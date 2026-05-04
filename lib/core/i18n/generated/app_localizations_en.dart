@@ -804,6 +804,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get edit_meal_err_invalid_number => 'Enter a valid number';
 
   @override
+  String get edit_meal_weight_label => 'Weight (g)';
+
+  @override
   String get addMeal_subscription_needed => 'Subscription required';
 
   @override
@@ -928,6 +931,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settings_delete_account_btn => 'Delete account';
+
+  @override
+  String get settings_ai_consent => 'AI Data Processing';
 
   @override
   String get settings_privacy_policy => 'Privacy Policy';

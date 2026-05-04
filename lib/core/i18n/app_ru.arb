@@ -339,6 +339,7 @@
   },
   "edit_meal_err_enter_value": "Введите значение",
   "edit_meal_err_invalid_number": "Введите корректное число",
+  "edit_meal_weight_label": "Вес (г)",
 
   "addMeal_subscription_needed": "Нужна подписка",
   "addMeal_subscription_desc": "Распознавание еды доступно на платном тарифе. Оформите подписку чтобы пользоваться ИИ-функциями.",
@@ -388,6 +389,7 @@
   "settings_delete_account_body": "Все ваши данные будут удалены без возможности восстановления. Это действие необратимо.",
   "settings_delete_account_btn": "Удалить аккаунт",
 
+  "settings_ai_consent": "Обработка данных ИИ",
   "settings_privacy_policy": "Политика конфиденциальности",
   "settings_terms": "Пользовательское соглашение",
   "settings_sub_promo": "Оформите подписку чтобы разблокировать ИИ-распознавание, голос и фото.",

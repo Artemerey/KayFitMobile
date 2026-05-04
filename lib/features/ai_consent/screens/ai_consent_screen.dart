@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../../../shared/theme/app_theme.dart';
 import '../../../core/ai_consent/ai_consent_provider.dart';
 import '../../../core/analytics/analytics_service.dart';
+import '../../../core/auth/auth_provider.dart';
 import '../../../core/locale/locale_provider.dart';
 import '../../../core/navigation/navigation_providers.dart';
 
@@ -23,12 +24,20 @@ class _AiConsentScreenState extends ConsumerState<AiConsentScreen> {
   /// True while [_onAccept] is running — disables button and shows loader.
   bool _isProcessing = false;
 
+  /// True after the 300 ms grace period — only then is the linear loader shown.
+  /// Prevents a flicker for fast (<300 ms) network responses, per spec §1.5.
+  bool _showLoader = false;
+  Timer? _loaderTimer;
+
   /// True when the server call exceeded [_kConsentTimeout] — shows retry UI.
   bool _hasError = false;
 
   @override
   void initState() {
     super.initState();
+    // Pre-fill checkbox from current consent state so users entering this
+    // screen from Settings (re-consent / revocation) see their own choice.
+    _checked = ref.read(aiConsentProvider) ?? false;
     try {
       AnalyticsService.aiConsentScreenOpened();
     } catch (_) {
@@ -375,8 +384,8 @@ class _AiConsentScreenState extends ConsumerState<AiConsentScreen> {
             ),
           ),
 
-          // ── Top LinearProgressIndicator while processing ──────────────────
-          if (_isProcessing)
+          // ── Top LinearProgressIndicator after 300ms grace period ──────────
+          if (_showLoader)
             const Positioned(
               top: 0,
               left: 0,
@@ -402,6 +411,12 @@ class _AiConsentScreenState extends ConsumerState<AiConsentScreen> {
     }
   }
 
+  @override
+  void dispose() {
+    _loaderTimer?.cancel();
+    super.dispose();
+  }
+
   Future<void> _onAccept() async {
     if (_isProcessing) return;
 
@@ -409,6 +424,15 @@ class _AiConsentScreenState extends ConsumerState<AiConsentScreen> {
     setState(() {
       _isProcessing = true;
       _hasError = false;
+      _showLoader = false;
+    });
+    // Spec §1.5: linear progress indicator appears only if the call takes
+    // longer than 300 ms — fast responses don't flicker.
+    _loaderTimer?.cancel();
+    _loaderTimer = Timer(const Duration(milliseconds: 300), () {
+      if (mounted && _isProcessing) {
+        setState(() => _showLoader = true);
+      }
     });
 
     try {
@@ -421,21 +445,56 @@ class _AiConsentScreenState extends ConsumerState<AiConsentScreen> {
       await ref.read(aiConsentProvider.notifier).setConsent(true);
     } on TimeoutException {
       if (!mounted) return;
+      _loaderTimer?.cancel();
       setState(() {
         _isProcessing = false;
+        _showLoader = false;
         _hasError = true;
       });
       return;
-    } on DioException {
+    } on DioException catch (e) {
       if (!mounted) return;
+      // Stale session: refresh chain failed, server says 401. Don't trap
+      // the user in an infinite "Could not connect / Retry" loop — sign
+      // them out so they can re-authenticate with fresh tokens.
+      if (e.response?.statusCode == 401) {
+        await _handleSessionExpired();
+        return;
+      }
+      _loaderTimer?.cancel();
       setState(() {
         _isProcessing = false;
+        _showLoader = false;
         _hasError = true;
       });
       return;
     }
     // setConsent succeeded — navigate forward.
+    _loaderTimer?.cancel();
     if (mounted) _navigateAfterConsent();
+  }
+
+  Future<void> _handleSessionExpired() async {
+    if (!mounted) return;
+    _loaderTimer?.cancel();
+    final isRu = ref.read(localeProvider).languageCode == 'ru';
+    final msg = isRu
+        ? 'Сессия истекла. Войдите снова.'
+        : 'Session expired. Please sign in again.';
+    setState(() {
+      _isProcessing = false;
+      _showLoader = false;
+      _hasError = false;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 3),
+      ),
+    );
+    // Logout clears tokens and updates auth state — router redirects to /login.
+    await ref.read(authNotifierProvider.notifier).logout();
   }
 
   Future<void> _onDecline() async {
@@ -454,8 +513,8 @@ class _AiConsentScreenState extends ConsumerState<AiConsentScreen> {
         title: Text(isRu ? 'Вы уверены?' : 'Are you sure?'),
         content: Text(
           isRu
-              ? 'Без согласия вы не сможете использовать добавление блюд и чат с ИИ.'
-              : 'Without consent you won\'t be able to use meal adding or AI chat.',
+              ? 'AI-функции — основа приложения. Без согласия пользоваться KayFit нельзя, и вы будете отключены от аккаунта.'
+              : 'AI features are core to KayFit. Without consent the app cannot be used and you will be signed out.',
           style: const TextStyle(color: AppColors.textMuted, height: 1.4),
         ),
         actions: [
@@ -469,7 +528,7 @@ class _AiConsentScreenState extends ConsumerState<AiConsentScreen> {
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
             child: Text(
-              isRu ? 'Отказаться' : 'Decline anyway',
+              isRu ? 'Отказаться и выйти' : 'Decline & sign out',
               style: const TextStyle(color: AppColors.accentOver),
             ),
           ),
@@ -482,8 +541,19 @@ class _AiConsentScreenState extends ConsumerState<AiConsentScreen> {
       } catch (_) {
         // Analytics is best-effort.
       }
-      await ref.read(aiConsentProvider.notifier).setConsent(false);
-      if (mounted) _navigateAfterConsent();
+      // Persist decline (best-effort) — local SharedPreferences already
+      // records it, so server failure (incl. 401) does not block sign-out.
+      try {
+        await ref.read(aiConsentProvider.notifier).setConsent(false);
+      } on TimeoutException {
+        // ignore — local state still records the decline
+      } on DioException {
+        // ignore — local state still records the decline
+      }
+      // Without consent the app cannot be used → sign out unconditionally.
+      if (mounted) {
+        await ref.read(authNotifierProvider.notifier).logout();
+      }
     }
   }
 }

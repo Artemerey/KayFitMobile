@@ -110,6 +110,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
       const SizedBox(height: 8),
       _SectionCard(children: [
         _NavItem(
+          icon: Icons.smart_toy_rounded,
+          iconColor: AppColors.accent,
+          iconBg: AppColors.accentSoft,
+          label: l10n.settings_ai_consent,
+          onTap: () => context.push('/ai-consent'),
+        ),
+        _ItemDivider(),
+        _NavItem(
+          icon: Icons.auto_awesome_rounded,
+          iconColor: const Color(0xFF007AFF),
+          iconBg: const Color(0x1A007AFF),
+          label: 'Kayfit 2.0 · Preview',
+          onTap: () => context.push('/kayfit2/preview'),
+        ),
+        _ItemDivider(),
+        _NavItem(
           icon: Icons.privacy_tip_rounded,
           iconColor: AppColors.warm,
           iconBg: AppColors.warmSoft,

@@ -339,6 +339,7 @@
   },
   "edit_meal_err_enter_value": "Enter a value",
   "edit_meal_err_invalid_number": "Enter a valid number",
+  "edit_meal_weight_label": "Weight (g)",
 
   "addMeal_subscription_needed": "Subscription required",
   "addMeal_subscription_desc": "Food recognition is available on a paid plan. Subscribe to use AI features.",
@@ -388,6 +389,7 @@
   "settings_delete_account_body": "All your data will be permanently deleted. This action cannot be undone.",
   "settings_delete_account_btn": "Delete account",
 
+  "settings_ai_consent": "AI Data Processing",
   "settings_privacy_policy": "Privacy Policy",
   "settings_terms": "Terms of Service",
   "settings_sub_promo": "Subscribe to unlock AI recognition, voice and photo.",

@@ -1604,6 +1604,12 @@ abstract class AppLocalizations {
   /// **'Введите корректное число'**
   String get edit_meal_err_invalid_number;
 
+  /// No description provided for @edit_meal_weight_label.
+  ///
+  /// In ru, this message translates to:
+  /// **'Вес (г)'**
+  String get edit_meal_weight_label;
+
   /// No description provided for @addMeal_subscription_needed.
   ///
   /// In ru, this message translates to:
@@ -1843,6 +1849,12 @@ abstract class AppLocalizations {
   /// In ru, this message translates to:
   /// **'Удалить аккаунт'**
   String get settings_delete_account_btn;
+
+  /// No description provided for @settings_ai_consent.
+  ///
+  /// In ru, this message translates to:
+  /// **'Обработка данных ИИ'**
+  String get settings_ai_consent;
 
   /// No description provided for @settings_privacy_policy.
   ///

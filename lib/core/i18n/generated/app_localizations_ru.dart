@@ -805,6 +805,9 @@ class AppLocalizationsRu extends AppLocalizations {
   String get edit_meal_err_invalid_number => 'Введите корректное число';
 
   @override
+  String get edit_meal_weight_label => 'Вес (г)';
+
+  @override
   String get addMeal_subscription_needed => 'Нужна подписка';
 
   @override
@@ -928,6 +931,9 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get settings_delete_account_btn => 'Удалить аккаунт';
+
+  @override
+  String get settings_ai_consent => 'Обработка данных ИИ';
 
   @override
   String get settings_privacy_policy => 'Политика конфиденциальности';
