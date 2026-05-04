@@ -802,6 +802,7 @@ class _IngredientTile extends StatefulWidget {
 class _IngredientTileState extends State<_IngredientTile>
     with SingleTickerProviderStateMixin {
   late final TextEditingController _weightCtrl;
+  late final FocusNode _weightFocus;
   late final AnimationController _expandCtrl;
   late final Animation<double> _expandAnim;
 
@@ -810,6 +811,10 @@ class _IngredientTileState extends State<_IngredientTile>
     super.initState();
     _weightCtrl = TextEditingController(
         text: widget.item.weightGrams.toStringAsFixed(0));
+    // Apply weight when the field loses focus (tap outside, keyboard dismiss).
+    // Without this `onSubmitted` only fires on the Return key — most users
+    // never press Return on a numeric keyboard, so calories never updated.
+    _weightFocus = FocusNode()..addListener(_onWeightFocusChange);
     _expandCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 280),
@@ -817,6 +822,14 @@ class _IngredientTileState extends State<_IngredientTile>
     );
     _expandAnim =
         CurvedAnimation(parent: _expandCtrl, curve: Curves.easeOutCubic);
+  }
+
+  void _onWeightFocusChange() {
+    if (_weightFocus.hasFocus) return;
+    final w = double.tryParse(_weightCtrl.text.trim());
+    if (w != null && w > 0 && w != widget.item.weightGrams) {
+      widget.onWeightChanged(w);
+    }
   }
 
   @override
@@ -832,6 +845,9 @@ class _IngredientTileState extends State<_IngredientTile>
 
   @override
   void dispose() {
+    _weightFocus
+      ..removeListener(_onWeightFocusChange)
+      ..dispose();
     _weightCtrl.dispose();
     _expandCtrl.dispose();
     super.dispose();
@@ -938,6 +954,7 @@ class _IngredientTileState extends State<_IngredientTile>
                               height: 22,
                               child: TextField(
                                 controller: _weightCtrl,
+                                focusNode: _weightFocus,
                                 keyboardType: TextInputType.number,
                                 style: TextStyle(
                                   fontSize: 12,

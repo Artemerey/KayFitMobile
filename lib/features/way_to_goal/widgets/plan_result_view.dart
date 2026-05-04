@@ -28,10 +28,54 @@ class PlanResultView extends StatelessWidget {
   });
 
   bool get _isMaintain {
+    // Detect by calorie target vs TDEE first — handles muscle-gain or
+    // recomposition where current_weight == target_weight but the user
+    // is actually on a surplus/deficit.
+    final calDelta = (calc.targetCalories - calc.tdee).abs();
+    if (calDelta > 80) return false; // significant surplus or deficit
+    // Otherwise fall back to weight delta.
     final tw = calc.targetWeight;
     final cw = currentWeight;
     if (tw == null || cw == null) return false;
     return (tw - cw).abs() < 0.5;
+  }
+
+  /// Direction of the plan: surplus / deficit / maintain.
+  /// Computed from calorie delta relative to TDEE (matches _isMaintain).
+  _PlanDirection get _direction {
+    final delta = calc.targetCalories - calc.tdee;
+    if (delta > 80) return _PlanDirection.gain;
+    if (delta < -80) return _PlanDirection.lose;
+    return _PlanDirection.maintain;
+  }
+
+  /// Local fallback for the personalised banner: shown when the backend
+  /// hasn't returned `personalizedPlan` yet (PR-4-BE not deployed).
+  /// Direction-aware copy + protein recommendation from current weight.
+  String _localPlanFallback(bool isRu) {
+    final cw = currentWeight ?? calc.targetWeight ?? 70;
+    // Roughly 1.6 g/kg for general goals, 1.8–2.0 g/kg for muscle gain.
+    final dir = _direction;
+    final perKg = dir == _PlanDirection.gain ? 1.8 : 1.6;
+    final proteinG = (cw * perKg).round();
+    if (isRu) {
+      switch (dir) {
+        case _PlanDirection.gain:
+          return 'Набор массы: цельтесь в $proteinG г белка/день, добавьте 1–2 силовые тренировки и углеводы вокруг тренировок.';
+        case _PlanDirection.lose:
+          return 'Снижение веса: $proteinG г белка/день, овощи в каждом приёме, вода до еды — мягкий дефицит без срывов.';
+        case _PlanDirection.maintain:
+          return 'Поддержание формы: $proteinG г белка/день, сбалансированная тарелка — ½ овощи, ¼ белок, ¼ сложные углеводы.';
+      }
+    }
+    switch (dir) {
+      case _PlanDirection.gain:
+        return 'Muscle gain: aim for $proteinG g protein/day, add 1–2 strength sessions, time carbs around training.';
+      case _PlanDirection.lose:
+        return 'Weight loss: $proteinG g protein/day, veggies on every plate, water before meals — gentle deficit, no crashes.';
+      case _PlanDirection.maintain:
+        return 'Maintain: $proteinG g protein/day, balanced plate — ½ veg, ¼ protein, ¼ complex carbs.';
+    }
   }
 
   @override
@@ -48,11 +92,17 @@ class PlanResultView extends StatelessWidget {
       children: [
         const SizedBox(height: 24),
 
-        // ── Personalized AI plan banner (focal point, when present) ──────────
-        if (calc.personalizedPlan != null && calc.personalizedPlan!.isNotEmpty) ...[
-          _PersonalPlanBanner(text: calc.personalizedPlan!, isRu: isRu),
-          const SizedBox(height: 12),
-        ],
+        // ── Personalized AI plan banner (focal point — always visible) ──────
+        // Server text wins; otherwise we compute a direction-aware fallback
+        // locally so the focal banner is never empty.
+        _PersonalPlanBanner(
+          text: (calc.personalizedPlan != null &&
+                  calc.personalizedPlan!.isNotEmpty)
+              ? calc.personalizedPlan!
+              : _localPlanFallback(isRu),
+          isRu: isRu,
+        ),
+        const SizedBox(height: 12),
 
         // ── Hero gradient card ───────────────────────────────────────────────
         Container(
@@ -351,6 +401,8 @@ class _PersonalPlanBanner extends StatelessWidget {
     );
   }
 }
+
+enum _PlanDirection { gain, lose, maintain }
 
 // ── Macro chip ──────────────────────────────────────────────────────────────
 
