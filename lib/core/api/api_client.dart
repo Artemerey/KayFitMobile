@@ -8,6 +8,7 @@ import '../auth/token_pair.dart';
 import 'locale_interceptor.dart';
 
 export '../auth/secure_token_storage.dart';
+export '../auth/token_pair.dart';
 
 const _baseUrl = 'https://app.carbcounter.online';
 
@@ -19,27 +20,6 @@ late Dio apiDio;
 // Created once in initApiClient() and used by both _AuthInterceptor and
 // AuthNotifier to avoid circular-dependency issues.
 late SecureTokenStorage secureTokenStorage;
-
-/// Kept for backwards-compatibility with code that still calls TokenStorage
-/// directly.  New code should use [secureTokenStorage] instead.
-/// This class is now a thin shim that delegates to [secureTokenStorage].
-@Deprecated('Use secureTokenStorage (SecureTokenStorageImpl) instead')
-class TokenStorage {
-  static Future<void> save(String access, String refresh) async {
-    final pair = TokenPair(
-      accessToken: access,
-      refreshToken: refresh,
-      expiresAt: DateTime.now(), // unknown — trigger immediate refresh
-    );
-    await secureTokenStorage.saveTokens(pair);
-  }
-
-  static Future<String?> getAccess() => secureTokenStorage.loadAccessToken();
-
-  static Future<String?> getRefresh() => secureTokenStorage.loadRefreshToken();
-
-  static Future<void> clear() => secureTokenStorage.clearTokens();
-}
 
 typedef LogoutCallback = Future<void> Function();
 LogoutCallback? _onLogout;
