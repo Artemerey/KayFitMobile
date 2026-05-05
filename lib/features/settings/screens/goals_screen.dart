@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/analytics/analytics_service.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/i18n/generated/app_localizations.dart';
+import '../../../features/dashboard/providers/dashboard_provider.dart';
 import '../../../shared/theme/app_theme.dart';
 import '../../../shared/widgets/loading_indicator.dart';
 
@@ -95,6 +96,9 @@ class _GoalsScreenState extends ConsumerState<GoalsScreen>
         'fat': int.parse(_fatCtrl.text),
         'carbs': int.parse(_carbsCtrl.text),
       });
+      // Invalidate the stats provider so the dashboard rings re-fetch goals
+      // from the backend on the next frame instead of serving stale cache.
+      ref.invalidate(todayStatsProvider);
       AnalyticsService.goalsSaved();
       if (mounted) {
         final l10n = AppLocalizations.of(context)!;
