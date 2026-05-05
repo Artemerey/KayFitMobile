@@ -12,6 +12,7 @@ import 'features/dashboard/screens/dashboard_screen.dart';
 import 'features/journal/screens/journal_screen.dart';
 import 'features/journal/screens/edit_meal_screen.dart';
 import 'features/settings/screens/settings_screen.dart';
+import 'features/settings/screens/settings_v2_screen.dart';
 import 'features/settings/screens/goals_screen.dart';
 import 'features/auth/screens/email_auth_screen.dart';
 import 'features/onboarding/screens/onboarding_screen.dart';
@@ -185,12 +186,11 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const ChatV2Screen(),
       ),
       // KF2 Journal: settings without the legacy ShellRoute bottom nav.
-      // Identical screen to /settings — the ShellRoute wrapper is simply absent.
-      // The SliverAppBar inside SettingsScreen has automaticallyImplyLeading=true
-      // (Flutter default), so the OS back button is shown automatically.
+      // SettingsV2Screen owns its own KF2-style top bar with an explicit back
+      // button — no dependency on the shell or automaticallyImplyLeading.
       GoRoute(
         path: '/settings-v2',
-        builder: (context, state) => const SettingsScreen(),
+        builder: (context, state) => const SettingsV2Screen(),
       ),
       GoRoute(
         path: '/meals/:id/edit',
