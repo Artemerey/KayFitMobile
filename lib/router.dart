@@ -18,6 +18,10 @@ import 'features/onboarding/screens/onboarding_screen.dart';
 import 'features/way_to_goal/screens/way_to_goal_screen.dart';
 import 'features/chat/screens/chat_screen.dart';
 import 'features/ai_consent/screens/ai_consent_screen.dart';
+import 'package:image_picker/image_picker.dart';
+import 'features/add_meal/screens/kf2_capture_screen.dart';
+import 'features/add_meal/screens/kf2_recognizing_screen.dart';
+import 'features/chat/screens/chat_v2_screen.dart';
 import 'features/journal/screens/journal_v2_screen.dart';
 import 'features/kayfit2/screens/kayfit2_preview_screen.dart';
 import 'shared/widgets/bottom_nav.dart';
@@ -27,6 +31,18 @@ export 'core/navigation/navigation_providers.dart';
 // Feature flag: enable the KF2 Journal redesign screen.
 // Activate with: flutter run --dart-define=KF2_JOURNAL=true
 const _kfJournal = bool.fromEnvironment('KF2_JOURNAL', defaultValue: false);
+
+// Feature flag: enable the KF2 Chat redesign screen.
+// Activate with: flutter run --dart-define=KF2_CHAT=true
+// When active the legacy /chat route transparently redirects to /chat-v2.
+const _kfChat = bool.fromEnvironment('KF2_CHAT', defaultValue: false);
+
+// Feature flag: enable the KF2 capture + recognizing screens.
+// Activate with: flutter run --dart-define=KF2_RECOG=true
+// When active, the Photo method in AddMealSheet navigates to /kf2/capture
+// instead of invoking ImagePicker inline.
+// ignore: unused_element
+const _kfRecog = bool.fromEnvironment('KF2_RECOG', defaultValue: false);
 
 const _kOnboardingDoneKey = 'onboarding_done';
 
@@ -91,6 +107,13 @@ class _RouterNotifier extends ChangeNotifier {
       return '/journal-v2';
     }
 
+    // KF2 Chat flag: transparently switch the legacy /chat tab to /chat-v2.
+    // Navigation from JournalV2Screen still calls context.go('/chat'); this
+    // redirect intercepts that and sends the user to the new screen instead.
+    if (_kfChat && loc == '/chat') {
+      return '/chat-v2';
+    }
+
     // AI consent is MANDATORY: only `true` lets the user past this gate.
     // `null` (never answered) and `false` (declined) both redirect back.
     // /kayfit2/preview is exempt — it's a design preview screen.
@@ -150,12 +173,32 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const JournalV2Screen(),
       ),
       GoRoute(
+        path: '/chat-v2',
+        builder: (context, state) => const ChatV2Screen(),
+      ),
+      GoRoute(
         path: '/meals/:id/edit',
         builder: (context, state) {
           final id = int.parse(state.pathParameters['id']!);
           return EditMealScreen(mealId: id);
         },
       ),
+
+      // ── KF2-RECOG: capture + recognizing full-screen flow ──────────────
+      // Opened programmatically from AddMealSheet when _kfRecog is true.
+      // Not protected by a redirect — AddMealSheet already handles auth context.
+      GoRoute(
+        path: '/kf2/capture',
+        builder: (context, state) => const Kf2CaptureScreen(),
+      ),
+      GoRoute(
+        path: '/kf2/recognizing',
+        builder: (context, state) {
+          final photo = state.extra as XFile;
+          return Kf2RecognizingScreen(photo: photo);
+        },
+      ),
+
       ShellRoute(
         builder: (context, state, child) => ScaffoldWithBottomNav(child: child),
         routes: [
