@@ -114,6 +114,14 @@ class _RouterNotifier extends ChangeNotifier {
       return '/chat-v2';
     }
 
+    // KF2 Journal flag: settings must not inherit the legacy ShellRoute bottom
+    // nav when the user arrives from JournalV2Screen.  Redirect /settings to
+    // /settings-v2, which is a plain GoRoute outside the ShellRoute — it
+    // renders SettingsScreen with an auto-implied back button and no bottom nav.
+    if (_kfJournal && loc == '/settings') {
+      return '/settings-v2';
+    }
+
     // AI consent is MANDATORY: only `true` lets the user past this gate.
     // `null` (never answered) and `false` (declined) both redirect back.
     // /kayfit2/preview is exempt — it's a design preview screen.
@@ -175,6 +183,14 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/chat-v2',
         builder: (context, state) => const ChatV2Screen(),
+      ),
+      // KF2 Journal: settings without the legacy ShellRoute bottom nav.
+      // Identical screen to /settings — the ShellRoute wrapper is simply absent.
+      // The SliverAppBar inside SettingsScreen has automaticallyImplyLeading=true
+      // (Flutter default), so the OS back button is shown automatically.
+      GoRoute(
+        path: '/settings-v2',
+        builder: (context, state) => const SettingsScreen(),
       ),
       GoRoute(
         path: '/meals/:id/edit',
