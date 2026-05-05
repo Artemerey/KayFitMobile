@@ -18,12 +18,18 @@ import '../../../shared/utils/nutrient_parser.dart';
 import '../../../shared/widgets/keyboard_dismisser.dart';
 import 'package:dio/dio.dart';
 import 'barcode_scanner_screen_v2.dart';
+import 'kf2_capture_screen.dart';
+import 'kf2_recognizing_screen.dart';
 import 'recognition_result_sheet_kf2.dart';
 import 'recognition_result_sheet_v2.dart';
 
 // KF2_PREVIEW: set to false via --dart-define=KF2_PREVIEW=false to fall back.
 const _useKF2 =
     bool.fromEnvironment('KF2_PREVIEW', defaultValue: true);
+
+// KF2_RECOG: when true the Photo method opens the KF2 full-screen capture flow.
+// Activate with: flutter run --dart-define=KF2_RECOG=true
+const _useKF2Recog = bool.fromEnvironment('KF2_RECOG', defaultValue: false);
 
 enum _InputMode { choose, text, voice, photo }
 enum _LoadingType { none, voice, photo, parsing }
@@ -480,6 +486,36 @@ class _AddMealSheetState extends ConsumerState<AddMealSheet>
                                           _startRecording);
                                     },
                                     onPhoto: () async {
+                                      if (_useKF2Recog) {
+                                        // KF2 full-screen capture flow.
+                                        // Use plain Navigator so the bottom-sheet
+                                        // context is preserved on the back stack.
+                                        final file =
+                                            await Navigator.of(context).push<XFile?>(
+                                          MaterialPageRoute<XFile?>(
+                                            fullscreenDialog: true,
+                                            builder: (_) =>
+                                                const Kf2CaptureScreen(),
+                                          ),
+                                        );
+                                        if (file == null || !mounted) return;
+                                        // Kf2RecognizingScreen handles its own
+                                        // pushReplacement to RecognitionResultSheetKF2
+                                        // and pops with true on save.
+                                        final saved =
+                                            await Navigator.of(context).push<bool>(
+                                          MaterialPageRoute<bool>(
+                                            fullscreenDialog: true,
+                                            builder: (_) =>
+                                                Kf2RecognizingScreen(photo: file),
+                                          ),
+                                        );
+                                        if (saved == true && mounted) {
+                                          Navigator.of(context).pop();
+                                        }
+                                        return;
+                                      }
+                                      // Legacy flow ─────────────────────────
                                       final source =
                                           await showModalBottomSheet<ImageSource>(
                                         context: context,
