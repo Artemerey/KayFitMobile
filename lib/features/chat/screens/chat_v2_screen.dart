@@ -21,10 +21,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../../core/analytics/analytics_service.dart';
 import '../../../core/ai_consent/ai_consent_provider.dart';
 import '../../../core/api/api_client.dart';
+import '../../../features/add_meal/screens/barcode_scanner_screen_v2.dart';
 import '../../../shared/theme/kayfit2_theme.dart';
 import '../../../shared/widgets/kayfit2_tab_bar.dart';
 import '../models/chat_message.dart';
@@ -228,6 +230,51 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen> {
     });
   }
 
+  // ── Attach toolbar handlers ─────────────────────────────────────────────────
+
+  /// Opens the KF2 capture screen, waits for a photo, then pushes to
+  /// recognizing. After save the router pops back here — no extra hook needed.
+  Future<void> _handleCamera() async {
+    final photo = await context.push<XFile>('/kf2/capture');
+    if (!mounted) return;
+    if (photo == null) return;
+    final result = await context.push<String>(
+      '/kf2/recognizing',
+      extra: photo,
+    );
+    if (!mounted) return;
+    if (result != null && result.isNotEmpty) {
+      setState(() {
+        _messages.add(ChatMessage(
+          role: 'user',
+          content: 'added: $result',
+          createdAt: DateTime.now(),
+        ));
+      });
+      _scrollToBottom();
+    }
+  }
+
+  /// Shows a coming-soon snackbar for voice input.
+  void _handleMic() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Voice input coming soon'),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
+  }
+
+  /// Opens the legacy barcode scanner via Navigator (no GoRouter route exists).
+  Future<void> _handleBarcode() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => const BarcodeScannerScreenV2(),
+      ),
+    );
+  }
+
   // ── Build ───────────────────────────────────────────────────────────────────
 
   @override
@@ -287,7 +334,12 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen> {
             ),
 
             // ── Attach toolbar ─────────────────────────────────────────────
-            _AttachToolbar(theme: t),
+            _AttachToolbar(
+              theme: t,
+              onCamera: _handleCamera,
+              onMic: _handleMic,
+              onBarcode: _handleBarcode,
+            ),
 
             // ── Input row ──────────────────────────────────────────────────
             _InputPill(
@@ -581,7 +633,7 @@ class _MessageBubbleState extends State<_MessageBubble>
                       padding: const EdgeInsets.symmetric(
                           horizontal: 14, vertical: 10),
                       decoration: BoxDecoration(
-                        color: isUser ? t.fg : t.surface,
+                        color: isUser ? K2Colors.accent : t.surface,
                         border: Border.all(color: t.border, width: 0.5),
                         borderRadius: BorderRadius.only(
                           topLeft: const Radius.circular(14),
@@ -596,7 +648,7 @@ class _MessageBubbleState extends State<_MessageBubble>
                           fontFamily: K2Fonts.sans,
                           fontSize: 14,
                           height: 1.45,
-                          color: isUser ? t.bg : t.fg,
+                          color: isUser ? Colors.white : t.fg,
                         ),
                       ),
                     ),
@@ -775,36 +827,47 @@ class _ArcClipper extends CustomClipper<Path> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _AttachToolbar extends StatelessWidget {
-  const _AttachToolbar({required this.theme});
+  const _AttachToolbar({
+    required this.theme,
+    required this.onCamera,
+    required this.onMic,
+    required this.onBarcode,
+  });
 
   final K2Theme theme;
-
-  static const _kButtons = <(IconData, String)>[
-    (Icons.camera_alt_outlined, 'photo'),
-    (Icons.mic_none_rounded, 'voice'),
-    (Icons.barcode_reader, 'barcode'),
-  ];
+  final VoidCallback onCamera;
+  final VoidCallback onMic;
+  final VoidCallback onBarcode;
 
   @override
   Widget build(BuildContext context) {
     final t = theme;
+    final buttons = <(IconData, VoidCallback)>[
+      (Icons.camera_alt_outlined, onCamera),
+      (Icons.mic_none_rounded, onMic),
+      (Icons.barcode_reader, onBarcode),
+    ];
+
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       color: t.bg,
       child: Row(
         children: [
-          for (final (icon, _) in _kButtons)
+          for (final (icon, handler) in buttons)
             Padding(
               padding: const EdgeInsets.only(right: 6),
-              child: Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: t.border, width: 0.5),
-                  color: t.surface,
+              child: GestureDetector(
+                onTap: handler,
+                child: Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: t.border, width: 0.5),
+                    color: t.surface,
+                  ),
+                  child: Icon(icon, size: 15, color: t.fg),
                 ),
-                child: Icon(icon, size: 15, color: t.fg),
               ),
             ),
         ],

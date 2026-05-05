@@ -11,7 +11,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../features/add_meal/screens/add_meal_sheet.dart';
 import '../../../features/dashboard/providers/dashboard_provider.dart';
 import '../../../features/journal/screens/journal_screen.dart'
     show journalDayMealsProvider;
@@ -143,20 +142,6 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
   String get _dateKey =>
       _calSelected == 'today' ? _todayIso() : _calSelected;
 
-  Future<void> _showAddMeal(BuildContext context) async {
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      isDismissible: true,
-      enableDrag: true,
-      showDragHandle: false,
-      builder: (_) => const AddMealSheet(),
-    );
-    ref.invalidate(journalDayMealsProvider(_dateKey));
-    ref.invalidate(todayStatsProvider);
-  }
-
   @override
   Widget build(BuildContext context) {
     const t = K2Theme.light;
@@ -172,7 +157,7 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
         onTab: (key) {
           if (key == 'chat') context.go('/chat');
         },
-        onAdd: () => _showAddMeal(context),
+        onAdd: () => context.go('/chat'),
       ),
       body: SafeArea(
         child: Column(
