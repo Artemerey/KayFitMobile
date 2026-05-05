@@ -33,6 +33,9 @@ class K2Colors {
   // ── Single accent ──────────────────────────────────────────────────────────
   static const accent = Color(0xFF007AFF); // Apple system blue
   static const accentLight = Color(0xFF5AC8FA);
+
+  // ── Semantic ───────────────────────────────────────────────────────────────
+  static const error = Color(0xFFFF3B30); // Apple system red
 }
 
 /// Apple Activity ring colors (Move/Exercise/Stand/Workout) mapped to KayFit
