@@ -36,6 +36,7 @@ class K2MealRowData {
     required this.carbs,
     required this.source,
     this.photoSeed,
+    this.photoUrl,
   });
 
   /// Unique identifier — used as widget key material.
@@ -69,9 +70,13 @@ class K2MealRowData {
   /// Only meaningful when [source] == [K2MealSource.photo].
   final int? photoSeed;
 
+  /// Real photo URL when available. If null, the row falls back to the
+  /// striped seed-based placeholder.
+  final String? photoUrl;
+
   /// Whether this row should render the [Kayfit2MealPhoto] thumbnail.
   bool get hasPhoto =>
-      source == K2MealSource.photo && photoSeed != null;
+      source == K2MealSource.photo && (photoUrl != null || photoSeed != null);
 
   K2MealRowData copyWith({
     String? id,
@@ -84,6 +89,7 @@ class K2MealRowData {
     int? carbs,
     K2MealSource? source,
     int? photoSeed,
+    String? photoUrl,
   }) {
     return K2MealRowData(
       id: id ?? this.id,
@@ -96,6 +102,7 @@ class K2MealRowData {
       carbs: carbs ?? this.carbs,
       source: source ?? this.source,
       photoSeed: photoSeed ?? this.photoSeed,
+      photoUrl: photoUrl ?? this.photoUrl,
     );
   }
 
@@ -112,7 +119,8 @@ class K2MealRowData {
         other.fat == fat &&
         other.carbs == carbs &&
         other.source == source &&
-        other.photoSeed == photoSeed;
+        other.photoSeed == photoSeed &&
+        other.photoUrl == photoUrl;
   }
 
   @override
@@ -127,5 +135,6 @@ class K2MealRowData {
         carbs,
         source,
         photoSeed,
+        photoUrl,
       );
 }

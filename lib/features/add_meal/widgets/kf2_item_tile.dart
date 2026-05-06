@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../../../shared/models/ingredient_v2.dart';
 import '../../../shared/models/nutrients_v2.dart';
 import '../../../shared/theme/kayfit2_theme.dart';
+import '../../../shared/widgets/nutrient_detail_sheet.dart';
 
 /// A single ingredient row in the KF2 preview-edit sheet.
 ///
@@ -144,6 +145,26 @@ class _KF2ItemTileState extends State<KF2ItemTile> {
         f.clamp(0, double.infinity), c.clamp(0, double.infinity));
   }
 
+  void _showDetailSheet() {
+    HapticFeedback.lightImpact();
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      isDismissible: true,
+      enableDrag: true,
+      showDragHandle: false,
+      builder: (_) => NutrientDetailSheet(
+        name: widget.item.name,
+        weightGrams: widget.item.weightGrams,
+        per100g: widget.item.nutrientsPer100g,
+        total: widget.item.nutrientsTotal,
+        source: widget.item.source,
+        sourceUrl: widget.item.sourceUrl,
+      ),
+    );
+  }
+
   void _toggleMacroEdit() {
     setState(() => _editingMacros = !_editingMacros);
     if (_editingMacros) {
@@ -166,13 +187,16 @@ class _KF2ItemTileState extends State<KF2ItemTile> {
     return AnimatedSize(
       duration: const Duration(milliseconds: 220),
       curve: Curves.easeOutCubic,
-      child: Container(
-        decoration: BoxDecoration(
-          color: t.card,
-          border: Border(
-            bottom: BorderSide(color: t.hairline),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onLongPress: _showDetailSheet,
+        child: Container(
+          decoration: BoxDecoration(
+            color: t.card,
+            border: Border(
+              bottom: BorderSide(color: t.hairline),
+            ),
           ),
-        ),
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -227,6 +251,8 @@ class _KF2ItemTileState extends State<KF2ItemTile> {
                 ),
               ],
             ),
+            const SizedBox(height: 4),
+            _SourceBadge(source: item.source, theme: t),
             const SizedBox(height: 6),
             // ── Row 2: weight pill · P·F·C ───────────────────────────────
             Row(
@@ -282,8 +308,72 @@ class _KF2ItemTileState extends State<KF2ItemTile> {
             ],
           ],
         ),
+        ),
       ),
     );
+  }
+}
+
+// ── Source badge ─────────────────────────────────────────────────────────────
+
+class _SourceBadge extends StatelessWidget {
+  const _SourceBadge({required this.source, required this.theme});
+
+  final String source;
+  final K2Theme theme;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = _labelFor(source);
+    final color = _colorFor(source);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontFamily: K2Fonts.mono,
+          fontSize: 9,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.6,
+          color: color,
+        ),
+      ),
+    );
+  }
+
+  static String _labelFor(String source) {
+    switch (source.toLowerCase()) {
+      case 'usda':
+        return 'USDA';
+      case 'fatsecret':
+        return 'FATSECRET';
+      case 'cache':
+        return 'CACHE';
+      case 'claude':
+      case 'anthropic':
+        return 'AI';
+      default:
+        return source.toUpperCase();
+    }
+  }
+
+  static Color _colorFor(String source) {
+    switch (source.toLowerCase()) {
+      case 'usda':
+        return const Color(0xFF059669); // green — official
+      case 'fatsecret':
+        return const Color(0xFF2563EB); // blue — third-party DB
+      case 'cache':
+        return const Color(0xFF6B7280); // gray — local
+      case 'claude':
+      case 'anthropic':
+      default:
+        return const Color(0xFF7C3AED); // purple — AI
+    }
   }
 }
 

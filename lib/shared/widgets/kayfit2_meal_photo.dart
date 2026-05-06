@@ -15,22 +15,30 @@ import 'package:flutter/material.dart';
 
 import '../theme/kayfit2_theme.dart';
 
-/// Striped greyscale photo placeholder used in [Kayfit2MealRow] when a meal
-/// has [K2MealSource.photo] but no real image is available yet.
+/// Meal photo widget used in [Kayfit2MealRow].
 ///
-/// The stripe pattern is deterministically derived from [seed] so the widget
-/// is stable across list rebuilds and hot reloads.
+/// When [photoUrl] is provided, renders a network image with a skeleton
+/// loading state and a graceful fallback to the striped placeholder on error.
+/// When [photoUrl] is null, renders the deterministic striped placeholder
+/// keyed to [seed].
+///
+/// The stripe pattern is stable across list rebuilds and hot reloads.
 class Kayfit2MealPhoto extends StatelessWidget {
   const Kayfit2MealPhoto({
     super.key,
-    required this.seed,
+    this.seed,
     required this.theme,
+    this.photoUrl,
     this.size = 56,
   });
 
-  /// Integer seed that drives the stripe variant. Typically the meal's
-  /// `photoSeed` field — any stable non-negative integer works.
-  final int seed;
+  /// Integer seed that drives the stripe variant. Used only when [photoUrl]
+  /// is null. Required when there is no real image to fall back on.
+  final int? seed;
+
+  /// Real network photo URL. When provided, renders [Image.network] with a
+  /// graceful fallback to the striped placeholder on error.
+  final String? photoUrl;
 
   /// Kayfit 2.0 design token bundle.
   final K2Theme theme;
@@ -45,22 +53,40 @@ class Kayfit2MealPhoto extends StatelessWidget {
       height: size,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(6),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: _stripeGradient(seed % 3),
-            border: Border.all(
-              color: theme.border,
-              width: 1,
-            ),
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Center(
-            child: Icon(
-              Icons.camera_alt_outlined,
-              size: 14,
-              color: Colors.white.withValues(alpha: 0.5),
-            ),
-          ),
+        child: photoUrl != null
+            ? Image.network(
+                photoUrl!,
+                width: size,
+                height: size,
+                fit: BoxFit.cover,
+                gaplessPlayback: true,
+                loadingBuilder: (ctx, child, progress) {
+                  if (progress == null) return child;
+                  return _buildPlaceholder();
+                },
+                errorBuilder: (ctx, error, stack) => _buildPlaceholder(),
+              )
+            : _buildPlaceholder(),
+      ),
+    );
+  }
+
+  Widget _buildPlaceholder() {
+    final variant = (seed ?? 0) % 3;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: _stripeGradient(variant),
+        border: Border.all(
+          color: theme.border,
+          width: 1,
+        ),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Center(
+        child: Icon(
+          Icons.camera_alt_outlined,
+          size: 14,
+          color: Colors.white.withValues(alpha: 0.5),
         ),
       ),
     );

@@ -30,20 +30,19 @@ import 'shared/widgets/bottom_nav.dart';
 export 'core/navigation/navigation_providers.dart';
 
 // Feature flag: enable the KF2 Journal redesign screen.
-// Activate with: flutter run --dart-define=KF2_JOURNAL=true
-const _kfJournal = bool.fromEnvironment('KF2_JOURNAL', defaultValue: false);
+// Default is `true` so Xcode "Run" (which doesn't pass dart-defines) picks it up.
+// To disable: --dart-define=KF2_JOURNAL=false
+const _kfJournal = bool.fromEnvironment('KF2_JOURNAL', defaultValue: true);
 
 // Feature flag: enable the KF2 Chat redesign screen.
-// Activate with: flutter run --dart-define=KF2_CHAT=true
 // When active the legacy /chat route transparently redirects to /chat-v2.
-const _kfChat = bool.fromEnvironment('KF2_CHAT', defaultValue: false);
+const _kfChat = bool.fromEnvironment('KF2_CHAT', defaultValue: true);
 
 // Feature flag: enable the KF2 capture + recognizing screens.
-// Activate with: flutter run --dart-define=KF2_RECOG=true
 // When active, the Photo method in AddMealSheet navigates to /kf2/capture
 // instead of invoking ImagePicker inline.
 // ignore: unused_element
-const _kfRecog = bool.fromEnvironment('KF2_RECOG', defaultValue: false);
+const _kfRecog = bool.fromEnvironment('KF2_RECOG', defaultValue: true);
 
 const _kOnboardingDoneKey = 'onboarding_done';
 
@@ -140,10 +139,16 @@ final _routerNotifierProvider = Provider<_RouterNotifier>((ref) {
   return _RouterNotifier(ref);
 });
 
+/// Debug-only escape hatch for VM Service-driven test automation.
+/// Captures the live [GoRouter] instance so external tooling can invoke
+/// `debugRouter!.push(...)` via Dart eval without needing a BuildContext.
+/// NEVER reference this from production code paths.
+GoRouter? debugRouter;
+
 final routerProvider = Provider<GoRouter>((ref) {
   final notifier = ref.watch(_routerNotifierProvider);
 
-  return GoRouter(
+  final router = GoRouter(
     initialLocation: '/',
     observers: [AnalyticsService.routeObserver],
     refreshListenable: notifier,
@@ -238,4 +243,6 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
     ],
   );
+  debugRouter = router;
+  return router;
 });

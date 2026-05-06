@@ -15,6 +15,8 @@
 // Gated via --dart-define=KF2_CHAT=true in router.dart.
 // The legacy ChatScreen remains untouched at /chat.
 
+import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
@@ -26,12 +28,18 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/analytics/analytics_service.dart';
 import '../../../core/ai_consent/ai_consent_provider.dart';
 import '../../../core/api/api_client.dart';
 import '../../../features/add_meal/screens/barcode_scanner_screen_v2.dart';
+import '../../../features/dashboard/providers/dashboard_provider.dart';
+import '../../../features/journal/screens/journal_screen.dart'
+    show journalDayMealsProvider;
+import '../../../shared/models/ingredient_v2.dart';
 import '../../../shared/theme/kayfit2_theme.dart';
+import '../../../shared/utils/nutrient_parser.dart';
 import '../../../shared/widgets/kayfit2_tab_bar.dart';
 import '../models/chat_message.dart';
 
@@ -78,6 +86,24 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen> {
   final List<ChatMessage> _messages = [];
   _ThinkingState? _thinking;
 
+  /// In-memory pending "Add to journal" card shown after a food-intent
+  /// message is parsed. Not persisted in chat history; cleared on
+  /// confirm/cancel/restart.
+  List<IngredientV2>? _pendingMealItems;
+  String _pendingMealType = 'snack';
+  bool _isAddingMeal = false;
+
+  /// Set when the assistant just asked the user to clarify a meal
+  /// (type/portion). The next user message is then routed to the meal
+  /// parser regardless of regex — we already know we're in a meal flow.
+  /// Cleared as soon as the next message is processed.
+  bool _awaitingMealClarification = false;
+
+  /// Original user text that triggered the clarification. We re-parse
+  /// `original + clarification` together so multi-item meals don't lose
+  /// the items that already had weights specified.
+  String? _pendingClarifyOriginal;
+
   bool _isLoading = false;
   bool _isSending = false;
 
@@ -93,6 +119,59 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen> {
     'cross-checking FatSecret',
     'compiling nutrition data',
   ];
+
+  /// Heuristic intent detector. If the message looks like a meal-logging
+  /// request (past-tense verbs, explicit "add/log", or a grams/volume token)
+  /// the chat is routed to the meal parser instead of the consultant.
+  ///
+  /// `\b` boundaries do NOT work for Cyrillic in Dart RegExp even with
+  /// `unicode: true` — so Cyrillic verbs are wrapped in `(^|<sep>)` /
+  /// `(<sep>|$)` patterns. Latin alternatives keep `\b`.
+  ///
+  /// False negatives fall through to the consultant — user retypes with
+  /// an explicit "ate ...". False positives fall back to the consultant
+  /// when the parser returns no items.
+  static final _kFoodIntent = RegExp(
+    // Cyrillic verbs (boundary via whitespace/punct/start/end)
+    r'(^|[\s.,!?:;\-])('
+    // ел/съел family
+    r'съел|съела|съели|поел|поела|поели|доел|доела|доели|'
+    // colloquial / разговорное "ate"
+    r'скушал|скушала|скушали|кушал|кушала|кушали|'
+    r'слопал|слопала|слопали|умял|умяла|умяли|'
+    r'сожрал|сожрала|сожрали|схомячил|схомячила|'
+    r'хватанул|хватанула|заточил|заточила|'
+    r'проглотил|проглотила|зажевал|зажевала|'
+    r'употребил|употребила|потребил|потребила|'
+    // приёмы пищи
+    r'перекусил|перекусила|перекусили|закусил|закусила|'
+    r'позавтракал|позавтракала|пообедал|пообедала|поужинал|поужинала|'
+    // напитки
+    r'выпил|выпила|выпили|допил|допила|потягивал|'
+    // bag-it verbs
+    r'закинул|закинула|перехватил|перехватила|'
+    // explicit add/log
+    r'добавь|добавить|добавил|добавила|'
+    r'записать|записал|записала|'
+    r'залогать|залогай|залогируй|залогировал|'
+    r'отметь|отметить|отметил|отметила'
+    r')([\s.,!?:;\-]|$)'
+    // Latin verbs (\b works fine for ASCII)
+    r'|\b('
+    r'ate|eaten|drank|drunk|'
+    r'eat|eating|chowed|gobbled|devoured|snacked|polished|downed|'
+    r'i\s+had|i\s+ate|i\s+drank|i\s+ve\s+had|ive\s+had|'
+    r'just\s+had|just\s+ate|just\s+drank|just\s+finished|'
+    r'finished\s+(a|the|my)|had\s+(a|some|the|my)|'
+    r'breakfast\s+was|lunch\s+was|dinner\s+was|snack\s+was|'
+    r'log|logged|add|added|track|tracked|record|recorded|note'
+    r')\b'
+    // Grams / ml / pieces token (any locale, both orders)
+    r'|\d+\s*(г|гр|грамм|грамма|граммов|g|gr|gram|grams|ml|мл|шт|штук|штуки|pcs|piece|pieces)(\b|\s|$|[.,!?])'
+    r'|(г|гр|грамм|граммов|g|grams)\s*\d+',
+    caseSensitive: false,
+    unicode: true,
+  );
 
   @override
   void initState() {
@@ -113,6 +192,13 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen> {
 
   // ── Data loading ────────────────────────────────────────────────────────────
 
+  /// SharedPreferences key for chat-local synthetic messages — clarify
+  /// prompts, "✓ added" confirmations, cancel acks. These are not persisted
+  /// on the backend (they're not real Claude turns), so we cache them
+  /// client-side and merge with server history on every reload.
+  static const _kLocalChatKey = 'kf2_chat_local_messages_v1';
+  static const _kLocalChatLimit = 100;
+
   Future<void> _loadHistory() async {
     setState(() => _isLoading = true);
     try {
@@ -120,19 +206,70 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen> {
         '/api/chat/messages',
         queryParameters: {'limit': 50},
       );
-      final list = (resp.data['messages'] as List)
+      final server = (resp.data['messages'] as List)
           .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
           .toList();
+      final local = await _loadLocalMessages();
+      // Drop locals older than the oldest server message we got — keeps the
+      // store from ballooning if /clear is hit on the backend; user-visible
+      // history is still continuous.
+      final merged = [...server, ...local]
+        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
       setState(() {
         _messages
           ..clear()
-          ..addAll(list);
+          ..addAll(merged);
       });
       _scrollToBottom();
     } on Exception {
-      // Empty state on load errors — shown via _messages.isEmpty branch.
+      // Even if the server fetch fails, surface local-only messages so the
+      // user keeps their meal-add receipts.
+      final local = await _loadLocalMessages();
+      if (mounted && local.isNotEmpty) {
+        setState(() {
+          _messages
+            ..clear()
+            ..addAll(local);
+        });
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<List<ChatMessage>> _loadLocalMessages() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getStringList(_kLocalChatKey) ?? const [];
+      return raw.map((s) {
+        final m = jsonDecode(s) as Map<String, dynamic>;
+        return ChatMessage(
+          role: m['role'] as String,
+          content: m['content'] as String,
+          createdAt: DateTime.parse(m['createdAt'] as String),
+        );
+      }).toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<void> _persistLocalMessage(ChatMessage msg) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getStringList(_kLocalChatKey) ?? <String>[];
+      raw.add(jsonEncode({
+        'role': msg.role,
+        'content': msg.content,
+        'createdAt': msg.createdAt.toIso8601String(),
+      }));
+      // Trim to last N to bound storage.
+      if (raw.length > _kLocalChatLimit) {
+        raw.removeRange(0, raw.length - _kLocalChatLimit);
+      }
+      await prefs.setStringList(_kLocalChatKey, raw);
+    } catch (_) {
+      // Non-fatal — synthetic messages stay only in memory until next save.
     }
   }
 
@@ -178,6 +315,39 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen> {
     try {
       AnalyticsService.chatMessageSent(_messages.length);
     } catch (_) {}
+
+    // ── Router ───────────────────────────────────────────────────────────
+    // Route to meal-add flow when:
+    //   • the message contains a meal-intent keyword/grams token, OR
+    //   • the previous assistant turn was our clarification request
+    //     (the user is replying to "сколько грамм?" — treat as meal flow)
+    final forceMealFlow = _awaitingMealClarification;
+    final pendingOrig = _pendingClarifyOriginal;
+    _awaitingMealClarification = false; // one-shot
+    _pendingClarifyOriginal = null;
+    if (forceMealFlow || _kFoodIntent.hasMatch(text)) {
+      // Detect language from the user's message itself, not from app locale —
+      // the user can write Russian inside an English app and vice versa.
+      final msgLang = _detectMessageLang(text);
+      // On follow-up turn after a clarification, combine the original meal
+      // text with the user's clarifying reply so multi-item meals keep all
+      // items (the original "soup 400g + bread" wouldn't otherwise survive
+      // a reply like "tемный 100г" — soup would be dropped).
+      final parseText = (forceMealFlow && pendingOrig != null)
+          ? '$pendingOrig. ${text.trim()}'
+          : text;
+      // Only ever ask for clarification ONCE per meal session.
+      final routed = await _tryParseAndOfferMeal(
+        parseText,
+        msgLang,
+        skipClarify: forceMealFlow,
+      );
+      if (routed) {
+        if (mounted) setState(() => _isSending = false);
+        return;
+      }
+      // Parser returned nothing — fall through to consultant.
+    }
 
     // Drip-feed step labels to simulate streaming progress.
     for (var i = 1; i < _kThinkingSteps.length; i++) {
@@ -234,6 +404,224 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen> {
     }
   }
 
+  /// Calls /api/v2/parse_meal_suggestions and dispatches one of three
+  /// outcomes:
+  ///   • backend returned no items → return false (caller falls back to
+  ///     the consultant)
+  ///   • at least one item is missing `weight_grams` → push a synthetic
+  ///     clarify message in chat asking for type/portion. No card yet.
+  ///     Return true (routed).
+  ///   • every item has a weight → render the pending-meal confirm card.
+  ///     Return true.
+  ///
+  /// Note: `parse_meal_suggestions` returns a flat `items[]` shape and is
+  /// the same endpoint used by AddMealSheet's text flow. The sister
+  /// `parse_meal_variants` was empirically returning empty bodies in
+  /// production (2026-05-06); avoid it here.
+  Future<bool> _tryParseAndOfferMeal(
+    String text,
+    String lang, {
+    bool skipClarify = false,
+  }) async {
+    try {
+      final resp = await apiDio.post(
+        '/api/v2/parse_meal_suggestions',
+        data: {'text': text, 'language': lang},
+      );
+      final rawItems = (resp.data['items'] as List<dynamic>?) ?? [];
+      if (rawItems.isEmpty) return false;
+
+      final missingWeight = <String>[];
+      final items = <IngredientV2>[];
+      for (final raw in rawItems) {
+        final m = raw as Map<String, dynamic>;
+        final wRaw = m['weight_grams'] as num?;
+        if (wRaw == null) {
+          missingWeight.add((m['name'] as String?) ?? '?');
+        }
+        final w = wRaw?.toDouble() ?? 100.0;
+        items.add(ingredientV2FromSuggestion(m, w));
+      }
+
+      // Ask the user to clarify type + portion before locking in a card.
+      // Single local message — no extra Claude round-trip.
+      // Skipped on follow-up turns: if user already answered our previous
+      // clarify, commit to the card even if weights are still missing.
+      if (missingWeight.isNotEmpty && !skipClarify) {
+        if (!mounted) return true;
+        final isRu = lang == 'ru';
+        final names = missingWeight.join(', ');
+        final reply = isRu
+            ? 'Уточни, пожалуйста:\n'
+                '• какой именно $names (вид/сорт)?\n'
+                '• сколько грамм или штук?'
+            : 'Quick check before I log this:\n'
+                '• which $names exactly (type/size)?\n'
+                '• how many grams or pieces?';
+        final clarifyMsg = ChatMessage(
+          role: 'assistant',
+          content: reply,
+          createdAt: DateTime.now(),
+        );
+        setState(() {
+          _thinking = null;
+          _messages.add(clarifyMsg);
+          _awaitingMealClarification = true;
+          // Remember the user's full original text so the next-turn parse
+          // gets BOTH the already-resolved items (e.g. "soup 400g") and
+          // the clarification reply (e.g. "тёмный, 100г"). Without this
+          // the soup would silently disappear from the final card.
+          _pendingClarifyOriginal = text;
+        });
+        unawaited(_persistLocalMessage(clarifyMsg));
+        _scrollToBottom();
+        return true;
+      }
+
+      if (!mounted) return false;
+      setState(() {
+        _thinking = null;
+        _pendingMealItems = items;
+        _pendingMealType = _inferMealTypeForNow();
+      });
+      _scrollToBottom();
+      return true;
+    } on Exception {
+      return false;
+    }
+  }
+
+  /// Infer breakfast/lunch/snack/dinner from current local time.
+  String _inferMealTypeForNow() {
+    final h = DateTime.now().hour;
+    if (h < 11) return 'breakfast';
+    if (h < 15) return 'lunch';
+    if (h < 18) return 'snack';
+    return 'dinner';
+  }
+
+  /// Detects the user message language from the content rather than the
+  /// app locale. The user may keep the UI in English but write in Russian
+  /// (or vice versa) — assistant should mirror their input.
+  static final _kCyrillic = RegExp(r'[а-яё]', caseSensitive: false);
+  String _detectMessageLang(String text) =>
+      _kCyrillic.hasMatch(text) ? 'ru' : 'en';
+
+  /// Confirms the pending meal: posts to /api/meals/add_selected, invalidates
+  /// dashboard/journal providers, replaces the preview with a synthetic
+  /// "✓ added" assistant message (local-only, not persisted on backend).
+  Future<void> _confirmAddPendingMeal() async {
+    final pending = _pendingMealItems;
+    if (pending == null || pending.isEmpty || _isAddingMeal) return;
+    setState(() => _isAddingMeal = true);
+    HapticFeedback.mediumImpact();
+
+    try {
+      final items = pending.map((item) {
+        final n = item.nutrientsTotal;
+        final mono = n.monounsaturatedFat ?? 0;
+        final poly = n.polyunsaturatedFat ?? 0;
+        return {
+          'name': item.name,
+          'calories': n.calories,
+          'protein': n.protein,
+          'fat': n.fat,
+          'carbs': n.carbs,
+          'weight': item.weightGrams,
+          'fiber': n.fiber,
+          'sugar': n.sugar,
+          'net_carbs': n.netCarbs,
+          'saturated_fat': n.saturatedFat,
+          'unsaturated_fat': mono + poly > 0 ? mono + poly : null,
+          'glycemic_index': item.nutrientsPer100g.glycemicIndex,
+          'sodium_mg': n.sodiumMg,
+          'cholesterol_mg': n.cholesterolMg,
+          'potassium_mg': n.potassiumMg,
+          'source': item.source,
+          'source_url': item.sourceUrl,
+        };
+      }).toList();
+
+      await apiDio.post('/api/meals/add_selected', data: {
+        'items': items,
+        'dish_name': pending.map((i) => i.name).join(', '),
+        'meal_type': _pendingMealType,
+      });
+
+      // Refresh everything that displays meal data.
+      ref.invalidate(todayStatsProvider);
+      ref.invalidate(todayMealsProvider);
+      ref.invalidate(userGoalsProvider);
+      ref.invalidate(dailyKcalHistoryProvider);
+      final today = DateTime.now();
+      final todayIso = '${today.year.toString().padLeft(4, '0')}-'
+          '${today.month.toString().padLeft(2, '0')}-'
+          '${today.day.toString().padLeft(2, '0')}';
+      ref.invalidate(journalDayMealsProvider(todayIso));
+
+      final totalKcal = pending.fold<double>(
+        0, (s, i) => s + i.nutrientsTotal.calories);
+      final dishLabel = pending.map((i) => i.name).join(', ');
+      // Mirror the language of the most recent user message.
+      final lastUserMsg = _messages
+          .lastWhere((m) => m.role == 'user', orElse: () => _messages.first);
+      final isRu = _detectMessageLang(lastUserMsg.content) == 'ru';
+      final reply = isRu
+          ? '✓ Добавлено в журнал: $dishLabel — ${totalKcal.round()} ккал'
+          : '✓ Added to journal: $dishLabel — ${totalKcal.round()} kcal';
+
+      if (!mounted) return;
+      final addedMsg = ChatMessage(
+        role: 'assistant',
+        content: reply,
+        createdAt: DateTime.now(),
+      );
+      setState(() {
+        _pendingMealItems = null;
+        _messages.add(addedMsg);
+      });
+      unawaited(_persistLocalMessage(addedMsg));
+      try {
+        AnalyticsService.mealSaved(
+          itemCount: pending.length,
+          mode: 'chat_route',
+          totalCalories: totalKcal.round(),
+        );
+      } catch (_) {}
+      _scrollToBottom();
+    } on Exception {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Could not add to journal. Try again.'),
+          backgroundColor: K2Colors.error,
+          behavior: SnackBarBehavior.floating,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isAddingMeal = false);
+    }
+  }
+
+  void _cancelPendingMeal() {
+    final lastUserMsg = _messages
+        .lastWhere((m) => m.role == 'user', orElse: () => _messages.first);
+    final isRu = _detectMessageLang(lastUserMsg.content) == 'ru';
+    final cancelMsg = ChatMessage(
+      role: 'assistant',
+      content: isRu ? 'Окей, не добавляю.' : 'Okay, skipping.',
+      createdAt: DateTime.now(),
+    );
+    setState(() {
+      _pendingMealItems = null;
+      _messages.add(cancelMsg);
+    });
+    unawaited(_persistLocalMessage(cancelMsg));
+    _scrollToBottom();
+  }
+
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
@@ -273,6 +661,7 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen> {
 
   /// Handles mic button tap: starts recording, or stops and transcribes.
   Future<void> _handleMic() async {
+    debugPrint('[mic] tap state=$_voiceState');
     if (_voiceState == _VoiceState.transcribing) return;
 
     if (_voiceState == _VoiceState.recording) {
@@ -283,14 +672,19 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen> {
   }
 
   Future<void> _startRecording() async {
+    debugPrint('[mic] requesting permission');
     final status = await Permission.microphone.request();
+    debugPrint('[mic] permission=$status');
     if (!mounted) return;
     if (!status.isGranted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('Microphone permission denied'),
+          content: Text(status.isPermanentlyDenied
+              ? 'Mic blocked. Open Settings → Kayfit → Microphone.'
+              : 'Microphone permission denied'),
           backgroundColor: K2Colors.error,
           behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 4),
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
           action: status.isPermanentlyDenied
@@ -306,21 +700,42 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen> {
     }
 
     try {
+      // Probe encoder support — surfaces a clear error if AAC is unsupported
+      // on this device/simulator instead of silently never recording.
+      final canRecord = await _recorder.hasPermission();
+      debugPrint('[mic] hasPermission=$canRecord');
+      if (!canRecord) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Recorder cannot access microphone.'),
+              backgroundColor: K2Colors.error,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+        return;
+      }
+
       final dir = await getTemporaryDirectory();
       _recordPath = '${dir.path}/chat_voice.m4a';
+      debugPrint('[mic] starting recorder → $_recordPath');
       await _recorder.start(
         const RecordConfig(encoder: AudioEncoder.aacLc),
         path: _recordPath!,
       );
+      debugPrint('[mic] recorder started OK');
       HapticFeedback.lightImpact();
       if (mounted) setState(() => _voiceState = _VoiceState.recording);
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
+      debugPrint('[mic] start FAILED: $e\n$st');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Could not start recording: $e'),
             backgroundColor: K2Colors.error,
             behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 5),
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(10)),
           ),
@@ -330,7 +745,9 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen> {
   }
 
   Future<void> _stopAndTranscribe() async {
-    await _recorder.stop();
+    debugPrint('[mic] stopping recorder');
+    final savedPath = await _recorder.stop();
+    debugPrint('[mic] stopped, file=$savedPath');
     if (!mounted) return;
     setState(() => _voiceState = _VoiceState.transcribing);
     HapticFeedback.lightImpact();
@@ -343,22 +760,24 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen> {
           filename: 'voice.m4a',
         ),
       });
+      debugPrint('[mic] POST /api/transcribe?language=$lang');
       final resp =
           await apiDio.post('/api/transcribe?language=$lang', data: form);
       final raw = resp.data;
       final text = raw is Map
           ? (raw['text'] as String? ?? '')
           : (raw?.toString() ?? '');
+      debugPrint('[mic] transcribe got text="${text.length > 50 ? '${text.substring(0, 50)}...' : text}"');
 
       if (!mounted) return;
       if (text.isNotEmpty) {
+        // Drop the text into the input field so the user can review and edit
+        // before sending. Auto-send is intentional NOT — user wants to verify
+        // the transcription first.
         _textController.text = text;
-        // Position cursor at end so user can review before sending.
         _textController.selection = TextSelection.fromPosition(
           TextPosition(offset: text.length),
         );
-        // Auto-send the transcribed text through the normal send path.
-        await _send();
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -370,13 +789,15 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen> {
           ),
         );
       }
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
+      debugPrint('[mic] transcribe FAILED: $e\n$st');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Transcription failed: $e'),
             backgroundColor: K2Colors.error,
             behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 5),
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(10)),
           ),
@@ -453,6 +874,19 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen> {
                           theme: t,
                         ),
             ),
+
+            // ── Pending meal confirm card ──────────────────────────────────
+            if (_pendingMealItems != null)
+              _PendingMealCard(
+                items: _pendingMealItems!,
+                mealType: _pendingMealType,
+                onMealTypeChanged: (mt) =>
+                    setState(() => _pendingMealType = mt),
+                isAdding: _isAddingMeal,
+                onAdd: _confirmAddPendingMeal,
+                onCancel: _cancelPendingMeal,
+                theme: t,
+              ),
 
             // ── Attach toolbar ─────────────────────────────────────────────
             _AttachToolbar(
@@ -1276,5 +1710,239 @@ class _InputPillState extends State<_InputPill>
         ],
       ),
     );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pending meal confirm card
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _PendingMealCard extends StatelessWidget {
+  const _PendingMealCard({
+    required this.items,
+    required this.mealType,
+    required this.onMealTypeChanged,
+    required this.isAdding,
+    required this.onAdd,
+    required this.onCancel,
+    required this.theme,
+  });
+
+  final List<IngredientV2> items;
+  final String mealType;
+  final ValueChanged<String> onMealTypeChanged;
+  final bool isAdding;
+  final VoidCallback onAdd;
+  final VoidCallback onCancel;
+  final K2Theme theme;
+
+  static const _kMealTypes = ['breakfast', 'lunch', 'snack', 'dinner'];
+
+  @override
+  Widget build(BuildContext context) {
+    final isRu = Localizations.localeOf(context).languageCode == 'ru';
+
+    final totalKcal =
+        items.fold<double>(0, (s, i) => s + i.nutrientsTotal.calories);
+    final totalP =
+        items.fold<double>(0, (s, i) => s + i.nutrientsTotal.protein);
+    final totalF = items.fold<double>(0, (s, i) => s + i.nutrientsTotal.fat);
+    final totalC = items.fold<double>(0, (s, i) => s + i.nutrientsTotal.carbs);
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: theme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: theme.border, width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.restaurant_rounded, size: 16, color: K2Colors.accent),
+              const SizedBox(width: 6),
+              Text(
+                isRu ? 'Добавить в журнал?' : 'Add to journal?',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: theme.fg,
+                  fontFamily: K2Fonts.sans,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '${totalKcal.round()} ${isRu ? "ккал" : "kcal"}',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: theme.fg,
+                  fontFamily: K2Fonts.mono,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          for (final i in items)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '${i.name} (${i.weightGrams.toStringAsFixed(0)}${isRu ? "г" : "g"})',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: theme.fgDim,
+                        fontFamily: K2Fonts.sans,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  Text(
+                    '${i.nutrientsTotal.calories.round()}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: theme.fgDim,
+                      fontFamily: K2Fonts.mono,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          const SizedBox(height: 6),
+          Text(
+            'P ${totalP.round()} · F ${totalF.round()} · C ${totalC.round()}',
+            style: TextStyle(
+              fontSize: 11,
+              color: theme.fgMute,
+              fontFamily: K2Fonts.mono,
+            ),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 26,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: _kMealTypes.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 6),
+              itemBuilder: (_, idx) {
+                final mt = _kMealTypes[idx];
+                final selected = mt == mealType;
+                return GestureDetector(
+                  onTap: isAdding ? null : () => onMealTypeChanged(mt),
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: selected ? theme.fg : Colors.transparent,
+                      borderRadius: BorderRadius.circular(13),
+                      border:
+                          Border.all(color: selected ? theme.fg : theme.border),
+                    ),
+                    child: Center(
+                      child: Text(
+                        _localizedMealType(mt, isRu),
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                          color: selected ? theme.bg : theme.fgDim,
+                          fontFamily: K2Fonts.sans,
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: GestureDetector(
+                  onTap: isAdding ? null : onCancel,
+                  child: Container(
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: theme.bg,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: theme.border),
+                    ),
+                    child: Center(
+                      child: Text(
+                        isRu ? 'Отмена' : 'Cancel',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: theme.fgDim,
+                          fontFamily: K2Fonts.sans,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 2,
+                child: GestureDetector(
+                  onTap: isAdding ? null : onAdd,
+                  child: Container(
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: isAdding ? theme.fgMute : theme.fg,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Center(
+                      child: isAdding
+                          ? SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: theme.bg,
+                              ),
+                            )
+                          : Text(
+                              isRu ? 'Добавить' : 'Add',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: theme.bg,
+                                fontFamily: K2Fonts.sans,
+                              ),
+                            ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _localizedMealType(String mt, bool isRu) {
+    if (!isRu) return mt[0].toUpperCase() + mt.substring(1);
+    return switch (mt) {
+      'breakfast' => 'Завтрак',
+      'lunch' => 'Обед',
+      'snack' => 'Перекус',
+      'dinner' => 'Ужин',
+      _ => mt,
+    };
   }
 }

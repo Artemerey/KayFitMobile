@@ -8,9 +8,11 @@
 // The legacy JournalScreen remains untouched.
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/api/api_client.dart';
 import '../../../features/dashboard/providers/dashboard_provider.dart';
 import '../../../features/journal/screens/journal_screen.dart'
     show journalDayMealsProvider;
@@ -104,6 +106,7 @@ K2MealRowData _toRowData(Meal m) {
     carbs: m.carbs.round(),
     source: source,
     photoSeed: photoSeed,
+    photoUrl: m.sourceUrl,
   );
 }
 
@@ -142,12 +145,102 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
   String get _dateKey =>
       _calSelected == 'today' ? _todayIso() : _calSelected;
 
+  ({double kcal, double protein, double carbs, double fat}) _resolveGoals(
+    AsyncValue<MacroGoals> goalsAsync,
+  ) {
+    final goals = goalsAsync.valueOrNull;
+    double pick(double fromGoals, double fallback) =>
+        fromGoals > 0 ? fromGoals : fallback;
+    return (
+      kcal: pick(goals?.calories ?? 0, 2100),
+      protein: pick(goals?.protein ?? 0, 130),
+      carbs: pick(goals?.carbs ?? 0, 250),
+      fat: pick(goals?.fat ?? 0, 70),
+    );
+  }
+
+  /// Swipe-to-delete handler for journal rows.
+  /// Returns true to let `Dismissible` collapse the row, false to bounce back.
+  /// On success: DELETE /api/meals/$id, invalidate dashboard + calendar +
+  /// per-day meals so rings/headers update immediately.
+  Future<bool> _deleteMeal(String idStr) async {
+    final intId = int.tryParse(idStr);
+    if (intId == null) return false;
+    HapticFeedback.mediumImpact();
+    try {
+      await apiDio.delete('/api/meals/$intId');
+      ref.invalidate(todayStatsProvider);
+      ref.invalidate(todayMealsProvider);
+      ref.invalidate(dailyKcalHistoryProvider);
+      ref.invalidate(journalDayMealsProvider(_dateKey));
+      if (mounted) {
+        final isRu = Localizations.localeOf(context).languageCode == 'ru';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(isRu ? 'Приём пищи удалён' : 'Meal deleted'),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 2),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+        );
+      }
+      return true;
+    } on Exception {
+      if (mounted) {
+        final isRu = Localizations.localeOf(context).languageCode == 'ru';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(isRu ? 'Не удалось удалить' : 'Could not delete'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+      return false;
+    }
+  }
+
+  /// Sum macros over the meal list for the currently-selected day.
+  /// Replaces /api/stats which only ever returns "today" — the rings now
+  /// stay in lock-step with what's actually rendered in the list below.
+  ///
+  /// Each meal's value is rounded BEFORE summing to match the per-row
+  /// display rounding (Kayfit2MealRow renders `m.kcal.round()` etc).
+  /// Without per-meal rounding, the rings drift by ±1 from the visible
+  /// row totals (e.g. raw sum 2518.7 → ring shows 2518 while the journal
+  /// rows visibly add up to 2519).
+  ({double kcal, double protein, double carbs, double fat}) _sumMeals(
+    List<Meal> meals,
+  ) {
+    double k = 0, p = 0, f = 0, c = 0;
+    for (final m in meals) {
+      k += m.calories.round();
+      p += m.protein.round();
+      f += m.fat.round();
+      c += m.carbs.round();
+    }
+    return (kcal: k, protein: p, fat: f, carbs: c);
+  }
+
   @override
   Widget build(BuildContext context) {
     const t = K2Theme.light;
 
-    final statsAsync = ref.watch(todayStatsProvider);
+    final goalsAsync = ref.watch(userGoalsProvider);
     final mealsAsync = ref.watch(journalDayMealsProvider(_dateKey));
+    final kcalHistory = ref.watch(dailyKcalHistoryProvider).valueOrNull;
+    final dayGoal = goalsAsync.valueOrNull?.calories ?? 0;
+    final statusByIso = (kcalHistory == null || dayGoal <= 0)
+        ? <String, K2DayStatus>{}
+        : <String, K2DayStatus>{
+            for (final entry in kcalHistory.entries)
+              if (entry.value > 0)
+                entry.key:
+                    entry.value > dayGoal ? K2DayStatus.over : K2DayStatus.good,
+          };
 
     return Scaffold(
       backgroundColor: t.bg,
@@ -174,60 +267,98 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
                   setState(() => _calExpanded = !_calExpanded),
               selectedIso: _calSelected,
               onSelect: (iso) => setState(() => _calSelected = iso),
+              statusByIso: statusByIso,
             ),
 
             // ── Rings summary ────────────────────────────────────────────────
-            statsAsync.when(
+            // Rings derive their "eaten" totals from the same meal list shown
+            // below — single source of truth, always in sync with the
+            // calendar-selected day. /api/stats is intentionally NOT used here:
+            // it only returns "today", which would desync the rings whenever
+            // the user picks a different date.
+            mealsAsync.when(
               loading: () => const _RingsLoading(),
               error: (_, __) => const _RingsFallback(),
-              data: (stats) => Padding(
-                padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
-                child: KayfitRingsSummary(
-                  theme: t,
-                  values: KayfitRingsValues(
-                    kcal: stats.caloriesEaten,
-                    kcalGoal: stats.caloriesGoal > 0
-                        ? stats.caloriesGoal
-                        : 2100,
-                    protein: stats.proteinEaten,
-                    proteinGoal: stats.proteinGoal > 0
-                        ? stats.proteinGoal
-                        : 130,
-                    carbs: stats.carbsEaten,
-                    carbsGoal: stats.carbsGoal > 0
-                        ? stats.carbsGoal
-                        : 250,
-                    fat: stats.fatEaten,
-                    fatGoal: stats.fatGoal > 0 ? stats.fatGoal : 70,
+              data: (meals) {
+                final eaten = _sumMeals(meals);
+                final g = _resolveGoals(goalsAsync);
+                return Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
+                  child: KayfitRingsSummary(
+                    theme: t,
+                    values: KayfitRingsValues(
+                      kcal: eaten.kcal,
+                      kcalGoal: g.kcal,
+                      protein: eaten.protein,
+                      proteinGoal: g.protein,
+                      carbs: eaten.carbs,
+                      carbsGoal: g.carbs,
+                      fat: eaten.fat,
+                      fatGoal: g.fat,
+                    ),
                   ),
-                ),
-              ),
+                );
+              },
             ),
 
             Container(height: 1, color: t.hairline),
 
             // ── Meal list ────────────────────────────────────────────────────
             Expanded(
-              child: mealsAsync.when(
-                loading: () => const Center(
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-                error: (_, __) => _MealList(
-                  rows: _kFallbackMeals,
-                  theme: t,
-                  onRowTap: (id) {},
-                ),
-                data: (meals) {
-                  if (meals.isEmpty) {
-                    return _EmptyMeals(theme: t);
+              child: RefreshIndicator(
+                onRefresh: () async {
+                  ref.invalidate(todayStatsProvider);
+                  ref.invalidate(userGoalsProvider);
+                  ref.invalidate(journalDayMealsProvider(_dateKey));
+                  ref.invalidate(dailyKcalHistoryProvider);
+                  try {
+                    await Future.wait([
+                      ref.read(todayStatsProvider.future),
+                      ref.read(userGoalsProvider.future),
+                      ref.read(journalDayMealsProvider(_dateKey).future),
+                      ref.read(dailyKcalHistoryProvider.future),
+                    ]);
+                  } catch (_) {
+                    // Swallow — UI errored already shows fallback state.
                   }
-                  final rows = meals.map(_toRowData).toList();
-                  return _MealList(
-                    rows: rows,
+                },
+                child: mealsAsync.when(
+                  loading: () => ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    children: const [
+                      SizedBox(height: 200),
+                      Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                    ],
+                  ),
+                  error: (err, st) => _MealList(
+                    rows: _kFallbackMeals,
                     theme: t,
                     onRowTap: (id) {},
-                  );
-                },
+                  ),
+                  data: (meals) {
+                    if (meals.isEmpty) {
+                      return ListView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        children: [
+                          SizedBox(
+                            height: MediaQuery.of(context).size.height * 0.5,
+                            child: _EmptyMeals(theme: t),
+                          ),
+                        ],
+                      );
+                    }
+                    final rows = meals.map(_toRowData).toList();
+                    return _MealList(
+                      rows: rows,
+                      theme: t,
+                      onRowTap: (id) {
+                        final intId = int.tryParse(id);
+                        if (intId != null) context.push('/meals/$intId/edit');
+                      },
+                      onDelete: _deleteMeal,
+                    );
+                  },
+                ),
               ),
             ),
           ],
@@ -347,11 +478,17 @@ class _MealList extends StatelessWidget {
     required this.rows,
     required this.theme,
     required this.onRowTap,
+    this.onDelete,
   });
 
   final List<K2MealRowData> rows;
   final K2Theme theme;
   final ValueChanged<String> onRowTap;
+
+  /// Returns a Future that resolves to true if delete succeeded, false to
+  /// keep the row. Null means the parent doesn't support delete (fallback
+  /// rows in error state pass null and don't render the swipe action).
+  final Future<bool> Function(String id)? onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -361,17 +498,54 @@ class _MealList extends StatelessWidget {
       padding: EdgeInsets.zero,
       children: [
         for (final (type, meals) in groups) ...[
-          _GroupHeader(type: type, theme: theme),
+          _GroupHeader(type: type, meals: meals, theme: theme),
           for (final meal in meals)
-            Kayfit2MealRow(
-              key: ValueKey(meal.id),
-              meal: meal,
-              theme: theme,
-              onTap: () => onRowTap(meal.id),
-            ),
+            if (onDelete != null)
+              Dismissible(
+                key: ValueKey('dismiss_${meal.id}'),
+                direction: DismissDirection.endToStart,
+                background: _DeleteSwipeBackground(theme: theme),
+                confirmDismiss: (_) async {
+                  return await onDelete!(meal.id);
+                },
+                child: Kayfit2MealRow(
+                  key: ValueKey(meal.id),
+                  meal: meal,
+                  theme: theme,
+                  onTap: () => onRowTap(meal.id),
+                ),
+              )
+            else
+              Kayfit2MealRow(
+                key: ValueKey(meal.id),
+                meal: meal,
+                theme: theme,
+                onTap: () => onRowTap(meal.id),
+              ),
         ],
         const SizedBox(height: 16),
       ],
+    );
+  }
+}
+
+/// Red trash background revealed under a meal row during right-to-left swipe.
+class _DeleteSwipeBackground extends StatelessWidget {
+  const _DeleteSwipeBackground({required this.theme});
+
+  final K2Theme theme;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      alignment: Alignment.centerRight,
+      padding: const EdgeInsets.only(right: 24),
+      color: const Color(0xFFFF3B30), // iOS systemRed
+      child: const Icon(
+        Icons.delete_outline_rounded,
+        color: Colors.white,
+        size: 22,
+      ),
     );
   }
 }
@@ -380,25 +554,75 @@ class _MealList extends StatelessWidget {
 // Group header
 // ─────────────────────────────────────────────────────────────────────────────
 
+const _kGroupTitles = <String, (String, String)>{
+  'breakfast': ('🌅', 'Breakfast'),
+  'lunch': ('☀️', 'Lunch'),
+  'snack': ('🍎', 'Snack'),
+  'dinner': ('🌙', 'Dinner'),
+  'other': ('🍽', 'Other'),
+};
+
 class _GroupHeader extends StatelessWidget {
-  const _GroupHeader({required this.type, required this.theme});
+  const _GroupHeader({
+    required this.type,
+    required this.meals,
+    required this.theme,
+  });
 
   final String type;
+  final List<K2MealRowData> meals;
   final K2Theme theme;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 6),
-      child: Text(
-        type.toUpperCase(),
-        style: TextStyle(
-          fontSize: 10,
-          letterSpacing: 1.0,
-          fontFamily: K2Fonts.sans,
-          fontWeight: FontWeight.w500,
-          color: theme.fgMute,
+    final cfg = _kGroupTitles[type] ?? ('🍽', type);
+    final emoji = cfg.$1;
+    final title = cfg.$2;
+    final totalKcal = meals.fold<int>(0, (s, m) => s + m.kcal);
+
+    return Container(
+      margin: const EdgeInsets.only(top: 20, bottom: 4),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      decoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(color: theme.hairline),
         ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Text(emoji, style: const TextStyle(fontSize: 16)),
+          const SizedBox(width: 8),
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 14,
+              fontFamily: K2Fonts.sans,
+              fontWeight: FontWeight.w600,
+              color: theme.fg,
+              letterSpacing: -0.1,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            '· ${meals.length}',
+            style: TextStyle(
+              fontSize: 12,
+              fontFamily: K2Fonts.mono,
+              color: theme.fgMute,
+            ),
+          ),
+          const Spacer(),
+          Text(
+            '$totalKcal kcal',
+            style: TextStyle(
+              fontSize: 12,
+              fontFamily: K2Fonts.mono,
+              fontWeight: FontWeight.w500,
+              color: theme.fgDim,
+            ),
+          ),
+        ],
       ),
     );
   }

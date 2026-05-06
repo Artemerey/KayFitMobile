@@ -66,7 +66,7 @@ class _Kf2RecognizingScreenState extends ConsumerState<Kf2RecognizingScreen>
   // ── Recognition logic ──────────────────────────────────────────────────────
 
   Future<void> _recognize() async {
-    final lang = WidgetsBinding.instance.platformDispatcher.locale.languageCode;
+    final lang = Localizations.localeOf(context).languageCode;
 
     try {
       final origSize = await File(widget.photo.path).length();
@@ -149,14 +149,17 @@ class _Kf2RecognizingScreenState extends ConsumerState<Kf2RecognizingScreen>
     Navigator.of(context).pushReplacement(
       MaterialPageRoute<bool>(
         fullscreenDialog: true,
-        builder: (_) => DraggableScrollableSheet(
-          expand: false,
-          initialChildSize: 1.0,
-          builder: (context, scrollController) => RecognitionResultSheetKF2(
-            dishName: dishName,
-            ingredients: items,
-            mealDate: null,
-            originalText: null,
+        builder: (_) => Scaffold(
+          backgroundColor: Colors.transparent,
+          body: DraggableScrollableSheet(
+            expand: false,
+            initialChildSize: 1.0,
+            builder: (context, scrollController) => RecognitionResultSheetKF2(
+              dishName: dishName,
+              ingredients: items,
+              mealDate: null,
+              originalText: null,
+            ),
           ),
         ),
       ),

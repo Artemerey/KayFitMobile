@@ -808,6 +808,15 @@ class AppLocalizationsRu extends AppLocalizations {
   String get edit_meal_weight_label => 'Вес (г)';
 
   @override
+  String get edit_meal_section_details => 'Детали';
+
+  @override
+  String get edit_meal_section_portion => 'Порция';
+
+  @override
+  String get edit_meal_section_nutrition => 'Питательная ценность';
+
+  @override
   String get addMeal_subscription_needed => 'Нужна подписка';
 
   @override

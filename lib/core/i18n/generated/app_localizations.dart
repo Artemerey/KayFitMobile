@@ -1610,6 +1610,24 @@ abstract class AppLocalizations {
   /// **'Вес (г)'**
   String get edit_meal_weight_label;
 
+  /// No description provided for @edit_meal_section_details.
+  ///
+  /// In ru, this message translates to:
+  /// **'Детали'**
+  String get edit_meal_section_details;
+
+  /// No description provided for @edit_meal_section_portion.
+  ///
+  /// In ru, this message translates to:
+  /// **'Порция'**
+  String get edit_meal_section_portion;
+
+  /// No description provided for @edit_meal_section_nutrition.
+  ///
+  /// In ru, this message translates to:
+  /// **'Питательная ценность'**
+  String get edit_meal_section_nutrition;
+
   /// No description provided for @addMeal_subscription_needed.
   ///
   /// In ru, this message translates to:

@@ -88,7 +88,8 @@ class _LeftColumn extends StatelessWidget {
   Widget build(BuildContext context) {
     if (meal.hasPhoto) {
       return Kayfit2MealPhoto(
-        seed: meal.photoSeed!,
+        seed: meal.photoSeed,
+        photoUrl: meal.photoUrl,
         theme: theme,
       );
     }

@@ -6,6 +6,7 @@ import '../../../core/analytics/analytics_service.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/i18n/generated/app_localizations.dart';
 import '../../../features/dashboard/providers/dashboard_provider.dart';
+import '../../../features/journal/screens/journal_screen.dart' show journalDayMealsProvider;
 import '../../../shared/models/ingredient_v2.dart';
 import '../../../shared/models/nutrients_v2.dart';
 import '../../../shared/theme/app_theme.dart';
@@ -301,8 +302,31 @@ class _RecognitionResultSheetKF2State
         totalCalories: _state.totals.calories.round(),
       );
 
+      // Stats + meals shown on Dashboard
       ref.invalidate(todayStatsProvider);
       ref.invalidate(todayMealsProvider);
+      // Goals provider (KF2-Journal rings)
+      ref.invalidate(userGoalsProvider);
+      // Calendar status rings on KF2 Journal — recompute green/red dots
+      ref.invalidate(dailyKcalHistoryProvider);
+      // Journal V2 watches per-day meals — invalidate today's key.
+      final today = widget.mealDate ?? DateTime.now();
+      final todayIso = '${today.year.toString().padLeft(4, '0')}-'
+          '${today.month.toString().padLeft(2, '0')}-'
+          '${today.day.toString().padLeft(2, '0')}';
+      ref.invalidate(journalDayMealsProvider(todayIso));
+
+      // Force-await refetch on the providers users will see immediately on return.
+      // If any of these throw, swallow — user can pull-to-refresh.
+      try {
+        await Future.wait([
+          ref.read(todayStatsProvider.future),
+          ref.read(journalDayMealsProvider(todayIso).future),
+          ref.read(dailyKcalHistoryProvider.future),
+        ]);
+      } catch (_) {
+        // Refetch failure surfaces via UI's error path — don't block save success.
+      }
 
       if (mounted) Navigator.of(context).pop(true);
     } on Exception catch (_) {
@@ -514,12 +538,19 @@ class _KF2SheetHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
       child: Row(
         children: [
           GestureDetector(
+            behavior: HitTestBehavior.opaque,
             onTap: onClose,
-            child: Icon(Icons.close, size: 22, color: theme.fgDim),
+            child: SizedBox(
+              width: 44,
+              height: 44,
+              child: Center(
+                child: Icon(Icons.close, size: 22, color: theme.fgDim),
+              ),
+            ),
           ),
           const Spacer(),
           Text(
@@ -533,7 +564,7 @@ class _KF2SheetHeader extends StatelessWidget {
             ),
           ),
           const Spacer(),
-          const SizedBox(width: 22), // Balance the close icon
+          const SizedBox(width: 44), // Balance the close button
         ],
       ),
     );

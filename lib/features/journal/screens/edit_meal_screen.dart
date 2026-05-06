@@ -1,24 +1,29 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/analytics/analytics_service.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/i18n/generated/app_localizations.dart';
+import '../../../features/dashboard/providers/dashboard_provider.dart';
+import '../../../features/journal/screens/journal_screen.dart'
+    show journalDayMealsProvider;
 import '../../../shared/theme/app_theme.dart';
 import '../../../shared/widgets/keyboard_dismisser.dart';
 import '../../../shared/widgets/loading_indicator.dart';
 
 // ─── Screen ──────────────────────────────────────────────────────────────────
 
-class EditMealScreen extends StatefulWidget {
+class EditMealScreen extends ConsumerStatefulWidget {
   final int mealId;
   const EditMealScreen({super.key, required this.mealId});
 
   @override
-  State<EditMealScreen> createState() => _EditMealScreenState();
+  ConsumerState<EditMealScreen> createState() => _EditMealScreenState();
 }
 
-class _EditMealScreenState extends State<EditMealScreen>
+class _EditMealScreenState extends ConsumerState<EditMealScreen>
     with TickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   final _nameCtrl = TextEditingController();
@@ -34,11 +39,20 @@ class _EditMealScreenState extends State<EditMealScreen>
   late final AnimationController _enterCtrl;
   late final AnimationController _macroCtrl;
 
-  // Live macro state for preview ring
+  // Live macro state for preview
   double _protein = 0;
   double _fat = 0;
   double _carbs = 0;
   double _calories = 0;
+
+  // Baseline KBJU values captured on load — used for proportional recalc
+  double _origCalories = 0;
+  double _origProtein = 0;
+  double _origFat = 0;
+  double _origCarbs = 0;
+  double _origWeight = 0;
+
+  Timer? _weightDebounce;
 
   @override
   void initState() {
@@ -55,6 +69,7 @@ class _EditMealScreenState extends State<EditMealScreen>
     for (final ctrl in [_proteinCtrl, _fatCtrl, _carbsCtrl, _caloriesCtrl]) {
       ctrl.addListener(_onMacroChanged);
     }
+    _weightCtrl.addListener(_onWeightChanged);
 
     AnalyticsService.editMealOpened(widget.mealId);
     _loadMeal();
@@ -66,6 +81,21 @@ class _EditMealScreenState extends State<EditMealScreen>
       _fat = double.tryParse(_fatCtrl.text) ?? 0;
       _carbs = double.tryParse(_carbsCtrl.text) ?? 0;
       _calories = double.tryParse(_caloriesCtrl.text) ?? 0;
+    });
+  }
+
+  void _onWeightChanged() {
+    _weightDebounce?.cancel();
+    _weightDebounce = Timer(const Duration(milliseconds: 300), () {
+      final newW = double.tryParse(_weightCtrl.text.trim());
+      if (newW == null || newW <= 0 || _origWeight <= 0) return;
+      if (newW == _origWeight) return;
+      final ratio = newW / _origWeight;
+      _caloriesCtrl.text = (_origCalories * ratio).toStringAsFixed(1);
+      _proteinCtrl.text = (_origProtein * ratio).toStringAsFixed(1);
+      _fatCtrl.text = (_origFat * ratio).toStringAsFixed(1);
+      _carbsCtrl.text = (_origCarbs * ratio).toStringAsFixed(1);
+      // _onMacroChanged fires automatically via listeners — updates preview
     });
   }
 
@@ -83,6 +113,13 @@ class _EditMealScreenState extends State<EditMealScreen>
       _carbsCtrl.text = (meal['carbs'] as num).toStringAsFixed(1);
       final w = meal['weight'] as num?;
       _weightCtrl.text = w != null ? w.toStringAsFixed(0) : '';
+
+      // Capture baseline for proportional recalc
+      _origCalories = (meal['calories'] as num).toDouble();
+      _origProtein = (meal['protein'] as num).toDouble();
+      _origFat = (meal['fat'] as num).toDouble();
+      _origCarbs = (meal['carbs'] as num).toDouble();
+      _origWeight = w?.toDouble() ?? 0;
     } catch (_) {
       // leave fields empty
     } finally {
@@ -122,9 +159,31 @@ class _EditMealScreenState extends State<EditMealScreen>
         'protein': double.parse(_proteinCtrl.text),
         'fat': double.parse(_fatCtrl.text),
         'carbs': double.parse(_carbsCtrl.text),
-        if (parsedWeight != null) 'weight_grams': parsedWeight,
+        'weight_grams': ?parsedWeight,
       });
       AnalyticsService.editMealSaved(widget.mealId);
+
+      // Invalidate everything that displays this meal — list rows, totals, rings.
+      // Force-await the futures so the journal/dashboard render fresh data on
+      // the very next frame, not while a refetch is still in flight.
+      final today = DateTime.now();
+      final todayIso = '${today.year.toString().padLeft(4, '0')}-'
+          '${today.month.toString().padLeft(2, '0')}-'
+          '${today.day.toString().padLeft(2, '0')}';
+      ref.invalidate(todayStatsProvider);
+      ref.invalidate(todayMealsProvider);
+      ref.invalidate(journalDayMealsProvider(todayIso));
+      ref.invalidate(dailyKcalHistoryProvider);
+      try {
+        await Future.wait([
+          ref.read(todayStatsProvider.future),
+          ref.read(todayMealsProvider.future),
+          ref.read(journalDayMealsProvider(todayIso).future),
+          ref.read(dailyKcalHistoryProvider.future),
+        ]);
+      } catch (_) {
+        // Refetch failure surfaces via UI's error path — don't block save success.
+      }
       if (mounted) {
         final l10n = AppLocalizations.of(context)!;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -165,6 +224,8 @@ class _EditMealScreenState extends State<EditMealScreen>
 
   @override
   void dispose() {
+    _weightDebounce?.cancel();
+    _weightCtrl.removeListener(_onWeightChanged);
     _enterCtrl.dispose();
     _macroCtrl.dispose();
     _nameCtrl.dispose();
@@ -197,183 +258,432 @@ class _EditMealScreenState extends State<EditMealScreen>
         ),
       );
 
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context)!;
-
-    return KeyboardDismisser(
-      child: Scaffold(
-      backgroundColor: AppColors.bg,
-      body: _loading
-          ? const Center(child: LoadingIndicator())
-          : Form(
-              key: _formKey,
-              child: CustomScrollView(
-                slivers: [
-                  // ── Gradient AppBar ───────────────────────────────
-                  SliverAppBar(
-                    backgroundColor: Colors.transparent,
-                    surfaceTintColor: Colors.transparent,
-                    expandedHeight: 110,
-                    pinned: true,
-                    leading: GestureDetector(
-                      onTap: () => Navigator.of(context).pop(),
-                      child: Container(
-                        margin: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.85),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: const Icon(Icons.arrow_back_ios_new_rounded,
-                            size: 16, color: AppColors.text),
-                      ),
-                    ),
-                    flexibleSpace: FlexibleSpaceBar(
-                      titlePadding:
-                          const EdgeInsets.fromLTRB(56, 0, 16, 14),
-                      title: Text(
-                        l10n.edit_meal_title,
-                        style: const TextStyle(
-                          color: AppColors.text,
-                          fontSize: 20,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.4,
-                        ),
-                      ),
-                      background: Container(
-                        decoration: const BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: [Color(0xFFDCFCE7), Color(0xFFF4F6F8)],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  // ── Content ───────────────────────────────────────
-                  SliverPadding(
-                    padding: const EdgeInsets.all(16),
-                    sliver: SliverList(
-                      delegate: SliverChildListDelegate([
-                        // Macro ring card
-                        _buildFade(0, _MacroRingCard(
-                          protein: _protein,
-                          fat: _fat,
-                          carbs: _carbs,
-                          calories: _calories,
-                          macroCtrl: _macroCtrl,
-                          l10n: l10n,
-                        )),
-                        const SizedBox(height: 16),
-
-                        // Name field
-                        _buildFade(1, _StyledField(
-                          controller: _nameCtrl,
-                          label: l10n.edit_meal_name_label,
-                          icon: Icons.restaurant_rounded,
-                          iconColor: AppColors.accent,
-                          iconBg: AppColors.accentSoft,
-                          validator: (v) => v == null || v.trim().isEmpty
-                              ? l10n.edit_meal_name_error
-                              : null,
-                        )),
-                        const SizedBox(height: 10),
-
-                        // Weight (optional)
-                        _buildFade(2, _StyledNumField(
-                          controller: _weightCtrl,
-                          label: l10n.edit_meal_weight_label,
-                          suffix: l10n.macro_g,
-                          icon: Icons.scale_rounded,
-                          iconColor: AppColors.textMuted,
-                          iconBg: AppColors.bg,
-                          errEnterValue: null,
-                          errInvalidNumber: l10n.edit_meal_err_invalid_number,
-                        )),
-                        const SizedBox(height: 10),
-
-                        // Calories
-                        _buildFade(3, _StyledNumField(
-                          controller: _caloriesCtrl,
-                          label: l10n.macro_calories,
-                          suffix: l10n.macro_kcal,
-                          icon: Icons.local_fire_department_rounded,
-                          iconColor: AppColors.accent,
-                          iconBg: AppColors.accentSoft,
-                          errEnterValue: l10n.edit_meal_err_enter_value,
-                          errInvalidNumber: l10n.edit_meal_err_invalid_number,
-                        )),
-                        const SizedBox(height: 10),
-
-                        // Protein
-                        _buildFade(4, _StyledNumField(
-                          controller: _proteinCtrl,
-                          label: l10n.macro_protein,
-                          suffix: l10n.macro_g,
-                          icon: Icons.fitness_center_rounded,
-                          iconColor: AppColors.accent,
-                          iconBg: AppColors.accentSoft,
-                          errEnterValue: l10n.edit_meal_err_enter_value,
-                          errInvalidNumber: l10n.edit_meal_err_invalid_number,
-                        )),
-                        const SizedBox(height: 10),
-
-                        // Fat
-                        _buildFade(5, _StyledNumField(
-                          controller: _fatCtrl,
-                          label: l10n.macro_fat,
-                          suffix: l10n.macro_g,
-                          icon: Icons.water_drop_rounded,
-                          iconColor: AppColors.warm,
-                          iconBg: AppColors.warmSoft,
-                          errEnterValue: l10n.edit_meal_err_enter_value,
-                          errInvalidNumber: l10n.edit_meal_err_invalid_number,
-                        )),
-                        const SizedBox(height: 10),
-
-                        // Carbs
-                        _buildFade(6, _StyledNumField(
-                          controller: _carbsCtrl,
-                          label: l10n.macro_carbs,
-                          suffix: l10n.macro_g,
-                          icon: Icons.grain_rounded,
-                          iconColor: AppColors.support,
-                          iconBg: AppColors.supportSoft,
-                          errEnterValue: l10n.edit_meal_err_enter_value,
-                          errInvalidNumber: l10n.edit_meal_err_invalid_number,
-                        )),
-                        const SizedBox(height: 24),
-
-                        // Save button
-                        _buildFade(7, _SaveButton(
-                          saving: _saving,
-                          label: l10n.common_save,
-                          onTap: _save,
-                        )),
-                        const SizedBox(height: 32),
-                      ]),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-      ),
-    );
-  }
-
   Widget _buildFade(int i, Widget child) {
     return FadeTransition(
       opacity: _fadeFor(i),
       child: SlideTransition(position: _slideFor(i), child: child),
     );
   }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+
+    return KeyboardDismisser(
+      child: Scaffold(
+        // iOS Settings system background
+        backgroundColor: const Color(0xFFF2F2F7),
+        body: _loading
+            ? const Center(child: LoadingIndicator())
+            : Form(
+                key: _formKey,
+                child: CustomScrollView(
+                  slivers: [
+                    // ── iOS-style white AppBar with hairline border ───
+                    SliverAppBar(
+                      backgroundColor: Colors.white,
+                      surfaceTintColor: Colors.transparent,
+                      shadowColor: Colors.transparent,
+                      pinned: true,
+                      elevation: 0,
+                      leading: GestureDetector(
+                        onTap: () => Navigator.of(context).pop(),
+                        child: const Icon(
+                          Icons.arrow_back_ios_new_rounded,
+                          size: 18,
+                          color: Color(0xFF007AFF),
+                        ),
+                      ),
+                      title: Text(
+                        l10n.edit_meal_title,
+                        style: const TextStyle(
+                          color: Colors.black,
+                          fontSize: 17,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: -0.3,
+                        ),
+                      ),
+                      bottom: PreferredSize(
+                        preferredSize: const Size.fromHeight(0),
+                        child: Container(
+                          height: 0.5,
+                          color: const Color(0xFFE5E5EA),
+                        ),
+                      ),
+                    ),
+
+                    // ── Content ───────────────────────────────────────
+                    SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(16, 20, 16, 40),
+                      sliver: SliverList(
+                        delegate: SliverChildListDelegate([
+                          // Compact neutral macro preview
+                          _buildFade(
+                            0,
+                            _CompactMacroPreview(
+                              protein: _protein,
+                              fat: _fat,
+                              carbs: _carbs,
+                              calories: _calories,
+                              macroCtrl: _macroCtrl,
+                              l10n: l10n,
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+
+                          // Section: DETAILS
+                          _buildFade(
+                            1,
+                            _SectionHeader(label: l10n.edit_meal_section_details),
+                          ),
+                          const SizedBox(height: 6),
+                          _buildFade(
+                            2,
+                            _InsetGroup(
+                              children: [
+                                _GroupRow(
+                                  label: l10n.edit_meal_name_label,
+                                  child: _InlineTextField(
+                                    controller: _nameCtrl,
+                                    textAlign: TextAlign.end,
+                                    keyboardType: TextInputType.text,
+                                    validator: (v) =>
+                                        v == null || v.trim().isEmpty
+                                            ? l10n.edit_meal_name_error
+                                            : null,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+
+                          // Section: PORTION
+                          _buildFade(
+                            3,
+                            _SectionHeader(label: l10n.edit_meal_section_portion),
+                          ),
+                          const SizedBox(height: 6),
+                          _buildFade(
+                            4,
+                            _InsetGroup(
+                              children: [
+                                _GroupRow(
+                                  label: l10n.edit_meal_weight_label,
+                                  child: _InlineNumField(
+                                    controller: _weightCtrl,
+                                    suffix: l10n.macro_g,
+                                    validator: (v) {
+                                      if (v == null || v.isEmpty) return null;
+                                      final n = double.tryParse(v);
+                                      if (n == null || n < 0) {
+                                        return l10n.edit_meal_err_invalid_number;
+                                      }
+                                      return null;
+                                    },
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+
+                          // Section: NUTRITION
+                          _buildFade(
+                            5,
+                            _SectionHeader(
+                                label: l10n.edit_meal_section_nutrition),
+                          ),
+                          const SizedBox(height: 6),
+                          _buildFade(
+                            6,
+                            _InsetGroup(
+                              children: [
+                                _GroupRow(
+                                  label: l10n.macro_calories,
+                                  child: _InlineNumField(
+                                    controller: _caloriesCtrl,
+                                    suffix: l10n.macro_kcal,
+                                    validator: (v) {
+                                      if (v == null || v.isEmpty) {
+                                        return l10n.edit_meal_err_enter_value;
+                                      }
+                                      final n = double.tryParse(v);
+                                      if (n == null || n < 0) {
+                                        return l10n.edit_meal_err_invalid_number;
+                                      }
+                                      return null;
+                                    },
+                                  ),
+                                ),
+                                _GroupDivider(),
+                                _GroupRow(
+                                  label: l10n.macro_protein,
+                                  child: _InlineNumField(
+                                    controller: _proteinCtrl,
+                                    suffix: l10n.macro_g,
+                                    validator: (v) {
+                                      if (v == null || v.isEmpty) {
+                                        return l10n.edit_meal_err_enter_value;
+                                      }
+                                      final n = double.tryParse(v);
+                                      if (n == null || n < 0) {
+                                        return l10n.edit_meal_err_invalid_number;
+                                      }
+                                      return null;
+                                    },
+                                  ),
+                                ),
+                                _GroupDivider(),
+                                _GroupRow(
+                                  label: l10n.macro_fat,
+                                  child: _InlineNumField(
+                                    controller: _fatCtrl,
+                                    suffix: l10n.macro_g,
+                                    validator: (v) {
+                                      if (v == null || v.isEmpty) {
+                                        return l10n.edit_meal_err_enter_value;
+                                      }
+                                      final n = double.tryParse(v);
+                                      if (n == null || n < 0) {
+                                        return l10n.edit_meal_err_invalid_number;
+                                      }
+                                      return null;
+                                    },
+                                  ),
+                                ),
+                                _GroupDivider(),
+                                _GroupRow(
+                                  label: l10n.macro_carbs,
+                                  child: _InlineNumField(
+                                    controller: _carbsCtrl,
+                                    suffix: l10n.macro_g,
+                                    validator: (v) {
+                                      if (v == null || v.isEmpty) {
+                                        return l10n.edit_meal_err_enter_value;
+                                      }
+                                      final n = double.tryParse(v);
+                                      if (n == null || n < 0) {
+                                        return l10n.edit_meal_err_invalid_number;
+                                      }
+                                      return null;
+                                    },
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 32),
+
+                          // iOS blue filled Save button
+                          _buildFade(
+                            7,
+                            _IosBlueButton(
+                              saving: _saving,
+                              label: l10n.common_save,
+                              onTap: _save,
+                            ),
+                          ),
+                        ]),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+      ),
+    );
+  }
 }
 
-// ─── Macro ring card ──────────────────────────────────────────────────────────
+// ─── Section header ───────────────────────────────────────────────────────────
 
-class _MacroRingCard extends StatelessWidget {
+class _SectionHeader extends StatelessWidget {
+  final String label;
+  const _SectionHeader({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 16, bottom: 0),
+      child: Text(
+        label.toUpperCase(),
+        style: const TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w400,
+          color: Color(0xFF8E8E93),
+          letterSpacing: 0.1,
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Inset grouped container ──────────────────────────────────────────────────
+
+class _InsetGroup extends StatelessWidget {
+  final List<Widget> children;
+  const _InsetGroup({required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: children,
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Row inside group ─────────────────────────────────────────────────────────
+
+class _GroupRow extends StatelessWidget {
+  final String label;
+  final Widget child;
+  const _GroupRow({required this.label, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 44,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Row(
+          children: [
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w400,
+                color: Colors.black,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(child: child),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GroupDivider extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.only(left: 16),
+      child: Divider(height: 0.5, thickness: 0.5, color: Color(0xFFE5E5EA)),
+    );
+  }
+}
+
+// ─── Inline text field (right-aligned value) ──────────────────────────────────
+
+class _InlineTextField extends StatelessWidget {
+  final TextEditingController controller;
+  final TextAlign textAlign;
+  final TextInputType keyboardType;
+  final String? Function(String?)? validator;
+
+  const _InlineTextField({
+    required this.controller,
+    this.textAlign = TextAlign.end,
+    this.keyboardType = TextInputType.text,
+    this.validator,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TextFormField(
+      controller: controller,
+      textAlign: textAlign,
+      keyboardType: keyboardType,
+      validator: validator,
+      style: const TextStyle(
+        fontSize: 17,
+        fontWeight: FontWeight.w400,
+        color: Color(0xFF8E8E93),
+      ),
+      decoration: const InputDecoration(
+        border: InputBorder.none,
+        enabledBorder: InputBorder.none,
+        focusedBorder: InputBorder.none,
+        errorBorder: InputBorder.none,
+        focusedErrorBorder: InputBorder.none,
+        isDense: true,
+        contentPadding: EdgeInsets.zero,
+        errorStyle: TextStyle(height: 0, fontSize: 0),
+      ),
+    );
+  }
+}
+
+// ─── Inline numeric field (right-aligned value + blue suffix) ─────────────────
+
+class _InlineNumField extends StatelessWidget {
+  final TextEditingController controller;
+  final String suffix;
+  final String? Function(String?)? validator;
+
+  const _InlineNumField({
+    required this.controller,
+    required this.suffix,
+    this.validator,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: [
+        Expanded(
+          child: TextFormField(
+            controller: controller,
+            textAlign: TextAlign.end,
+            keyboardType:
+                const TextInputType.numberWithOptions(decimal: true),
+            validator: validator,
+            style: const TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w400,
+              color: Color(0xFF8E8E93),
+            ),
+            decoration: const InputDecoration(
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              errorBorder: InputBorder.none,
+              focusedErrorBorder: InputBorder.none,
+              isDense: true,
+              contentPadding: EdgeInsets.zero,
+              errorStyle: TextStyle(height: 0, fontSize: 0),
+            ),
+          ),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          suffix,
+          style: const TextStyle(
+            fontSize: 17,
+            fontWeight: FontWeight.w400,
+            color: Color(0xFF007AFF),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─── Compact neutral macro preview card ──────────────────────────────────────
+
+class _CompactMacroPreview extends StatelessWidget {
   final double protein;
   final double fat;
   final double carbs;
@@ -381,7 +691,7 @@ class _MacroRingCard extends StatelessWidget {
   final AnimationController macroCtrl;
   final AppLocalizations l10n;
 
-  const _MacroRingCard({
+  const _CompactMacroPreview({
     required this.protein,
     required this.fat,
     required this.carbs,
@@ -398,32 +708,21 @@ class _MacroRingCard extends StatelessWidget {
     final carbsFrac = total > 0 ? carbs / total : 0.0;
 
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF064E1F), Color(0xFF16A34A)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(AppRadius.lg),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.accent.withValues(alpha: 0.35),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
-          ),
-        ],
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
         children: [
-          // Ring
+          // Simple neutral ring 80×80
           SizedBox(
-            width: 100,
-            height: 100,
+            width: 80,
+            height: 80,
             child: AnimatedBuilder(
               animation: macroCtrl,
-              builder: (_, __) => CustomPaint(
-                painter: _MacroRingPainter(
+              builder: (_, _) => CustomPaint(
+                painter: _NeutralRingPainter(
                   proteinFrac: proteinFrac,
                   fatFrac: fatFrac,
                   carbsFrac: carbsFrac,
@@ -438,17 +737,17 @@ class _MacroRingCard extends StatelessWidget {
                             ? calories.toStringAsFixed(0)
                             : '—',
                         style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
+                          color: Colors.black,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
                           height: 1.1,
                         ),
                       ),
                       Text(
                         l10n.macro_kcal,
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.65),
-                          fontSize: 10,
+                        style: const TextStyle(
+                          color: Color(0xFF8E8E93),
+                          fontSize: 9,
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -458,37 +757,28 @@ class _MacroRingCard extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(width: 20),
-          // Macro list
+          const SizedBox(width: 16),
+          // Macro legend
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _RingLegendRow(
-                  color: AppColors.accent,
+                _PreviewLegendRow(
+                  color: const Color(0xFF34C759),
                   label: l10n.macro_protein,
                   value: '${protein.toStringAsFixed(1)} ${l10n.macro_g}',
-                  pct: proteinFrac,
-                  ctrl: macroCtrl,
-                  delay: 0.1,
                 ),
-                const SizedBox(height: 10),
-                _RingLegendRow(
-                  color: AppColors.warm,
+                const SizedBox(height: 8),
+                _PreviewLegendRow(
+                  color: const Color(0xFFFF9500),
                   label: l10n.macro_fat,
                   value: '${fat.toStringAsFixed(1)} ${l10n.macro_g}',
-                  pct: fatFrac,
-                  ctrl: macroCtrl,
-                  delay: 0.25,
                 ),
-                const SizedBox(height: 10),
-                _RingLegendRow(
-                  color: AppColors.support,
+                const SizedBox(height: 8),
+                _PreviewLegendRow(
+                  color: const Color(0xFF007AFF),
                   label: l10n.macro_carbs,
                   value: '${carbs.toStringAsFixed(1)} ${l10n.macro_g}',
-                  pct: carbsFrac,
-                  ctrl: macroCtrl,
-                  delay: 0.4,
                 ),
               ],
             ),
@@ -499,77 +789,42 @@ class _MacroRingCard extends StatelessWidget {
   }
 }
 
-class _RingLegendRow extends StatelessWidget {
+class _PreviewLegendRow extends StatelessWidget {
   final Color color;
   final String label;
   final String value;
-  final double pct;
-  final AnimationController ctrl;
-  final double delay;
 
-  const _RingLegendRow({
+  const _PreviewLegendRow({
     required this.color,
     required this.label,
     required this.value,
-    required this.pct,
-    required this.ctrl,
-    required this.delay,
   });
 
   @override
   Widget build(BuildContext context) {
-    final widthAnim = Tween<double>(begin: 0, end: pct).animate(
-      CurvedAnimation(
-        parent: ctrl,
-        curve: Interval(delay, math.min(delay + 0.6, 1.0),
-            curve: Curves.easeOutCubic),
-      ),
-    );
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Row(
       children: [
-        Row(
-          children: [
-            Container(
-              width: 8,
-              height: 8,
-              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-            ),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.7),
-                fontSize: 11,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const Spacer(),
-            Text(
-              value,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
-        const SizedBox(height: 4),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(4),
-          child: Container(
-            height: 4,
-            color: Colors.white.withValues(alpha: 0.15),
-            child: AnimatedBuilder(
-              animation: widthAnim,
-              builder: (_, __) => FractionallySizedBox(
-                widthFactor: (pct > 0 ? widthAnim.value / pct : 0.0).clamp(0.0, 1.0),
-                alignment: Alignment.centerLeft,
-                child: Container(color: color),
-              ),
-            ),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: const TextStyle(
+            color: Color(0xFF8E8E93),
+            fontSize: 12,
+            fontWeight: FontWeight.w400,
+          ),
+        ),
+        const Spacer(),
+        Text(
+          value,
+          style: const TextStyle(
+            color: Colors.black,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
           ),
         ),
       ],
@@ -577,15 +832,15 @@ class _RingLegendRow extends StatelessWidget {
   }
 }
 
-// ─── Ring painter ─────────────────────────────────────────────────────────────
+// ─── Neutral ring painter ─────────────────────────────────────────────────────
 
-class _MacroRingPainter extends CustomPainter {
+class _NeutralRingPainter extends CustomPainter {
   final double proteinFrac;
   final double fatFrac;
   final double carbsFrac;
   final double progress;
 
-  _MacroRingPainter({
+  _NeutralRingPainter({
     required this.proteinFrac,
     required this.fatFrac,
     required this.carbsFrac,
@@ -595,8 +850,8 @@ class _MacroRingPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.width / 2 - 8;
-    const strokeWidth = 10.0;
+    final radius = size.width / 2 - 7;
+    const strokeWidth = 9.0;
 
     // Track
     canvas.drawArc(
@@ -607,15 +862,15 @@ class _MacroRingPainter extends CustomPainter {
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = strokeWidth
-        ..color = Colors.white.withValues(alpha: 0.12),
+        ..color = const Color(0xFFF2F2F7),
     );
 
     if (proteinFrac + fatFrac + carbsFrac == 0) return;
 
     final segments = [
-      (proteinFrac, AppColors.accent),
-      (fatFrac, AppColors.warm),
-      (carbsFrac, AppColors.support),
+      (proteinFrac, const Color(0xFF34C759)),
+      (fatFrac, const Color(0xFFFF9500)),
+      (carbsFrac, const Color(0xFF007AFF)),
     ];
 
     double startAngle = -math.pi / 2;
@@ -644,193 +899,31 @@ class _MacroRingPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_MacroRingPainter old) =>
+  bool shouldRepaint(_NeutralRingPainter old) =>
       old.proteinFrac != proteinFrac ||
       old.fatFrac != fatFrac ||
       old.carbsFrac != carbsFrac ||
       old.progress != progress;
 }
 
-// ─── Styled text field ────────────────────────────────────────────────────────
+// ─── iOS blue filled Save button ──────────────────────────────────────────────
 
-class _StyledField extends StatelessWidget {
-  final TextEditingController controller;
-  final String label;
-  final IconData icon;
-  final Color iconColor;
-  final Color iconBg;
-  final String? Function(String?)? validator;
-
-  const _StyledField({
-    required this.controller,
-    required this.label,
-    required this.icon,
-    required this.iconColor,
-    required this.iconBg,
-    this.validator,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadius.md),
-        boxShadow: AppShadow.sm,
-      ),
-      child: Row(
-        children: [
-          // Icon badge
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 0, 0, 0),
-            child: Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(
-                color: iconBg,
-                borderRadius: BorderRadius.circular(9),
-              ),
-              child: Icon(icon, color: iconColor, size: 18),
-            ),
-          ),
-          Expanded(
-            child: TextFormField(
-              controller: controller,
-              validator: validator,
-              style: const TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w500,
-                color: AppColors.text,
-              ),
-              decoration: InputDecoration(
-                labelText: label,
-                labelStyle: const TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 14,
-                ),
-                border: InputBorder.none,
-                enabledBorder: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                errorBorder: InputBorder.none,
-                focusedErrorBorder: InputBorder.none,
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StyledNumField extends StatelessWidget {
-  final TextEditingController controller;
-  final String label;
-  final String suffix;
-  final IconData icon;
-  final Color iconColor;
-  final Color iconBg;
-  final String? errEnterValue;
-  final String errInvalidNumber;
-
-  const _StyledNumField({
-    required this.controller,
-    required this.label,
-    required this.suffix,
-    required this.icon,
-    required this.iconColor,
-    required this.iconBg,
-    this.errEnterValue,
-    required this.errInvalidNumber,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadius.md),
-        boxShadow: AppShadow.sm,
-      ),
-      child: Row(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 0, 0, 0),
-            child: Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(
-                color: iconBg,
-                borderRadius: BorderRadius.circular(9),
-              ),
-              child: Icon(icon, color: iconColor, size: 18),
-            ),
-          ),
-          Expanded(
-            child: TextFormField(
-              controller: controller,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
-              style: const TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w500,
-                color: AppColors.text,
-              ),
-              decoration: InputDecoration(
-                labelText: label,
-                labelStyle: const TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 14,
-                ),
-                suffixText: suffix,
-                suffixStyle: TextStyle(
-                  color: iconColor,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 13,
-                ),
-                border: InputBorder.none,
-                enabledBorder: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                errorBorder: InputBorder.none,
-                focusedErrorBorder: InputBorder.none,
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
-              ),
-              validator: (v) {
-                if (v == null || v.isEmpty) {
-                  return errEnterValue; // null → no error for optional fields
-                }
-                final n = double.tryParse(v);
-                if (n == null || n < 0) return errInvalidNumber;
-                return null;
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─── Save button ──────────────────────────────────────────────────────────────
-
-class _SaveButton extends StatefulWidget {
+class _IosBlueButton extends StatefulWidget {
   final bool saving;
   final String label;
   final VoidCallback onTap;
 
-  const _SaveButton({
+  const _IosBlueButton({
     required this.saving,
     required this.label,
     required this.onTap,
   });
 
   @override
-  State<_SaveButton> createState() => _SaveButtonState();
+  State<_IosBlueButton> createState() => _IosBlueButtonState();
 }
 
-class _SaveButtonState extends State<_SaveButton>
+class _IosBlueButtonState extends State<_IosBlueButton>
     with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl;
   late final Animation<double> _scale;
@@ -840,7 +933,7 @@ class _SaveButtonState extends State<_SaveButton>
     super.initState();
     _ctrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 130));
-    _scale = Tween(begin: 1.0, end: 0.96).animate(
+    _scale = Tween(begin: 1.0, end: 0.97).animate(
         CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut));
   }
 
@@ -865,53 +958,31 @@ class _SaveButtonState extends State<_SaveButton>
         onTapCancel: () => _ctrl.reverse(),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
-          height: 56,
+          height: 50,
           decoration: BoxDecoration(
-            gradient: widget.saving
-                ? const LinearGradient(
-                    colors: [Color(0xFF6B7280), Color(0xFF9CA3AF)])
-                : const LinearGradient(
-                    colors: [Color(0xFF059669), Color(0xFF10B981)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: widget.saving
-                ? []
-                : [
-                    BoxShadow(
-                      color: AppColors.accent.withValues(alpha: 0.4),
-                      blurRadius: 16,
-                      offset: const Offset(0, 6),
-                    ),
-                  ],
+            color: widget.saving
+                ? const Color(0xFFADB5BD)
+                : const Color(0xFF007AFF),
+            borderRadius: BorderRadius.circular(14),
           ),
           child: Center(
             child: widget.saving
                 ? const SizedBox(
-                    width: 22,
-                    height: 22,
+                    width: 20,
+                    height: 20,
                     child: CircularProgressIndicator(
                       strokeWidth: 2.5,
                       color: Colors.white,
                     ),
                   )
-                : Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.check_rounded,
-                          color: Colors.white, size: 20),
-                      const SizedBox(width: 8),
-                      Text(
-                        widget.label,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 16,
-                          letterSpacing: 0.2,
-                        ),
-                      ),
-                    ],
+                : Text(
+                    widget.label,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 17,
+                      letterSpacing: -0.2,
+                    ),
                   ),
           ),
         ),

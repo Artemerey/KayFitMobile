@@ -807,6 +807,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String get edit_meal_weight_label => 'Weight (g)';
 
   @override
+  String get edit_meal_section_details => 'Details';
+
+  @override
+  String get edit_meal_section_portion => 'Portion';
+
+  @override
+  String get edit_meal_section_nutrition => 'Nutrition';
+
+  @override
   String get addMeal_subscription_needed => 'Subscription required';
 
   @override

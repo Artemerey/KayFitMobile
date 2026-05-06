@@ -340,6 +340,9 @@
   "edit_meal_err_enter_value": "Enter a value",
   "edit_meal_err_invalid_number": "Enter a valid number",
   "edit_meal_weight_label": "Weight (g)",
+  "edit_meal_section_details": "Details",
+  "edit_meal_section_portion": "Portion",
+  "edit_meal_section_nutrition": "Nutrition",
 
   "addMeal_subscription_needed": "Subscription required",
   "addMeal_subscription_desc": "Food recognition is available on a paid plan. Subscribe to use AI features.",
