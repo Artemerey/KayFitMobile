@@ -2,6 +2,22 @@
 
 > Previous release: 1.0.0+10 (App Store build)
 
+## New Features
+
+### BodyForm — body shape goal selector
+- New onboarding step: user picks current and desired body silhouette (0–6 scale, separate male/female images)
+- `BodyFormPrefs` stores indices in `SharedPreferences`; `body_form_calc.dart` derives target weight via lean-mass formula
+- Target weight flows into `/api/calculate` automatically when goal is `lose_weight`
+- Accessible post-onboarding via Settings → Body Form
+
+### KayFit 2.0 — full UI redesign (all flags `defaultValue: true`)
+- **JournalV2**: calendar strip (week+month), Apple Activity macro rings, swipe-to-delete, status rings (green/red vs goal)
+- **ChatV2**: thinking-step bubbles, attach toolbar (camera/voice/barcode), MealAddedBadge, "Скорректировать" correction chip, disclaimer banner (WHO/USDA links)
+- **RecognitionV2**: full-screen KF2 capture → recognizing → preview/edit flow
+- **SettingsV2**: back-button navigation, KF2 design tokens, legacy bottom nav removed when KF2_JOURNAL active
+- Fonts: Geist (UI) + JetBrains Mono (numbers) bundled
+- Design tokens in `kayfit2_theme.dart`: light + dark, Apple ring colors
+
 ## Bug Fixes
 
 ### UI / Localisation
