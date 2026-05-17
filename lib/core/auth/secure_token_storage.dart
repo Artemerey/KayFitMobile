@@ -15,6 +15,18 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'token_pair.dart';
 
+/// Thrown when iOS Keychain is temporarily unavailable — device has not been
+/// unlocked after a reboot (OSStatus -25308, errSecInteractionNotAllowed).
+/// This is NOT a sign that tokens are absent; it means the secure enclave
+/// cannot be accessed until the user performs a first unlock.
+class KeychainUnavailableException implements Exception {
+  const KeychainUnavailableException(this.platformCode);
+  final String platformCode;
+
+  @override
+  String toString() => 'KeychainUnavailableException(code: $platformCode)';
+}
+
 abstract interface class SecureTokenStorage {
   Future<void> saveTokens(TokenPair pair);
   Future<TokenPair?> loadTokens();
@@ -99,6 +111,12 @@ class SecureTokenStorageImpl implements SecureTokenStorage {
       }
     } on PlatformException catch (e) {
       debugPrint('[SecureTokenStorage] loadTokens PlatformException: $e');
+      // errSecInteractionNotAllowed (-25308): Keychain locked after reboot.
+      // This does NOT mean tokens are absent — rethrow so checkSession can
+      // distinguish this case and avoid logging the user out.
+      if (e.code == '-25308' || e.code == 'errSecInteractionNotAllowed') {
+        throw KeychainUnavailableException(e.code);
+      }
       return null;
     }
 
@@ -143,6 +161,9 @@ class SecureTokenStorageImpl implements SecureTokenStorage {
       return await _storage.read(key: _kAccessToken);
     } on PlatformException catch (e) {
       debugPrint('[SecureTokenStorage] loadAccessToken PlatformException: $e');
+      if (e.code == '-25308' || e.code == 'errSecInteractionNotAllowed') {
+        throw KeychainUnavailableException(e.code);
+      }
       return null;
     }
   }
@@ -153,6 +174,9 @@ class SecureTokenStorageImpl implements SecureTokenStorage {
       return await _storage.read(key: _kRefreshToken);
     } on PlatformException catch (e) {
       debugPrint('[SecureTokenStorage] loadRefreshToken PlatformException: $e');
+      if (e.code == '-25308' || e.code == 'errSecInteractionNotAllowed') {
+        throw KeychainUnavailableException(e.code);
+      }
       return null;
     }
   }

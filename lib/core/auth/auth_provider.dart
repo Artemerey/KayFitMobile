@@ -9,7 +9,6 @@ import '../api/api_client.dart';
 import '../notifications/notification_service.dart';
 import '../ai_consent/ai_consent_provider.dart';
 import 'onboarding_sync.dart';
-import 'token_pair.dart';
 
 part 'auth_provider.g.dart';
 
@@ -24,13 +23,10 @@ final secureStorageProvider = Provider<SecureTokenStorage>(
   (_) => secureTokenStorage,
 );
 
-@riverpod
+@Riverpod(keepAlive: true)
 class AuthNotifier extends _$AuthNotifier {
   @override
   AsyncValue<UserProfile?> build() {
-    setLogoutCallback(() async {
-      state = const AsyncValue.data(null);
-    });
     return const AsyncValue.loading();
   }
 
@@ -49,9 +45,10 @@ class AuthNotifier extends _$AuthNotifier {
       final pair = await storage.loadTokens();
 
       if (pair == null) {
-        // No tokens at all → not logged in.
+        // No tokens at all → not logged in. Unconditionally set data(null)
+        // so the router redirects to /login regardless of backgroundRefresh.
         await _clearCache();
-        if (!backgroundRefresh) state = const AsyncValue.data(null);
+        state = const AsyncValue.data(null);
         return;
       }
 
@@ -87,16 +84,35 @@ class AuthNotifier extends _$AuthNotifier {
           return;
         }
       } on DioException catch (e) {
+        final isNetworkError =
+            e.type == DioExceptionType.connectionTimeout ||
+            e.type == DioExceptionType.receiveTimeout ||
+            e.type == DioExceptionType.sendTimeout ||
+            e.type == DioExceptionType.connectionError;
+        if (isNetworkError) {
+          rethrow; // caught by outer DioException handler → tokens stay intact
+        }
         debugPrint('[auth] refresh failed: $e');
       }
 
       // Refresh failed or /me still returned null → clear and log out.
+      // Unconditionally set data(null): tokens are dead, there is no point
+      // keeping the UI in a logged-in state even during a background refresh.
       await storage.clearTokens();
       await _clearCache();
-      if (!backgroundRefresh) state = const AsyncValue.data(null);
+      state = const AsyncValue.data(null);
+    } on DioException catch (e) {
+      // H3: network errors — tokens are not compromised, do not log out.
+      debugPrint('[auth] checkSession DioException: $e');
+      // state is intentionally not modified for any DioException.
+    } on KeychainUnavailableException catch (e) {
+      // H5: Keychain locked after reboot — tokens exist but cannot be read yet.
+      // Do not log out; the user will unlock the device and try again.
+      debugPrint('[auth] Keychain unavailable: $e — not logging out');
     } catch (e) {
-      debugPrint('[auth] checkSession error: $e');
-      if (!backgroundRefresh) state = const AsyncValue.data(null);
+      // Unexpected error — fail-safe: do not log the user out for unknown
+      // exceptions to avoid spurious logouts on transient issues.
+      debugPrint('[auth] unexpected checkSession error: $e');
     }
   }
 

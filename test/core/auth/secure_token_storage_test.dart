@@ -21,8 +21,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 class FakeFlutterSecureStorage implements FlutterSecureStorage {
   final Map<String, String> _store = {};
 
-  /// Set to true to simulate a Keychain PlatformException on the next read.
+  /// Set to true to simulate a generic Keychain PlatformException on read.
   bool throwOnRead = false;
+
+  /// Set to true to simulate errSecInteractionNotAllowed (-25308): Keychain
+  /// locked after device reboot before first user unlock.
+  bool throwKeychainUnavailable = false;
 
   // Satisfy interface members not relevant to these tests.
   @override
@@ -76,6 +80,7 @@ class FakeFlutterSecureStorage implements FlutterSecureStorage {
     MacOsOptions? mOptions,
     WindowsOptions? wOptions,
   }) async {
+    if (throwKeychainUnavailable) throw PlatformException(code: '-25308');
     if (throwOnRead) throw PlatformException(code: 'keychain_error');
     return _store[key];
   }
@@ -317,6 +322,50 @@ void main() {
       await storage.saveTokens(_makeTestPair());
       await storage.clearTokens();
       expect(await storage.loadAccessToken(), isNull);
+    });
+  });
+
+  // ── H5: KeychainUnavailableException ─────────────────────────────────────────
+
+  group('KeychainUnavailableException (H5)', () {
+    test('loadTokens throws KeychainUnavailableException when code is -25308',
+        () async {
+      fakeSecure.throwKeychainUnavailable = true;
+
+      expect(
+        () => storage.loadTokens(),
+        throwsA(isA<KeychainUnavailableException>()),
+      );
+    });
+
+    test('loadTokens returns null for other PlatformException codes', () async {
+      fakeSecure.throwOnRead = true;
+
+      final result = await storage.loadTokens();
+
+      expect(result, isNull);
+    });
+
+    test(
+        'loadAccessToken throws KeychainUnavailableException when code is -25308',
+        () async {
+      fakeSecure.throwKeychainUnavailable = true;
+
+      expect(
+        () => storage.loadAccessToken(),
+        throwsA(isA<KeychainUnavailableException>()),
+      );
+    });
+
+    test(
+        'loadRefreshToken throws KeychainUnavailableException when code is -25308',
+        () async {
+      fakeSecure.throwKeychainUnavailable = true;
+
+      expect(
+        () => storage.loadRefreshToken(),
+        throwsA(isA<KeychainUnavailableException>()),
+      );
     });
   });
 }

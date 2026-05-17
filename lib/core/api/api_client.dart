@@ -21,11 +21,6 @@ late Dio apiDio;
 // AuthNotifier to avoid circular-dependency issues.
 late SecureTokenStorage secureTokenStorage;
 
-typedef LogoutCallback = Future<void> Function();
-LogoutCallback? _onLogout;
-
-void setLogoutCallback(LogoutCallback cb) => _onLogout = cb;
-
 Future<void> initApiClient({
   SecureTokenStorage? storage,
   @visibleForTesting RefreshDioFactory? refreshDioFactory,
@@ -211,8 +206,11 @@ class _AuthInterceptor extends Interceptor {
   }
 
   Future<void> _handleLogout() async {
+    // Only clear tokens. AuthNotifier detects the absence of tokens on the
+    // next checkSession call (triggered via H2 WidgetsBindingObserver on
+    // resumed, or on the next API-driven auth check). There is no global
+    // callback — that was a race-condition source (H4).
     await _storage.clearTokens();
-    await _onLogout?.call();
   }
 }
 

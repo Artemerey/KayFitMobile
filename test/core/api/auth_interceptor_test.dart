@@ -94,7 +94,6 @@ void main() {
 
   setUp(() {
     fakeStorage = FakeSecureTokenStorage();
-    setLogoutCallback(() async {});
   });
 
   // ── onRequest ─────────────────────────────────────────────────────────────
@@ -193,10 +192,11 @@ void main() {
       expect(fakeStorage.saveCount, equals(1));
     });
 
-    test('clears tokens and calls logout when refresh returns 401', () async {
+    test('clears tokens (only) when refresh returns 401', () async {
+      // H4: _handleLogout no longer calls a global logout callback.
+      // It only clears tokens; AuthNotifier detects the absence on next
+      // checkSession (triggered via WidgetsBindingObserver on resumed).
       fakeStorage.seed(_validPair());
-      bool logoutCalled = false;
-      setLogoutCallback(() async => logoutCalled = true);
 
       final refreshAdapter = MockClientAdapter(
         (_) async => _jsonResponse('{}', 401),
@@ -218,15 +218,12 @@ void main() {
         await apiDio.get('/api/v1/protected');
       } on DioException catch (_) {}
 
-      expect(logoutCalled, isTrue);
       expect(fakeStorage.clearCount, greaterThan(0));
       expect(await fakeStorage.loadAccessToken(), isNull);
     });
 
-    test('401 on auth path is not intercepted (no logout)', () async {
+    test('401 on auth path is not intercepted (no token clear)', () async {
       fakeStorage.seed(_validPair());
-      bool logoutCalled = false;
-      setLogoutCallback(() async => logoutCalled = true);
 
       await initApiClient(storage: fakeStorage, refreshDioFactory: () => Dio());
       apiDio.httpClientAdapter = MockClientAdapter(
@@ -237,15 +234,12 @@ void main() {
         await apiDio.post('/api/v1/auth/login', data: {});
       } on DioException catch (_) {}
 
-      // Auth paths should NOT trigger logout.
-      expect(logoutCalled, isFalse);
+      // Auth paths should NOT trigger token clear.
       expect(fakeStorage.clearCount, equals(0));
     });
 
     test('network timeout on refresh does NOT clear tokens', () async {
       fakeStorage.seed(_validPair());
-      bool logoutCalled = false;
-      setLogoutCallback(() async => logoutCalled = true);
 
       final refreshAdapter = MockClientAdapter((_) async {
         throw DioException(
@@ -270,26 +264,30 @@ void main() {
         await apiDio.get('/api/v1/protected');
       } catch (_) {}
 
-      // Timeout → session may still be valid; do NOT logout.
-      expect(logoutCalled, isFalse);
+      // Timeout → session may still be valid; tokens must not be cleared.
       expect(fakeStorage.clearCount, equals(0));
     });
 
-    test('no refresh token → immediate logout', () async {
+    test('no refresh token → clears tokens immediately', () async {
       // fakeStorage is empty — no token.
-      bool logoutCalled = false;
-      setLogoutCallback(() async => logoutCalled = true);
-
+      // H4: no logout callback; _handleLogout only clears tokens.
+      // Since storage is empty, clearCount stays 0 but the 401 propagates.
       await initApiClient(storage: fakeStorage, refreshDioFactory: () => Dio());
       apiDio.httpClientAdapter = MockClientAdapter(
         (_) async => _jsonResponse('{}', 401),
       );
 
+      DioException? thrown;
       try {
         await apiDio.get('/api/v1/protected');
-      } catch (_) {}
+      } on DioException catch (e) {
+        thrown = e;
+      }
 
-      expect(logoutCalled, isTrue);
+      // The 401 should have propagated as a DioException.
+      expect(thrown, isNotNull);
+      // clearTokens called once (even though storage was empty — idempotent).
+      expect(fakeStorage.clearCount, equals(1));
     });
   });
 }

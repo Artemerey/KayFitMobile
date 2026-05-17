@@ -61,10 +61,12 @@ class _AppInit extends ConsumerStatefulWidget {
   ConsumerState<_AppInit> createState() => _AppInitState();
 }
 
-class _AppInitState extends ConsumerState<_AppInit> {
+class _AppInitState extends ConsumerState<_AppInit>
+    with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final notifier = ref.read(authNotifierProvider.notifier);
@@ -73,6 +75,22 @@ class _AppInitState extends ConsumerState<_AppInit> {
       }
       notifier.checkSession(backgroundRefresh: widget.cachedUser != null);
     });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // backgroundRefresh: true — user sees the existing UI, no loading flash.
+      ref
+          .read(authNotifierProvider.notifier)
+          .checkSession(backgroundRefresh: true);
+    }
   }
 
   @override
