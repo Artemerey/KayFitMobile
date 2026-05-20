@@ -52,6 +52,10 @@ class _EditMealScreenState extends ConsumerState<EditMealScreen>
   double _origCarbs = 0;
   double _origWeight = 0;
 
+  // Actual date of the meal (YYYY-MM-DD), used to invalidate the correct
+  // journal provider after save. Falls back to today if unknown.
+  String? _mealDateKey;
+
   Timer? _weightDebounce;
 
   @override
@@ -88,8 +92,11 @@ class _EditMealScreenState extends ConsumerState<EditMealScreen>
     _weightDebounce?.cancel();
     _weightDebounce = Timer(const Duration(milliseconds: 300), () {
       final newW = double.tryParse(_weightCtrl.text.trim());
-      if (newW == null || newW <= 0 || _origWeight <= 0) return;
-      if (newW == _origWeight) return;
+      if (newW == null || newW <= 0) return;
+      // Only scale macros proportionally when the original weight is known.
+      // When _origWeight == 0 (no weight was stored), weight is saved as-is
+      // without touching the manually-entered macro values.
+      if (_origWeight <= 0 || newW == _origWeight) return;
       final ratio = newW / _origWeight;
       _caloriesCtrl.text = (_origCalories * ratio).toStringAsFixed(1);
       _proteinCtrl.text = (_origProtein * ratio).toStringAsFixed(1);
@@ -101,7 +108,12 @@ class _EditMealScreenState extends ConsumerState<EditMealScreen>
 
   Future<void> _loadMeal() async {
     try {
-      final resp = await apiDio.get('/api/meals');
+      // Use the history endpoint so meals from any date can be loaded, not
+      // just today's. Limit=500 matches what journalDayMealsProvider fetches.
+      final resp = await apiDio.get(
+        '/api/meals/history',
+        queryParameters: {'limit': 500},
+      );
       final list = resp.data as List<dynamic>;
       final meal = list
           .cast<Map<String, dynamic>>()
@@ -120,6 +132,17 @@ class _EditMealScreenState extends ConsumerState<EditMealScreen>
       _origFat = (meal['fat'] as num).toDouble();
       _origCarbs = (meal['carbs'] as num).toDouble();
       _origWeight = w?.toDouble() ?? 0;
+
+      // Capture the meal's actual date so we invalidate the right provider.
+      final timeRaw = meal['time'] as String?;
+      if (timeRaw != null) {
+        final dt = DateTime.tryParse(timeRaw)?.toLocal();
+        if (dt != null) {
+          _mealDateKey = '${dt.year.toString().padLeft(4, '0')}-'
+              '${dt.month.toString().padLeft(2, '0')}-'
+              '${dt.day.toString().padLeft(2, '0')}';
+        }
+      }
     } catch (_) {
       // leave fields empty
     } finally {
@@ -164,21 +187,25 @@ class _EditMealScreenState extends ConsumerState<EditMealScreen>
       AnalyticsService.editMealSaved(widget.mealId);
 
       // Invalidate everything that displays this meal — list rows, totals, rings.
-      // Force-await the futures so the journal/dashboard render fresh data on
-      // the very next frame, not while a refetch is still in flight.
+      // Use the meal's actual date (captured on load) so journal providers for
+      // past dates are also refreshed correctly. Falls back to today.
       final today = DateTime.now();
       final todayIso = '${today.year.toString().padLeft(4, '0')}-'
           '${today.month.toString().padLeft(2, '0')}-'
           '${today.day.toString().padLeft(2, '0')}';
+      final mealDateIso = _mealDateKey ?? todayIso;
       ref.invalidate(todayStatsProvider);
       ref.invalidate(todayMealsProvider);
-      ref.invalidate(journalDayMealsProvider(todayIso));
+      ref.invalidate(journalDayMealsProvider(mealDateIso));
+      if (mealDateIso != todayIso) {
+        ref.invalidate(journalDayMealsProvider(todayIso));
+      }
       ref.invalidate(dailyKcalHistoryProvider);
       try {
         await Future.wait([
           ref.read(todayStatsProvider.future),
           ref.read(todayMealsProvider.future),
-          ref.read(journalDayMealsProvider(todayIso).future),
+          ref.read(journalDayMealsProvider(mealDateIso).future),
           ref.read(dailyKcalHistoryProvider.future),
         ]);
       } catch (_) {
