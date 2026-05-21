@@ -93,15 +93,27 @@ class _EditMealScreenState extends ConsumerState<EditMealScreen>
     _weightDebounce = Timer(const Duration(milliseconds: 300), () {
       final newW = double.tryParse(_weightCtrl.text.trim());
       if (newW == null || newW <= 0) return;
-      // Only scale macros proportionally when the original weight is known.
-      // When _origWeight == 0 (no weight was stored), weight is saved as-is
-      // without touching the manually-entered macro values.
-      if (_origWeight <= 0 || newW == _origWeight) return;
-      final ratio = newW / _origWeight;
+      if (newW == _origWeight) return; // no change
+      // When `_origWeight` is known, scale from it. Otherwise — legacy meals
+      // without a stored weight — fall back to a 100 g baseline so the user
+      // still gets proportional updates: typing 200 doubles the macros,
+      // typing 50 halves them. The first edit they make becomes the new
+      // baseline below, so subsequent edits scale from THAT value.
+      final baseline = _origWeight > 0 ? _origWeight : 100.0;
+      final ratio = newW / baseline;
       _caloriesCtrl.text = (_origCalories * ratio).toStringAsFixed(1);
       _proteinCtrl.text = (_origProtein * ratio).toStringAsFixed(1);
       _fatCtrl.text = (_origFat * ratio).toStringAsFixed(1);
       _carbsCtrl.text = (_origCarbs * ratio).toStringAsFixed(1);
+      // Re-baseline so that further edits compute against the user's most
+      // recent confirmed numbers, not the original (which they've now
+      // overridden). Without this, typing 200 → 250 → 300 would re-derive
+      // each value from the ORIGINAL macros rather than chaining smoothly.
+      _origCalories = double.parse(_caloriesCtrl.text);
+      _origProtein = double.parse(_proteinCtrl.text);
+      _origFat = double.parse(_fatCtrl.text);
+      _origCarbs = double.parse(_carbsCtrl.text);
+      _origWeight = newW;
       // _onMacroChanged fires automatically via listeners — updates preview
     });
   }

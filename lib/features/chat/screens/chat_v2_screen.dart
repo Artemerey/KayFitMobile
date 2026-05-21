@@ -41,6 +41,8 @@ import '../../../features/dashboard/providers/dashboard_provider.dart';
 import '../../../features/journal/screens/journal_screen.dart'
     show journalDayMealsProvider;
 import '../../../shared/models/ingredient_v2.dart';
+import '../../../shared/models/nutrients_v2.dart';
+import '../providers/pending_meal_provider.dart';
 import '../../../shared/models/stats.dart';
 import '../../../shared/theme/kayfit2_theme.dart';
 import '../../../shared/utils/nutrient_parser.dart';
@@ -83,19 +85,22 @@ class ChatV2Screen extends ConsumerStatefulWidget {
   ConsumerState<ChatV2Screen> createState() => _ChatV2ScreenState();
 }
 
-class _ChatV2ScreenState extends ConsumerState<ChatV2Screen> {
+class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
+    with WidgetsBindingObserver {
   final _scrollController = ScrollController();
   final _textController = TextEditingController();
+
+  /// Last seen bottom view inset (keyboard height in logical pixels).
+  /// Used by [didChangeMetrics] to detect keyboard appearance and autoscroll
+  /// so the latest message stays visible above the keyboard.
+  double _lastBottomInset = 0;
 
   final List<ChatMessage> _messages = [];
   _ThinkingState? _thinking;
 
-  /// In-memory pending "Add to journal" card shown after a food-intent
-  /// message is parsed. Not persisted in chat history; cleared on
-  /// confirm/cancel/restart.
-  List<IngredientV2>? _pendingMealItems;
-  String _pendingMealType = 'snack';
-  bool _isAddingMeal = false;
+  // Pending "Add to journal" card state lives in `pendingMealProvider` so it
+  // survives navigation away from chat (e.g. tab switch to journal).
+  // Cleared on confirm/cancel/restart through the notifier API.
 
   /// Set when the assistant just asked the user to clarify a meal
   /// (type/portion). The next user message is then routed to the meal
@@ -180,6 +185,7 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     try {
       AnalyticsService.chatOpened();
     } catch (_) {}
@@ -188,10 +194,31 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _scrollController.dispose();
     _textController.dispose();
     _recorder.dispose();
     super.dispose();
+  }
+
+  /// Keep the latest message visible when the keyboard opens.
+  ///
+  /// `Scaffold.resizeToAvoidBottomInset` (default true) shrinks the body but
+  /// doesn't move the list's scroll offset — so the bottom message slides under
+  /// the keyboard. We watch for the bottom inset growing and scroll to the
+  /// end. The postFrame inside `_scrollToBottom` covers the one-frame inset
+  /// lag we see on Android.
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final bottom = MediaQuery.of(context).viewInsets.bottom;
+      if (bottom > _lastBottomInset + 1) {
+        _scrollToBottom();
+      }
+      _lastBottomInset = bottom;
+    });
   }
 
   // ── Data loading ────────────────────────────────────────────────────────────
@@ -486,11 +513,10 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen> {
       }
 
       if (!mounted) return false;
-      setState(() {
-        _thinking = null;
-        _pendingMealItems = items;
-        _pendingMealType = _inferMealTypeForNow();
-      });
+      setState(() => _thinking = null);
+      ref
+          .read(pendingMealProvider.notifier)
+          .setMeal(items, _inferMealTypeForNow());
       _scrollToBottom();
       return true;
     } on Exception {
@@ -550,9 +576,9 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen> {
     } else if (proPct < 0.5 && proGoal > 0) {
       advice = isRu
           ? 'Белка пока маловато — ${pro.round()} из ${proGoal.round()} г.'
-              ' Следующий приём пищи сделай белковым: яйца, творог, куриная грудка, рыба.'
+              ' Следующий приём пищи сделай белковым.'
           : 'Protein is low — ${pro.round()} / ${proGoal.round()} g.'
-              ' Make your next meal protein-rich: eggs, cottage cheese, chicken, or fish.';
+              ' Make your next meal protein-rich.';
     } else if (calPct > 0.85 && proPct >= 0.9) {
       advice = isRu
           ? 'Отличный баланс! ${cal.round()} / ${calGoal.round()} ккал, белок в норме (${pro.round()} г).'
@@ -581,9 +607,10 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen> {
   /// dashboard/journal providers, replaces the preview with a synthetic
   /// "✓ added" assistant message (local-only, not persisted on backend).
   Future<void> _confirmAddPendingMeal() async {
-    final pending = _pendingMealItems;
-    if (pending == null || pending.isEmpty || _isAddingMeal) return;
-    setState(() => _isAddingMeal = true);
+    final pendingState = ref.read(pendingMealProvider);
+    final pending = pendingState.items;
+    if (pending == null || pending.isEmpty || pendingState.isAdding) return;
+    ref.read(pendingMealProvider.notifier).setAdding(true);
     HapticFeedback.mediumImpact();
 
     try {
@@ -615,7 +642,7 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen> {
       await apiDio.post('/api/meals/add_selected', data: {
         'items': items,
         'dish_name': pending.map((i) => i.name).join(', '),
-        'meal_type': _pendingMealType,
+        'meal_type': pendingState.mealType,
       });
 
       // Refresh everything that displays meal data.
@@ -650,12 +677,40 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen> {
         );
       }
 
-      final reply = _buildCoachMessage(
-        stats: freshStats,
-        dishLabel: dishLabel,
-        isRu: isRu,
-        addedKcal: totalKcal,
-      );
+      // Ask the backend coach for a history-aware reply. The hardcoded
+      // `_buildCoachMessage` template named specific foods like "fish" even
+      // when the user had no fish in their history — see /api/coach/advice
+      // which feeds `frequent_meals` (last 30 days) into the prompt.
+      // Falls back to the local template on any network/Claude failure.
+      String? backendAdvice;
+      try {
+        final advResp = await apiDio.post(
+          '/api/coach/advice',
+          data: {
+            'meal_names': pending.map((i) => i.name).toList(),
+            'total_calories': totalKcal,
+          },
+        );
+        backendAdvice = (advResp.data['advice'] as String?)?.trim();
+        if (backendAdvice != null && backendAdvice.isEmpty) {
+          backendAdvice = null;
+        }
+      } on Exception {
+        // network/Claude timeout — fall back to client template below
+        backendAdvice = null;
+      }
+
+      final confirmLine = isRu
+          ? '✓ Добавлено: $dishLabel — ${totalKcal.round()} ккал'
+          : '✓ Added: $dishLabel — ${totalKcal.round()} kcal';
+      final reply = backendAdvice != null
+          ? '$confirmLine\n\n$backendAdvice'
+          : _buildCoachMessage(
+              stats: freshStats,
+              dishLabel: dishLabel,
+              isRu: isRu,
+              addedKcal: totalKcal,
+            );
 
       if (!mounted) return;
       final addedMsg = ChatMessage(
@@ -663,10 +718,8 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen> {
         content: reply,
         createdAt: DateTime.now(),
       );
-      setState(() {
-        _pendingMealItems = null;
-        _messages.add(addedMsg);
-      });
+      ref.read(pendingMealProvider.notifier).clear();
+      setState(() => _messages.add(addedMsg));
       unawaited(_persistLocalMessage(addedMsg));
       try {
         AnalyticsService.mealSaved(
@@ -688,8 +741,132 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen> {
         ),
       );
     } finally {
-      if (mounted) setState(() => _isAddingMeal = false);
+      if (mounted) ref.read(pendingMealProvider.notifier).setAdding(false);
     }
+  }
+
+  /// Per-item "Correct" handler. Opens a sheet so the user can fix a wrong
+  /// name, weight, or KBJU on a single line of the pending meal card.
+  ///
+  /// Resolution order:
+  ///   1. Name changed → re-search via /api/v2/parse_meal_suggestions; the
+  ///      returned item replaces this slot. Other items stay.
+  ///   2. Otherwise, if KBJU changed → derive a new `nutrientsPer100g` from
+  ///      the user's totals and weight (so subsequent weight edits still
+  ///      scale correctly).
+  ///   3. Otherwise, if only weight changed → `item.withWeight(...)`.
+  Future<void> _onEditPendingItem(int index) async {
+    final items = ref.read(pendingMealProvider).items;
+    if (items == null || index < 0 || index >= items.length) return;
+    final original = items[index];
+
+    final result = await showModalBottomSheet<_EditPendingItemResult>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetCtx) => _EditPendingItemSheet(original: original),
+    );
+    if (result == null || !mounted) return;
+
+    final nameChanged = result.name.trim() != original.name.trim();
+    final weightChanged =
+        (result.weightGrams - original.weightGrams).abs() > 0.5;
+    final origTotals = original.nutrientsTotal;
+    final kbjuChanged =
+        (result.calories - origTotals.calories).abs() > 0.5 ||
+            (result.protein - origTotals.protein).abs() > 0.05 ||
+            (result.fat - origTotals.fat).abs() > 0.05 ||
+            (result.carbs - origTotals.carbs).abs() > 0.05;
+
+    IngredientV2? updated;
+
+    if (nameChanged) {
+      // DB re-search for the new name. Show a brief snackbar on miss/error.
+      final lang =
+          Localizations.localeOf(context).languageCode == 'ru' ? 'ru' : 'en';
+      final isRu = lang == 'ru';
+      try {
+        final resp = await apiDio.post(
+          '/api/v2/parse_meal_suggestions',
+          data: {'text': result.name, 'language': lang},
+        );
+        final raw = (resp.data['items'] as List?)
+            ?.cast<Map<String, dynamic>>();
+        if (raw == null || raw.isEmpty) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(
+                isRu
+                    ? 'Не нашли «${result.name}» в базе'
+                    : 'Couldn\'t find "${result.name}"',
+              ),
+              behavior: SnackBarBehavior.floating,
+            ));
+          }
+          return;
+        }
+        // Trust the user's weight if they typed one different from original;
+        // else use the backend's suggested portion.
+        final suggestedW =
+            (raw.first['weight_grams'] as num?)?.toDouble() ??
+                result.weightGrams;
+        final useW = weightChanged ? result.weightGrams : suggestedW;
+        updated = ingredientV2FromSuggestion(raw.first, useW);
+      } on Exception {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(isRu
+                ? 'Не удалось обновить — попробуй ещё раз'
+                : 'Could not update — please try again'),
+            behavior: SnackBarBehavior.floating,
+            backgroundColor: K2Colors.error,
+          ));
+        }
+        return;
+      }
+    } else if (kbjuChanged) {
+      // Manual KBJU override. Derive per-100g for the 4 macros from the
+      // user's totals so future weight tweaks still scale correctly. Other
+      // nutrient fields (fiber, sodium, vitamins) are preserved as-is on
+      // the per-100g object — they'll be re-scaled when totals are recomputed.
+      final w = result.weightGrams > 0 ? result.weightGrams : 100.0;
+      final factor = 100.0 / w;
+      final origPer100 = original.nutrientsPer100g;
+      final newPer100 = NutrientsV2(
+        calories: result.calories * factor,
+        protein: result.protein * factor,
+        fat: result.fat * factor,
+        carbs: result.carbs * factor,
+        fiber: origPer100.fiber,
+        sugar: origPer100.sugar,
+        sugarAlcohols: origPer100.sugarAlcohols,
+        netCarbs: origPer100.netCarbs,
+        saturatedFat: origPer100.saturatedFat,
+        monounsaturatedFat: origPer100.monounsaturatedFat,
+        polyunsaturatedFat: origPer100.polyunsaturatedFat,
+        sodiumMg: origPer100.sodiumMg,
+        cholesterolMg: origPer100.cholesterolMg,
+        potassiumMg: origPer100.potassiumMg,
+        calciumMg: origPer100.calciumMg,
+        ironMg: origPer100.ironMg,
+        vitaminAMcg: origPer100.vitaminAMcg,
+        vitaminCMg: origPer100.vitaminCMg,
+        vitaminDMcg: origPer100.vitaminDMcg,
+        glycemicIndex: origPer100.glycemicIndex,
+        glycemicIndexCategory: origPer100.glycemicIndexCategory,
+      );
+      // `withWeight` rebuilds nutrientsTotal from per-100g and the supplied
+      // weight, so the manually entered macro totals are honored exactly.
+      updated = original
+          .copyWith(nutrientsPer100g: newPer100)
+          .withWeight(w);
+    } else if (weightChanged) {
+      updated = original.withWeight(result.weightGrams);
+    } else {
+      return; // nothing actually changed
+    }
+
+    ref.read(pendingMealProvider.notifier).replaceItem(index, updated);
   }
 
   void _cancelPendingMeal() {
@@ -701,10 +878,8 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen> {
       content: isRu ? 'Окей, не добавляю.' : 'Okay, skipping.',
       createdAt: DateTime.now(),
     );
-    setState(() {
-      _pendingMealItems = null;
-      _messages.add(cancelMsg);
-    });
+    ref.read(pendingMealProvider.notifier).clear();
+    setState(() => _messages.add(cancelMsg));
     unawaited(_persistLocalMessage(cancelMsg));
     _scrollToBottom();
   }
@@ -726,7 +901,10 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen> {
   /// Opens the KF2 capture screen, waits for a photo, then shows the
   /// recognizing screen. On successful save, adds a coaching message to chat.
   Future<void> _handleCamera() async {
+    debugPrint('KF2-CHAT: _handleCamera start, pushing /kf2/capture');
     final photo = await context.push<XFile>('/kf2/capture');
+    debugPrint(
+        'KF2-CHAT: /kf2/capture returned photo=${photo?.path} mounted=$mounted');
     if (!mounted) return;
     if (photo == null) return;
 
@@ -734,6 +912,7 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen> {
     // and capture the dish name — GoRouter's push<String> can't receive a
     // String from Kf2RecognizingScreen which internally uses pushReplacement.
     String? savedDishName;
+    debugPrint('KF2-CHAT: pushing Kf2RecognizingScreen');
     await Navigator.of(context).push<bool>(
       MaterialPageRoute<bool>(
         fullscreenDialog: true,
@@ -743,6 +922,8 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen> {
         ),
       ),
     );
+    debugPrint(
+        'KF2-CHAT: Kf2RecognizingScreen popped, savedDishName=$savedDishName');
     if (!mounted || savedDishName == null) return;
 
     // RecognitionResultSheetKF2 already invalidated todayStatsProvider.
@@ -939,6 +1120,7 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen> {
   @override
   Widget build(BuildContext context) {
     const t = K2Theme.light;
+    final pendingMeal = ref.watch(pendingMealProvider);
 
     return Scaffold(
       backgroundColor: t.bg,
@@ -996,15 +1178,16 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen> {
             ),
 
             // ── Pending meal confirm card ──────────────────────────────────
-            if (_pendingMealItems != null)
+            if (pendingMeal.isActive)
               _PendingMealCard(
-                items: _pendingMealItems!,
-                mealType: _pendingMealType,
-                onMealTypeChanged: (mt) =>
-                    setState(() => _pendingMealType = mt),
-                isAdding: _isAddingMeal,
+                items: pendingMeal.items!,
+                mealType: pendingMeal.mealType,
+                onMealTypeChanged:
+                    ref.read(pendingMealProvider.notifier).setMealType,
+                isAdding: pendingMeal.isAdding,
                 onAdd: _confirmAddPendingMeal,
                 onCancel: _cancelPendingMeal,
+                onEditItem: _onEditPendingItem,
                 theme: t,
               ),
 
@@ -1845,6 +2028,7 @@ class _PendingMealCard extends StatelessWidget {
     required this.isAdding,
     required this.onAdd,
     required this.onCancel,
+    required this.onEditItem,
     required this.theme,
   });
 
@@ -1854,6 +2038,11 @@ class _PendingMealCard extends StatelessWidget {
   final bool isAdding;
   final VoidCallback onAdd;
   final VoidCallback onCancel;
+
+  /// Triggered when the user taps the pencil on a row. The handler shows the
+  /// edit bottom-sheet, possibly re-searches the DB on name change, and
+  /// updates the pending-meal provider.
+  final void Function(int index) onEditItem;
   final K2Theme theme;
 
   static const _kMealTypes = ['breakfast', 'lunch', 'snack', 'dinner'];
@@ -1913,34 +2102,63 @@ class _PendingMealCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
-          for (final i in items)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 3),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      '${i.name} (${i.weightGrams.toStringAsFixed(0)}${isRu ? "г" : "g"})',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: theme.fgDim,
-                        fontFamily: K2Fonts.sans,
+          // Cap the items section so a long voice-parsed meal can't squeeze
+          // the chat ListView to zero height. ~120 logical px shows about
+          // 4 items at once; the rest is reachable via inner scroll.
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 120),
+            child: ListView.builder(
+              shrinkWrap: true,
+              padding: EdgeInsets.zero,
+              itemCount: items.length,
+              itemBuilder: (_, idx) {
+                final i = items[idx];
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '${i.name} (${i.weightGrams.toStringAsFixed(0)}${isRu ? "г" : "g"})',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: theme.fgDim,
+                            fontFamily: K2Fonts.sans,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                      Text(
+                        '${i.nutrientsTotal.calories.round()}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: theme.fgDim,
+                          fontFamily: K2Fonts.mono,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      // Pencil — opens the per-item edit sheet (name / weight /
+                      // KBJU). Disabled while the parent is mid-save to avoid
+                      // racing with /api/meals/add_selected.
+                      GestureDetector(
+                        onTap: isAdding ? null : () => onEditItem(idx),
+                        behavior: HitTestBehavior.opaque,
+                        child: Padding(
+                          padding: const EdgeInsets.all(4),
+                          child: Icon(
+                            Icons.edit_outlined,
+                            size: 16,
+                            color: isAdding ? theme.fgMute : theme.fgDim,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  Text(
-                    '${i.nutrientsTotal.calories.round()}',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: theme.fgDim,
-                      fontFamily: K2Fonts.mono,
-                    ),
-                  ),
-                ],
-              ),
+                );
+              },
             ),
+          ),
           const SizedBox(height: 6),
           Text(
             'P ${totalP.round()} · F ${totalF.round()} · C ${totalC.round()}',
@@ -2145,6 +2363,305 @@ class _ChatDisclaimerBanner extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Per-item edit sheet for the pending meal card
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Snapshot of the user's edits returned by [_EditPendingItemSheet]. The
+/// chat handler compares against the original to decide whether to re-search
+/// the DB (name change), override per-100g macros (KBJU change), or just
+/// re-scale on weight.
+class _EditPendingItemResult {
+  const _EditPendingItemResult({
+    required this.name,
+    required this.weightGrams,
+    required this.calories,
+    required this.protein,
+    required this.fat,
+    required this.carbs,
+  });
+
+  final String name;
+  final double weightGrams;
+  final double calories;
+  final double protein;
+  final double fat;
+  final double carbs;
+}
+
+class _EditPendingItemSheet extends StatefulWidget {
+  const _EditPendingItemSheet({required this.original});
+
+  final IngredientV2 original;
+
+  @override
+  State<_EditPendingItemSheet> createState() => _EditPendingItemSheetState();
+}
+
+class _EditPendingItemSheetState extends State<_EditPendingItemSheet> {
+  late final TextEditingController _nameCtrl;
+  late final TextEditingController _weightCtrl;
+  late final TextEditingController _calCtrl;
+  late final TextEditingController _proCtrl;
+  late final TextEditingController _fatCtrl;
+  late final TextEditingController _carbCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    final o = widget.original;
+    _nameCtrl = TextEditingController(text: o.name);
+    _weightCtrl = TextEditingController(text: o.weightGrams.toStringAsFixed(0));
+    _calCtrl = TextEditingController(
+        text: o.nutrientsTotal.calories.toStringAsFixed(0));
+    _proCtrl = TextEditingController(
+        text: o.nutrientsTotal.protein.toStringAsFixed(1));
+    _fatCtrl = TextEditingController(
+        text: o.nutrientsTotal.fat.toStringAsFixed(1));
+    _carbCtrl = TextEditingController(
+        text: o.nutrientsTotal.carbs.toStringAsFixed(1));
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _weightCtrl.dispose();
+    _calCtrl.dispose();
+    _proCtrl.dispose();
+    _fatCtrl.dispose();
+    _carbCtrl.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final name = _nameCtrl.text.trim();
+    if (name.isEmpty) return;
+    final weight = double.tryParse(_weightCtrl.text.trim());
+    final cal = double.tryParse(_calCtrl.text.trim());
+    final pro = double.tryParse(_proCtrl.text.trim());
+    final fat = double.tryParse(_fatCtrl.text.trim());
+    final carb = double.tryParse(_carbCtrl.text.trim());
+    if (weight == null || weight <= 0 ||
+        cal == null || pro == null || fat == null || carb == null) {
+      return; // invalid input — silently keep sheet open
+    }
+    Navigator.of(context).pop(_EditPendingItemResult(
+      name: name,
+      weightGrams: weight,
+      calories: cal,
+      protein: pro,
+      fat: fat,
+      carbs: carb,
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const t = K2Theme.light;
+    final isRu = Localizations.localeOf(context).languageCode == 'ru';
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: Container(
+        margin: const EdgeInsets.all(12),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+        decoration: BoxDecoration(
+          color: t.surface,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                isRu ? 'Скорректировать' : 'Correct item',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: t.fg,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                isRu
+                    ? 'Изменишь название — заново найдём в базе. Менять можно и КБЖУ напрямую.'
+                    : 'Change the name to re-search the DB. KBJU can also be edited directly.',
+                style: TextStyle(fontSize: 11, color: t.fgMute),
+              ),
+              const SizedBox(height: 14),
+              _SheetField(
+                label: isRu ? 'Название' : 'Name',
+                controller: _nameCtrl,
+                keyboardType: TextInputType.text,
+              ),
+              const SizedBox(height: 10),
+              _SheetField(
+                label: isRu ? 'Вес, г' : 'Weight, g',
+                controller: _weightCtrl,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: false),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: _SheetField(
+                      label: isRu ? 'Ккал' : 'Kcal',
+                      controller: _calCtrl,
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _SheetField(
+                      label: isRu ? 'Белки' : 'Protein',
+                      controller: _proCtrl,
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: _SheetField(
+                      label: isRu ? 'Жиры' : 'Fat',
+                      controller: _fatCtrl,
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _SheetField(
+                      label: isRu ? 'Углеводы' : 'Carbs',
+                      controller: _carbCtrl,
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => Navigator.of(context).pop(),
+                      child: Container(
+                        height: 42,
+                        decoration: BoxDecoration(
+                          color: t.bg,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: t.border),
+                        ),
+                        child: Center(
+                          child: Text(
+                            isRu ? 'Отмена' : 'Cancel',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                              color: t.fgDim,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    flex: 2,
+                    child: GestureDetector(
+                      onTap: _submit,
+                      child: Container(
+                        height: 42,
+                        decoration: BoxDecoration(
+                          color: t.fg,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Center(
+                          child: Text(
+                            isRu ? 'Сохранить' : 'Save',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: t.bg,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SheetField extends StatelessWidget {
+  const _SheetField({
+    required this.label,
+    required this.controller,
+    required this.keyboardType,
+  });
+
+  final String label;
+  final TextEditingController controller;
+  final TextInputType keyboardType;
+
+  @override
+  Widget build(BuildContext context) {
+    const t = K2Theme.light;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            color: t.fgMute,
+            letterSpacing: 0.3,
+          ),
+        ),
+        const SizedBox(height: 2),
+        TextField(
+          controller: controller,
+          keyboardType: keyboardType,
+          style: TextStyle(
+            fontSize: 14,
+            color: t.fg,
+            fontFamily: K2Fonts.sans,
+          ),
+          decoration: InputDecoration(
+            isDense: true,
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: t.border),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: t.fg),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

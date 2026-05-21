@@ -203,6 +203,120 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
     }
   }
 
+  /// Tracks in-flight copy requests so a double long-press doesn't fire the
+  /// same copy twice.
+  bool _isCopying = false;
+
+  /// Long-press handler — confirms the intent, picks a target date, copies
+  /// the meal, refreshes the affected day's provider, shows a snackbar with
+  /// a CTA back to that date.
+  Future<void> _onCopyTapped(String idStr) async {
+    final intId = int.tryParse(idStr);
+    if (intId == null || _isCopying) return;
+    HapticFeedback.selectionClick();
+    final isRu = Localizations.localeOf(context).languageCode == 'ru';
+    final confirmed = await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetCtx) => _CopyMealActionSheet(isRu: isRu),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final today = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: today,
+      firstDate: today.subtract(const Duration(days: 365)),
+      lastDate: today.add(const Duration(days: 365)),
+      helpText: isRu ? 'Дата копии' : 'Copy to date',
+      cancelText: isRu ? 'Отмена' : 'Cancel',
+      confirmText: isRu ? 'Копировать' : 'Copy',
+    );
+    if (picked == null || !mounted) return;
+
+    final targetIso =
+        '${picked.year.toString().padLeft(4, '0')}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
+    await _copyMealToDate(intId, targetIso, isRu: isRu);
+  }
+
+  Future<void> _copyMealToDate(
+    int mealId,
+    String targetIso, {
+    required bool isRu,
+  }) async {
+    setState(() => _isCopying = true);
+    try {
+      await apiDio.post(
+        '/api/meals/$mealId/copy',
+        data: {'target_date': targetIso},
+      );
+      // Refresh the destination day so a switch via the snackbar CTA shows
+      // the copied meal. The source day doesn't change.
+      ref.invalidate(journalDayMealsProvider(targetIso));
+      ref.invalidate(dailyKcalHistoryProvider);
+      // If the copy landed on the currently-visible day, the watch above
+      // will rebuild it automatically; nothing extra needed.
+      if (!mounted) return;
+      final humanDate = _humanReadableDate(targetIso, isRu: isRu);
+      HapticFeedback.lightImpact();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            isRu ? 'Скопировано на $humanDate' : 'Copied to $humanDate',
+          ),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 4),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+          action: SnackBarAction(
+            label: isRu ? 'Перейти' : 'Open',
+            onPressed: () {
+              if (!mounted) return;
+              // `_dateKey` is a getter over `_calSelected`, so updating
+              // the latter is enough to re-watch the new date.
+              setState(() => _calSelected = targetIso);
+            },
+          ),
+        ),
+      );
+    } on Exception {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            isRu ? 'Не удалось скопировать' : 'Could not copy',
+          ),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isCopying = false);
+    }
+  }
+
+  String _humanReadableDate(String iso, {required bool isRu}) {
+    final parts = iso.split('-');
+    if (parts.length != 3) return iso;
+    final y = int.tryParse(parts[0]);
+    final m = int.tryParse(parts[1]);
+    final d = int.tryParse(parts[2]);
+    if (y == null || m == null || d == null) return iso;
+    const monthsRu = [
+      'янв', 'фев', 'мар', 'апр', 'мая', 'июн',
+      'июл', 'авг', 'сен', 'окт', 'ноя', 'дек',
+    ];
+    const monthsEn = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    final months = isRu ? monthsRu : monthsEn;
+    if (m < 1 || m > 12) return iso;
+    return isRu ? '$d ${months[m - 1]}' : '${months[m - 1]} $d';
+  }
+
   /// Sum macros over the meal list for the currently-selected day.
   /// Replaces /api/stats which only ever returns "today" — the rings now
   /// stay in lock-step with what's actually rendered in the list below.
@@ -360,6 +474,7 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
                         if (intId != null) context.push('/meals/$intId/edit');
                       },
                       onDelete: _deleteMeal,
+                      onCopy: _onCopyTapped,
                     );
                   },
                 ),
@@ -483,6 +598,7 @@ class _MealList extends StatelessWidget {
     required this.theme,
     required this.onRowTap,
     this.onDelete,
+    this.onCopy,
   });
 
   final List<K2MealRowData> rows;
@@ -493,6 +609,9 @@ class _MealList extends StatelessWidget {
   /// keep the row. Null means the parent doesn't support delete (fallback
   /// rows in error state pass null and don't render the swipe action).
   final Future<bool> Function(String id)? onDelete;
+
+  /// Long-press handler that copies the meal to another date.
+  final void Function(String id)? onCopy;
 
   @override
   Widget build(BuildContext context) {
@@ -517,6 +636,7 @@ class _MealList extends StatelessWidget {
                   meal: meal,
                   theme: theme,
                   onTap: () => onRowTap(meal.id),
+                  onLongPress: onCopy == null ? null : () => onCopy!(meal.id),
                 ),
               )
             else
@@ -525,10 +645,63 @@ class _MealList extends StatelessWidget {
                 meal: meal,
                 theme: theme,
                 onTap: () => onRowTap(meal.id),
+                onLongPress: onCopy == null ? null : () => onCopy!(meal.id),
               ),
         ],
         const SizedBox(height: 16),
       ],
+    );
+  }
+}
+
+/// Bottom sheet shown on long-press of a meal row. A confirmation step
+/// before the date picker so accidental long-presses don't immediately
+/// open the calendar.
+class _CopyMealActionSheet extends StatelessWidget {
+  const _CopyMealActionSheet({required this.isRu});
+
+  final bool isRu;
+
+  @override
+  Widget build(BuildContext context) {
+    const t = K2Theme.light;
+    return SafeArea(
+      child: Container(
+        margin: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: t.surface,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
+              child: Text(
+                isRu ? 'Действия с приёмом пищи' : 'Meal actions',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: t.fgMute,
+                  letterSpacing: 0.4,
+                ),
+              ),
+            ),
+            Container(height: 1, color: t.hairline),
+            ListTile(
+              leading: const Icon(Icons.calendar_month_rounded),
+              title: Text(
+                isRu ? 'Копировать на другую дату' : 'Copy to another date',
+              ),
+              onTap: () => Navigator.of(context).pop(true),
+            ),
+            Container(height: 1, color: t.hairline),
+            ListTile(
+              title: Text(isRu ? 'Отмена' : 'Cancel'),
+              onTap: () => Navigator.of(context).pop(false),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:kayfit/shared/theme/kayfit2_theme.dart';
 
@@ -36,6 +37,11 @@ class _Kf2CaptureScreenState extends State<Kf2CaptureScreen>
       vsync: this,
       duration: const Duration(milliseconds: 1800),
     )..repeat(reverse: true);
+
+    // Auto-trigger camera so the user doesn't need to tap the shutter.
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _pick(ImageSource.camera),
+    );
   }
 
   @override
@@ -52,13 +58,18 @@ class _Kf2CaptureScreenState extends State<Kf2CaptureScreen>
     setState(() => _picking = true);
 
     try {
-      final file = await ImagePicker().pickImage(
-        source: source,
-        imageQuality: 80,
-      );
+      // No imageQuality here — compressWithList in Kf2RecognizingScreen is the
+      // single compression step (avoids double-JPEG generation loss).
+      final file = await ImagePicker().pickImage(source: source);
+      debugPrint('KF2-CAPTURE: pickImage returned path=${file?.path}');
       if (!mounted) return;
-      Navigator.of(context).pop(file); // null = cancelled
-    } on Exception {
+      // Use `context.pop` (go_router) instead of `Navigator.of(context).pop`
+      // so the value reliably propagates back to the `Future<XFile>` returned
+      // by `context.push<XFile>('/kf2/capture')`. With go_router 14, mixing
+      // the two `pop` APIs can silently swallow the result.
+      context.pop(file);
+    } on Exception catch (e) {
+      debugPrint('KF2-CAPTURE: pickImage threw $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -75,7 +86,7 @@ class _Kf2CaptureScreenState extends State<Kf2CaptureScreen>
 
   void _cancel() {
     HapticFeedback.selectionClick();
-    Navigator.of(context).pop(null);
+    context.pop(null);
   }
 
   // ── Build ──────────────────────────────────────────────────────────────────

@@ -25,6 +25,7 @@ class Kayfit2MealRow extends StatelessWidget {
     required this.theme,
     this.dense = false,
     this.onTap,
+    this.onLongPress,
   });
 
   /// Meal data to render.
@@ -39,12 +40,18 @@ class Kayfit2MealRow extends StatelessWidget {
   /// Called when the user taps the row. Null disables the tap ripple.
   final VoidCallback? onTap;
 
+  /// Called when the user long-presses the row. Used by the journal to
+  /// surface the "Copy to another date" action — keeps the primary tap
+  /// gesture available for the meal-edit screen.
+  final VoidCallback? onLongPress;
+
   @override
   Widget build(BuildContext context) {
     final vertPad = dense ? 12.0 : 14.0;
 
     return InkWell(
       onTap: onTap,
+      onLongPress: onLongPress,
       child: Container(
         padding: EdgeInsets.symmetric(horizontal: 16, vertical: vertPad),
         decoration: BoxDecoration(
