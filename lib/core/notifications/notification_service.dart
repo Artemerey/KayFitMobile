@@ -137,6 +137,29 @@ class NotificationService {
     }
   }
 
+  /// Shows a local notification when background photo recognition completes.
+  static Future<void> showMealRecognized({
+    required String dishName,
+    required double kcal,
+    required bool isRu,
+  }) async {
+    try {
+      final title = isRu ? 'Блюдо распознано' : 'Meal recognized';
+      final body = isRu
+          ? '$dishName — ${kcal.round()} ккал'
+          : '$dishName — ${kcal.round()} kcal';
+      await _showLocalNotification(
+        title: title,
+        body: body,
+        // Each meal_recognized notification replaces the previous one (same ID
+        // via hashCode). Acceptable for back-to-back scans.
+        data: const {'type': 'meal_recognized'},
+      );
+    } catch (e) {
+      debugPrint('[FCM] showMealRecognized error (ignored): $e');
+    }
+  }
+
   /// Unregisters the FCM token from the backend and deletes it locally.
   static Future<void> unregisterToken() async {
     try {
@@ -287,6 +310,7 @@ class NotificationService {
       'daily_reminder' => '/',
       'streak' => '/',
       'weekly_summary' => '/journal',
+      'meal_recognized' => '/chat-v2',
       _ => '/',
     };
     _onNavigate?.call(route);

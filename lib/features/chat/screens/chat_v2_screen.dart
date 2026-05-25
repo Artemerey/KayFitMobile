@@ -17,6 +17,7 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
@@ -36,7 +37,8 @@ import '../../../core/analytics/analytics_service.dart';
 import '../../../core/ai_consent/ai_consent_provider.dart';
 import '../../../core/api/api_client.dart';
 import '../../../features/add_meal/screens/barcode_scanner_screen_v2.dart';
-import '../../../features/add_meal/screens/kf2_recognizing_screen.dart';
+import '../../../features/add_meal/screens/recognition_result_sheet_kf2.dart';
+import '../providers/photo_recognition_provider.dart';
 import '../../../features/dashboard/providers/dashboard_provider.dart';
 import '../../../features/journal/screens/journal_screen.dart'
     show journalDayMealsProvider;
@@ -54,6 +56,10 @@ import '../models/chat_message.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 
 enum _VoiceState { idle, recording, transcribing }
+
+// Role string for the in-chat photo-analyzing bubble. Used in multiple places;
+// keeping it as a constant avoids silent typo bugs.
+const _kPhotoAnalyzingRole = 'photo_analyzing';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Thinking-step model
@@ -115,6 +121,10 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
 
   bool _isLoading = false;
   bool _isSending = false;
+
+  // Guard against _onPhotoRecognitionDone being called twice — once via
+  // ref.listen and once via the initState post-frame check.
+  bool _photoResultConsumed = false;
 
   // Voice recording
   final _recorder = AudioRecorder();
@@ -190,6 +200,15 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
       AnalyticsService.chatOpened();
     } catch (_) {}
     _loadHistory();
+    // If the user navigated away during recognition and comes back, the
+    // provider might already be in done state — show the result sheet.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final recog = ref.read(photoRecognitionProvider);
+      if (recog.isDone && recog.result != null) {
+        _onPhotoRecognitionDone(recog.result!);
+      }
+    });
   }
 
   @override
@@ -898,45 +917,123 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
 
   // ── Attach toolbar handlers ─────────────────────────────────────────────────
 
-  /// Opens the KF2 capture screen, waits for a photo, then shows the
-  /// recognizing screen. On successful save, adds a coaching message to chat.
+  /// Opens the KF2 capture screen, adds a photo bubble to chat, and starts
+  /// recognition in the background. The user can freely navigate the app while
+  /// recognition runs. Result is delivered via [ref.listen] on
+  /// [photoRecognitionProvider] and a push notification when done.
   Future<void> _handleCamera() async {
-    debugPrint('KF2-CHAT: _handleCamera start, pushing /kf2/capture');
+    debugPrint('KF2-CHAT: _handleCamera start');
     final photo = await context.push<XFile>('/kf2/capture');
-    debugPrint(
-        'KF2-CHAT: /kf2/capture returned photo=${photo?.path} mounted=$mounted');
-    if (!mounted) return;
-    if (photo == null) return;
+    if (!mounted || photo == null) return;
 
-    // Use plain Navigator (not GoRouter) so we can pass the onSaved callback
-    // and capture the dish name — GoRouter's push<String> can't receive a
-    // String from Kf2RecognizingScreen which internally uses pushReplacement.
-    String? savedDishName;
-    debugPrint('KF2-CHAT: pushing Kf2RecognizingScreen');
-    await Navigator.of(context).push<bool>(
-      MaterialPageRoute<bool>(
-        fullscreenDialog: true,
-        builder: (_) => Kf2RecognizingScreen(
-          photo: photo,
-          onSaved: (name) => savedDishName = name,
-        ),
+    final lang = Localizations.localeOf(context).languageCode;
+
+    // Drop any previous result guard so the new scan can show its result.
+    _photoResultConsumed = false;
+
+    // Immediately show the photo in chat with a loading indicator.
+    final photoMsg = ChatMessage(
+      role: _kPhotoAnalyzingRole,
+      content: photo.path,
+      createdAt: DateTime.now(),
+    );
+    setState(() => _messages.add(photoMsg));
+    _scrollToBottom();
+
+    // Fire recognition in the background — outcome handled by ref.listen.
+    unawaited(
+      ref.read(photoRecognitionProvider.notifier).startRecognition(photo, lang),
+    );
+  }
+
+  // ── Photo recognition result handlers ────────────────────────────────────────
+
+  void _onPhotoRecognitionDone(RecognitionResult result) {
+    if (!mounted || _photoResultConsumed) return;
+    _photoResultConsumed = true;
+
+    setState(
+      () => _messages.removeWhere((m) => m.role == _kPhotoAnalyzingRole),
+    );
+    _pushPhotoResult(result.dishName, result.items);
+  }
+
+  void _onPhotoRecognitionFailed(PhotoRecognitionState state) {
+    if (!mounted) return;
+    setState(
+      () => _messages.removeWhere((m) => m.role == _kPhotoAnalyzingRole),
+    );
+    ref.read(photoRecognitionProvider.notifier).clear();
+    _photoResultConsumed = false;
+
+    final isRu = state.langCode == 'ru';
+    final msg = state.isNotFood
+        ? (isRu
+            ? 'Это не похоже на еду. Попробуйте ещё раз.'
+            : "That doesn't look like food. Please try again.")
+        : (isRu
+            ? 'Что-то пошло не так. Попробуйте ещё раз.'
+            : 'Something went wrong. Please try again.');
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: state.isNotFood ? null : K2Colors.error,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        duration: const Duration(seconds: 4),
       ),
     );
-    debugPrint(
-        'KF2-CHAT: Kf2RecognizingScreen popped, savedDishName=$savedDishName');
-    if (!mounted || savedDishName == null) return;
+  }
 
-    // RecognitionResultSheetKF2 already invalidated todayStatsProvider.
-    // Reading the future here returns the freshly fetched value.
+  void _pushPhotoResult(String dishName, List<IngredientV2> items) {
+    if (!mounted) return;
+    HapticFeedback.mediumImpact();
+
+    Navigator.of(context)
+        .push<bool>(
+      MaterialPageRoute<bool>(
+        fullscreenDialog: true,
+        builder: (_) => Scaffold(
+          backgroundColor: Colors.transparent,
+          body: DraggableScrollableSheet(
+            expand: false,
+            initialChildSize: 1.0,
+            builder: (_, sc) => RecognitionResultSheetKF2(
+              dishName: dishName,
+              ingredients: items,
+              mealDate: null,
+              originalText: null,
+              onSaved: (name) {
+                ref.read(photoRecognitionProvider.notifier).clear();
+                unawaited(_onPhotoSaved(name));
+              },
+            ),
+          ),
+        ),
+      ),
+    )
+        .then((_) {
+      // User dismissed the sheet without saving.
+      ref.read(photoRecognitionProvider.notifier).clear();
+      _photoResultConsumed = false;
+    });
+  }
+
+  Future<void> _onPhotoSaved(String dishName) async {
     MacroStats freshStats;
     try {
       freshStats = await ref.read(todayStatsProvider.future);
     } catch (_) {
       freshStats = const MacroStats(
-        caloriesEaten: 0, caloriesGoal: 0,
-        proteinEaten: 0, proteinGoal: 0,
-        fatEaten: 0, fatGoal: 0,
-        carbsEaten: 0, carbsGoal: 0,
+        caloriesEaten: 0,
+        caloriesGoal: 0,
+        proteinEaten: 0,
+        proteinGoal: 0,
+        fatEaten: 0,
+        fatGoal: 0,
+        carbsEaten: 0,
+        carbsGoal: 0,
       );
     }
     if (!mounted) return;
@@ -944,7 +1041,7 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     final isRu = Localizations.localeOf(context).languageCode == 'ru';
     final coachText = _buildCoachMessage(
       stats: freshStats,
-      dishLabel: savedDishName!,
+      dishLabel: dishName,
       isRu: isRu,
     );
     final coachMsg = ChatMessage(
@@ -1121,6 +1218,20 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
   Widget build(BuildContext context) {
     const t = K2Theme.light;
     final pendingMeal = ref.watch(pendingMealProvider);
+
+    // Auto-show result sheet when background photo recognition completes.
+    ref.listen<PhotoRecognitionState>(
+      photoRecognitionProvider,
+      (prev, next) {
+        final wasAnalyzing = prev?.isAnalyzing ?? false;
+        if (next.isDone && next.result != null && wasAnalyzing) {
+          _onPhotoRecognitionDone(next.result!);
+        }
+        if ((next.isError || next.isNotFood) && wasAnalyzing) {
+          _onPhotoRecognitionFailed(next);
+        }
+      },
+    );
 
     return Scaffold(
       backgroundColor: t.bg,
@@ -1397,8 +1508,15 @@ class _MessageList extends StatelessWidget {
       itemCount: itemCount,
       itemBuilder: (context, index) {
         if (index < messages.length) {
+          final msg = messages[index];
+          if (msg.role == _kPhotoAnalyzingRole) {
+            return _PhotoAnalyzingBubble(
+              photoPath: msg.content,
+              theme: theme,
+            );
+          }
           return _MessageBubble(
-            message: messages[index],
+            message: msg,
             theme: theme,
             isNewest: index == messages.length - 1 && thinking == null,
           );
@@ -2662,6 +2780,151 @@ class _SheetField extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Photo analyzing bubble
+// Shows the captured photo thumbnail + cycling recognition stage steps.
+// Right-aligned (user side), replaces the old fullscreen Kf2RecognizingScreen.
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _PhotoAnalyzingBubble extends ConsumerStatefulWidget {
+  const _PhotoAnalyzingBubble({
+    required this.photoPath,
+    required this.theme,
+  });
+
+  final String photoPath;
+  final K2Theme theme;
+
+  @override
+  ConsumerState<_PhotoAnalyzingBubble> createState() =>
+      _PhotoAnalyzingBubbleState();
+}
+
+class _PhotoAnalyzingBubbleState extends ConsumerState<_PhotoAnalyzingBubble>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _spinCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _spinCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _spinCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = widget.theme;
+    // Only watch the fields we actually render to minimise rebuilds.
+    final (stageIndex, isDone, langCode) = ref.watch(
+      photoRecognitionProvider
+          .select((s) => (s.stageIndex, s.isDone, s.langCode)),
+    );
+    final stages = photoRecognitionStages(langCode);
+
+    return Padding(
+      padding: const EdgeInsets.only(left: 56, top: 3, bottom: 7),
+      child: Align(
+        alignment: Alignment.centerRight,
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 240),
+          decoration: BoxDecoration(
+            color: K2Colors.accent.withValues(alpha: 0.10),
+            border: Border.all(
+              color: K2Colors.accent.withValues(alpha: 0.22),
+              width: 0.5,
+            ),
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(14),
+              topRight: Radius.circular(14),
+              bottomLeft: Radius.circular(14),
+              bottomRight: Radius.circular(4),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Photo thumbnail
+              ClipRRect(
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(13),
+                  topRight: Radius.circular(13),
+                ),
+                child: Image.file(
+                  File(widget.photoPath),
+                  width: 240,
+                  height: 180,
+                  fit: BoxFit.cover,
+                  gaplessPlayback: false,
+                  errorBuilder: (_, err, trace) => Container(
+                    width: 240,
+                    height: 180,
+                    color: t.card,
+                    child: Icon(
+                      Icons.image_outlined,
+                      color: t.fgMute,
+                      size: 32,
+                    ),
+                  ),
+                ),
+              ),
+              // Stage step list
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (var i = 0;
+                        i <= stageIndex && i < stages.length;
+                        i++)
+                      Padding(
+                        padding: EdgeInsets.only(top: i == 0 ? 0 : 5),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (i == stageIndex && !isDone)
+                              _SpinnerDot(
+                                controller: _spinCtrl,
+                                color: K2Colors.accent.withValues(alpha: 0.8),
+                              )
+                            else
+                              Icon(
+                                Icons.check_rounded,
+                                size: 11,
+                                color: K2Colors.accent.withValues(alpha: 0.8),
+                              ),
+                            const SizedBox(width: 8),
+                            Text(
+                              stages[i],
+                              style: TextStyle(
+                                fontFamily: K2Fonts.mono,
+                                fontSize: 11,
+                                color: t.fgDim,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

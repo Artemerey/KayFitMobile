@@ -38,10 +38,8 @@ class _Kf2CaptureScreenState extends State<Kf2CaptureScreen>
       duration: const Duration(milliseconds: 1800),
     )..repeat(reverse: true);
 
-    // Auto-trigger camera so the user doesn't need to tap the shutter.
-    WidgetsBinding.instance.addPostFrameCallback(
-      (_) => _pick(ImageSource.camera),
-    );
+    // No auto-trigger — show capture UI with both Shutter and Gallery buttons
+    // so the user can choose either option from the start.
   }
 
   @override
@@ -63,6 +61,15 @@ class _Kf2CaptureScreenState extends State<Kf2CaptureScreen>
       final file = await ImagePicker().pickImage(source: source);
       debugPrint('KF2-CAPTURE: pickImage returned path=${file?.path}');
       if (!mounted) return;
+
+      // User cancelled the picker — stay on screen so they can still tap the
+      // gallery button (or shutter again). Previously we popped with null,
+      // which closed the whole capture screen and prevented gallery access.
+      if (file == null) {
+        setState(() => _picking = false);
+        return;
+      }
+
       // Use `context.pop` (go_router) instead of `Navigator.of(context).pop`
       // so the value reliably propagates back to the `Future<XFile>` returned
       // by `context.push<XFile>('/kf2/capture')`. With go_router 14, mixing
