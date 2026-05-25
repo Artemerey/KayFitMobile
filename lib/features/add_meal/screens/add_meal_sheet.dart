@@ -6,7 +6,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:kayfit/core/analytics/analytics_service.dart';
 import 'package:kayfit/core/i18n/generated/app_localizations.dart';
-import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:record/record.dart';
@@ -282,7 +281,8 @@ class _AddMealSheetState extends ConsumerState<AddMealSheet>
     if (mounted) setState(() => _loadingType = _LoadingType.photo);
     final picker = ImagePicker();
     final lang = _lang;
-    final file = await picker.pickImage(source: source, imageQuality: 80);
+    // No imageQuality — compressWithList below is the single compression step.
+    final file = await picker.pickImage(source: source);
     if (file == null) {
       if (mounted) setState(() => _loadingType = _LoadingType.none);
       if (mounted) _switchMode(_InputMode.choose);
@@ -295,13 +295,16 @@ class _AddMealSheetState extends ConsumerState<AddMealSheet>
     }
     if (!mounted) return;
     try {
-      final origSize = await File(file.path).length();
-      debugPrint('📸 Original photo: ${file.path} (${origSize ~/ 1024} KB)');
+      // Read bytes into memory — avoids the OS-level file-path cache that
+      // image_picker may reuse between captures (same temp path, new content).
+      final originalBytes = await file.readAsBytes();
+      if (!mounted) return;
+      debugPrint('📸 Original photo: ${file.path} (${originalBytes.length ~/ 1024} KB)');
 
       // Force-convert any source format (PNG/HEIC/JPEG) to a JPEG that's
       // small enough for fast upload + AI processing on the server.
-      final compressed = await FlutterImageCompress.compressWithFile(
-        file.path,
+      final compressed = await FlutterImageCompress.compressWithList(
+        originalBytes,
         minWidth: 1280,
         minHeight: 1280,
         quality: 75,
@@ -309,7 +312,7 @@ class _AddMealSheetState extends ConsumerState<AddMealSheet>
       );
 
       late final MultipartFile multipart;
-      if (compressed != null) {
+      if (compressed.isNotEmpty) {
         debugPrint('📸 Compressed to ${compressed.length ~/ 1024} KB');
         multipart = MultipartFile.fromBytes(
           compressed,
@@ -317,9 +320,9 @@ class _AddMealSheetState extends ConsumerState<AddMealSheet>
           contentType: DioMediaType('image', 'jpeg'),
         );
       } else {
-        debugPrint('📸 Compression failed, sending original');
-        multipart = await MultipartFile.fromFile(
-          file.path,
+        debugPrint('📸 Compression empty, sending original');
+        multipart = MultipartFile.fromBytes(
+          originalBytes,
           filename: 'photo.jpg',
           contentType: DioMediaType('image', 'jpeg'),
         );

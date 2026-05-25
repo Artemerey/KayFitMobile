@@ -60,7 +60,11 @@ class _Kf2RecognizingScreenState extends ConsumerState<Kf2RecognizingScreen>
       duration: const Duration(milliseconds: 2400),
     )..repeat(reverse: true);
 
-    // Start recognition right away.
+    // Evict any cached version of this path so Image.file always shows
+    // the freshly taken photo rather than a stale cached frame.
+    PaintingBinding.instance.imageCache
+        .evict(FileImage(File(widget.photo.path)));
+
     WidgetsBinding.instance.addPostFrameCallback((_) => _recognize());
   }
 
@@ -77,11 +81,14 @@ class _Kf2RecognizingScreenState extends ConsumerState<Kf2RecognizingScreen>
     final lang = Localizations.localeOf(context).languageCode;
 
     try {
-      final origSize = await File(widget.photo.path).length();
-      debugPrint('KF2-RECOG: original ${origSize ~/ 1024} KB');
+      // Read bytes once for upload. Display uses Image.file directly,
+      // with cache eviction in initState ensuring the fresh photo is shown.
+      final originalBytes = await widget.photo.readAsBytes();
+      if (!mounted) return;
+      debugPrint('KF2-RECOG: original ${originalBytes.length ~/ 1024} KB  path=${widget.photo.path}');
 
-      final compressed = await FlutterImageCompress.compressWithFile(
-        widget.photo.path,
+      final compressed = await FlutterImageCompress.compressWithList(
+        originalBytes,
         minWidth: 1280,
         minHeight: 1280,
         quality: 75,
@@ -89,7 +96,7 @@ class _Kf2RecognizingScreenState extends ConsumerState<Kf2RecognizingScreen>
       );
 
       late final MultipartFile multipart;
-      if (compressed != null) {
+      if (compressed.isNotEmpty) {
         debugPrint('KF2-RECOG: compressed to ${compressed.length ~/ 1024} KB');
         multipart = MultipartFile.fromBytes(
           compressed,
@@ -97,9 +104,9 @@ class _Kf2RecognizingScreenState extends ConsumerState<Kf2RecognizingScreen>
           contentType: DioMediaType('image', 'jpeg'),
         );
       } else {
-        debugPrint('KF2-RECOG: compression skipped, sending original');
-        multipart = await MultipartFile.fromFile(
-          widget.photo.path,
+        debugPrint('KF2-RECOG: compression returned empty, sending original');
+        multipart = MultipartFile.fromBytes(
+          originalBytes,
           filename: 'photo.jpg',
           contentType: DioMediaType('image', 'jpeg'),
         );
@@ -263,11 +270,13 @@ class _PhotoDisplay extends StatelessWidget {
     return Stack(
       fit: StackFit.expand,
       children: [
-        // Photo
+        // Image.file renders immediately from the temp path.
+        // Cache eviction in initState ensures the freshly taken photo is shown
+        // rather than any stale frame from a previous capture at the same path.
         Image.file(
           File(photoPath),
           fit: BoxFit.cover,
-          gaplessPlayback: true,
+          gaplessPlayback: false,
           errorBuilder: (context, error, stackTrace) => Container(
             color: theme.card,
             child: Icon(Icons.broken_image_outlined, color: theme.fgMute, size: 48),
