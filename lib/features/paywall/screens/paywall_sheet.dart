@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:purchases_flutter/purchases_flutter.dart';
@@ -100,6 +102,25 @@ class _PaywallSheetContentState extends ConsumerState<_PaywallSheetContent> {
           ),
         );
       }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _onRedeemCode() async {
+    if (!Platform.isIOS) return;
+    setState(() => _loading = true);
+    try {
+      await Purchases.presentCodeRedemptionSheet();
+      if (!mounted) return;
+      // Refresh subscription state after redemption
+      ref.invalidate(subscriptionNotifierProvider);
+      final state = ref.read(subscriptionNotifierProvider);
+      if (state is SubscriptionActive || state is SubscriptionGracePeriod) {
+        Navigator.of(context).pop(PaywallResult.subscribed);
+      }
+    } on Exception catch (_) {
+      // Sheet dismissed or cancelled — not an error
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -304,6 +325,16 @@ class _PaywallSheetContentState extends ConsumerState<_PaywallSheetContent> {
                       style: TextStyle(fontSize: 12, color: _kDimText),
                     ),
                   const SizedBox(height: 16),
+
+                  // Promo code (iOS only)
+                  if (Platform.isIOS)
+                    TextButton(
+                      onPressed: _loading ? null : _onRedeemCode,
+                      child: const Text(
+                        'У меня есть промокод',
+                        style: TextStyle(fontSize: 14, color: _kAccent),
+                      ),
+                    ),
 
                   // Dismiss
                   TextButton(
