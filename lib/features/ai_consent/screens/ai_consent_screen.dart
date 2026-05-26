@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../shared/theme/app_theme.dart';
@@ -18,11 +20,19 @@ class AiConsentScreen extends ConsumerStatefulWidget {
   ConsumerState<AiConsentScreen> createState() => _AiConsentScreenState();
 }
 
-class _AiConsentScreenState extends ConsumerState<AiConsentScreen> {
+class _AiConsentScreenState extends ConsumerState<AiConsentScreen>
+    with SingleTickerProviderStateMixin {
   bool _checked = false;
 
   /// True while [_onAccept] is running — disables button and shows loader.
   bool _isProcessing = false;
+
+  late final AnimationController _shakeController = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 400),
+  );
+  late final Animation<double> _shakeAnim =
+      Tween<double>(begin: 0, end: 1).animate(_shakeController);
 
   /// True after the 300 ms grace period — only then is the linear loader shown.
   /// Prevents a flicker for fast (<300 ms) network responses, per spec §1.5.
@@ -203,7 +213,18 @@ class _AiConsentScreenState extends ConsumerState<AiConsentScreen> {
                   const SizedBox(height: 28),
 
                   // ── Checkbox row ─────────────────────────────────────────────
-                  GestureDetector(
+                  AnimatedBuilder(
+                    animation: _shakeAnim,
+                    builder: (context, child) {
+                      final dx = math.sin(_shakeAnim.value * math.pi * 5) *
+                          8 *
+                          (1 - _shakeAnim.value);
+                      return Transform.translate(
+                        offset: Offset(dx, 0),
+                        child: child,
+                      );
+                    },
+                    child: GestureDetector(
                     key: const Key('consent_checkbox'),
                     onTap: _isProcessing
                         ? null
@@ -257,6 +278,7 @@ class _AiConsentScreenState extends ConsumerState<AiConsentScreen> {
                         ),
                       ],
                     ),
+                  ),
                   ),
 
                   const SizedBox(height: 24),
@@ -333,8 +355,7 @@ class _AiConsentScreenState extends ConsumerState<AiConsentScreen> {
                           borderRadius: BorderRadius.circular(AppRadius.md),
                           child: InkWell(
                             key: const Key('accept_inkwell'),
-                            // Immediately disabled on first tap (≤ 100 ms response)
-                            onTap: (_checked && !_isProcessing) ? _onAccept : null,
+                            onTap: _isProcessing ? null : _onAccept,
                             borderRadius: BorderRadius.circular(AppRadius.md),
                             child: Center(
                               child: _isProcessing
@@ -414,11 +435,19 @@ class _AiConsentScreenState extends ConsumerState<AiConsentScreen> {
   @override
   void dispose() {
     _loaderTimer?.cancel();
+    _shakeController.dispose();
     super.dispose();
   }
 
   Future<void> _onAccept() async {
     if (_isProcessing) return;
+
+    // Checkbox not checked — shake it and give haptic feedback.
+    if (!_checked) {
+      HapticFeedback.lightImpact();
+      _shakeController.forward(from: 0);
+      return;
+    }
 
     // ── Immediate visual feedback — well within 100 ms ────────────────────
     setState(() {

@@ -6,7 +6,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../api/api_client.dart';
 
-const _kLocalConsentKey = 'ai_consent_local';
+/// Exposed so [main.dart] can read the initial value synchronously before the
+/// first router evaluation, preventing the race where the router briefly
+/// redirects to /ai-consent for users who have already answered.
+const kAiConsentLocalKey = 'ai_consent_local';
+
+// Keep backward compat for internal use within this file.
+const _kLocalConsentKey = kAiConsentLocalKey;
 
 /// How long to wait for the server before surfacing a timeout error.
 /// Must cover the worst-case auth-refresh chain: original POST (~3s)
@@ -17,11 +23,18 @@ const _kConsentTimeout = Duration(seconds: 20);
 /// true = accepted
 /// false = declined
 class AiConsentNotifier extends Notifier<bool?> {
+  /// Optionally pre-seed the state with a value read synchronously from
+  /// SharedPreferences in [main.dart] before ProviderScope is created.
+  AiConsentNotifier([this._initial]);
+  final bool? _initial;
+
   @override
   bool? build() {
-    // Auto-load from local storage on first access (for unauthenticated users).
-    Future.microtask(_loadLocal);
-    return null;
+    if (_initial == null) {
+      // No pre-seeded value — load async (first-launch or fresh install).
+      Future.microtask(_loadLocal);
+    }
+    return _initial;
   }
 
   Future<void> _loadLocal() async {
@@ -38,10 +51,11 @@ class AiConsentNotifier extends Notifier<bool?> {
           .timeout(_kConsentTimeout);
       state = resp.data['consent'] as bool?;
     } on TimeoutException {
-      // Server too slow — keep local value.
       await _loadLocal();
     } on DioException {
-      // Server unavailable — keep local value.
+      await _loadLocal();
+    } catch (e) {
+      debugPrint('[ai_consent] load unexpected error: $e');
       await _loadLocal();
     }
   }

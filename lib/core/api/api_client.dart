@@ -105,8 +105,7 @@ class _AuthInterceptor extends Interceptor {
       final newToken = await _refreshCompleter!.future;
       if (newToken != null) {
         try {
-          final opts = err.requestOptions;
-          opts.headers['Authorization'] = 'Bearer $newToken';
+          final opts = _cloneForRetry(err.requestOptions, newToken);
           final retryResp = await _dio.fetch(opts);
           handler.resolve(retryResp);
         } catch (_) {
@@ -191,8 +190,7 @@ class _AuthInterceptor extends Interceptor {
 
     // Retry the original request that triggered the 401
     try {
-      final opts = err.requestOptions;
-      opts.headers['Authorization'] = 'Bearer $newAccess';
+      final opts = _cloneForRetry(err.requestOptions, newAccess);
       final retryResp = await _dio.fetch(opts);
       handler.resolve(retryResp);
     } catch (e) {
@@ -203,6 +201,21 @@ class _AuthInterceptor extends Interceptor {
         handler.next(err);
       }
     }
+  }
+
+  /// Returns a fresh `RequestOptions` safe to re-send after a 401-refresh.
+  ///
+  /// Dio's `RequestOptions.data` may be a `FormData` whose internal multipart
+  /// stream is single-consumption — if we re-`fetch(opts)` after the first
+  /// send, the body is empty and the backend either rejects (4xx) or
+  /// re-issues 401, masking the refresh path. `FormData.clone()` re-creates
+  /// the stream from the same fields/files. Other body types (Map, String,
+  /// bytes) are safe to re-send as-is.
+  RequestOptions _cloneForRetry(RequestOptions opts, String newAccessToken) {
+    final data = opts.data is FormData ? (opts.data as FormData).clone() : opts.data;
+    final headers = Map<String, dynamic>.from(opts.headers)
+      ..['Authorization'] = 'Bearer $newAccessToken';
+    return opts.copyWith(data: data, headers: headers);
   }
 
   Future<void> _handleLogout() async {

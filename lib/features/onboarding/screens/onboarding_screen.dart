@@ -47,12 +47,15 @@ enum _Step {
   // ignore: constant_identifier_names
   weight_loss_info,
   // ignore: constant_identifier_names
+  weight_loss_speed,
+  // ignore: constant_identifier_names
   info_1,
   // ignore: constant_identifier_names
   info_2,
   // ignore: constant_identifier_names
   info_3,
   method,
+  reviews,
   result,
   auth,
 }
@@ -81,11 +84,13 @@ CalculationResult _calcPreview({
   required String gender,
   required String trainingDays,
   double? targetWeight,
+  double weightLossSpeedKgPerWeek = 0.5,
 }) {
   final offset = gender == 'male' ? 5.0 : -161.0;
   final bmr = 10 * weight + 6.25 * height - 5 * age + offset;
   final tdee = bmr * _getActivityCoef(trainingDays);
-  final target = (tdee - 500).clamp(1200.0, 9999.0);
+  final deficitPerDay = (weightLossSpeedKgPerWeek * 7700 / 7).clamp(100.0, 1100.0);
+  final target = (tdee - deficitPerDay).clamp(1200.0, 9999.0);
   final protein = (weight * 1.6);
   final fat = (weight * 0.9);
   final carbs = ((target - protein * 4 - fat * 9) / 4).clamp(0.0, 9999.0);
@@ -135,10 +140,12 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       _Step.body_form,
       _Step.reward,
       if (_goals.contains('lose_weight')) _Step.weight_loss_info,
+      if (_goals.contains('lose_weight')) _Step.weight_loss_speed,
       _Step.info_1,
       _Step.info_2,
       _Step.info_3,
       // _Step.method removed (manual QA: «как добавить еду» screen вырезан)
+      _Step.reviews,
       _Step.result,
       _Step.auth,
     ];
@@ -162,6 +169,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   String _dietType = 'none';
   String _foodRestrictions = '';
   Set<String> _goals = {};
+  double _weightLossSpeedKgPerWeek = 0.5;
 
   // Controllers
   final _heightCtrl = TextEditingController();
@@ -434,6 +442,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
         gender: _gender.isEmpty ? 'female' : _gender,
         trainingDays: _trainingFreq,
         targetWeight: _targetWeight,
+        weightLossSpeedKgPerWeek: _goals.contains('lose_weight') ? _weightLossSpeedKgPerWeek : 0.5,
       );
 
   // ── Progress ────────────────────────────────────────────────────────────────
@@ -666,6 +675,16 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
           primaryCta: ObGradientButton(label: nextLabel, onTap: _goNext),
         );
 
+      case _Step.weight_loss_speed:
+        return _FooterCtaData(
+          primaryCta: ObGradientButton(label: nextLabel, onTap: _goNext),
+        );
+
+      case _Step.reviews:
+        return _FooterCtaData(
+          primaryCta: ObGradientButton(label: nextLabel, onTap: _goNext),
+        );
+
       case _Step.method:
         return _FooterCtaData(
           primaryCta: ObGradientButton(label: l10n.common_next, onTap: _goNext),
@@ -780,6 +799,15 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       case _Step.weight_loss_info:
         return _WeightLossInfoStep(isRu: isRu);
 
+      case _Step.weight_loss_speed:
+        return _WeightLossSpeedStep(
+          speedKgPerWeek: _weightLossSpeedKgPerWeek,
+          onChanged: (v) => setState(() => _weightLossSpeedKgPerWeek = v),
+          currentWeight: _weight ?? 70,
+          targetWeight: _targetWeight ?? (_weight != null ? _weight! - 5 : 65),
+          isRu: isRu,
+        );
+
       case _Step.info_1:
         return _InfoStep(
           icon: Icons.center_focus_strong_rounded,
@@ -830,6 +858,9 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
 
       case _Step.method:
         return _MethodStep(l10n: l10n);
+
+      case _Step.reviews:
+        return _ReviewsStep(isRu: isRu);
 
       case _Step.result:
         return _ResultStep(
@@ -3047,6 +3078,436 @@ class _OBSourceOption extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ─── Step: Weight loss speed ───────────────────────────────────────────────────
+class _WeightLossSpeedStep extends StatefulWidget {
+  final double speedKgPerWeek;
+  final ValueChanged<double> onChanged;
+  final double currentWeight;
+  final double targetWeight;
+  final bool isRu;
+
+  const _WeightLossSpeedStep({
+    required this.speedKgPerWeek,
+    required this.onChanged,
+    required this.currentWeight,
+    required this.targetWeight,
+    required this.isRu,
+  });
+
+  @override
+  State<_WeightLossSpeedStep> createState() => _WeightLossSpeedStepState();
+}
+
+class _WeightLossSpeedStepState extends State<_WeightLossSpeedStep> {
+  late double _speed;
+
+  @override
+  void initState() {
+    super.initState();
+    _speed = widget.speedKgPerWeek;
+  }
+
+  String _goalDateLabel(double speedKgPerWeek, bool isRu) {
+    final weightToLose = (widget.currentWeight - widget.targetWeight).clamp(0.0, 999.0);
+    if (weightToLose <= 0) return isRu ? 'цель достигнута' : 'goal reached';
+    final daysToGoal = (weightToLose * 7700 / (speedKgPerWeek * 7700 / 7)).ceil();
+    final goalDate = DateTime.now().add(Duration(days: daysToGoal));
+    final months = isRu
+        ? ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек']
+        : ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return '${goalDate.day} ${months[goalDate.month - 1]}';
+  }
+
+  bool get _isRecommended => _speed >= 0.4 && _speed <= 0.6;
+
+  @override
+  Widget build(BuildContext context) {
+    final isRu = widget.isRu;
+    final title = isRu
+        ? 'Как быстро вы хотите\nдостигнуть своей цели?'
+        : 'How fast do you want\nto reach your goal?';
+    final speedLabel = isRu ? 'Скорость похудения в неделю' : 'Weight loss speed per week';
+    final recommendedLabel = isRu ? 'Рекомендуется' : 'Recommended';
+    final goalLabel = isRu ? 'Вы достигнете своей цели\nк ' : 'You will reach your goal\nby ';
+    final kgUnit = isRu ? ' кг' : ' kg';
+
+    final sliderMin = 0.1;
+    final sliderMax = 1.0;
+    // Snap to 0.1 steps
+    final sliderDivisions = 9;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 26,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.5,
+              color: AppColors.text,
+            ),
+          ),
+          const SizedBox(height: 32),
+
+          // Speed value display
+          Text(
+            speedLabel,
+            style: const TextStyle(fontSize: 14, color: AppColors.textMuted),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '${_speed.toStringAsFixed(1)}$kgUnit',
+            style: const TextStyle(
+              fontSize: 48,
+              fontWeight: FontWeight.w800,
+              color: AppColors.text,
+              height: 1,
+            ),
+          ),
+          const SizedBox(height: 8),
+          AnimatedOpacity(
+            opacity: _isRecommended ? 1.0 : 0.0,
+            duration: const Duration(milliseconds: 200),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+              decoration: BoxDecoration(
+                color: const Color(0xFF22C55E),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                recommendedLabel,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // Animal markers row
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: const [
+                Text('🐢', style: TextStyle(fontSize: 28)),
+                Text('🐈', style: TextStyle(fontSize: 28)),
+                Text('🐇', style: TextStyle(fontSize: 28)),
+              ],
+            ),
+          ),
+
+          // Slider
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              activeTrackColor: OBColors.pink,
+              inactiveTrackColor: OBColors.border,
+              thumbColor: Colors.white,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 14),
+              overlayShape: SliderComponentShape.noOverlay,
+              trackHeight: 4,
+            ),
+            child: Slider(
+              value: _speed,
+              min: sliderMin,
+              max: sliderMax,
+              divisions: sliderDivisions,
+              onChanged: (v) {
+                final snapped = (v * 10).round() / 10;
+                setState(() => _speed = snapped);
+                widget.onChanged(snapped);
+              },
+            ),
+          ),
+
+          // Scale labels
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('0.1$kgUnit', style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                Text('0.5$kgUnit', style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                Text('1$kgUnit', style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 24),
+
+          // Goal date card
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 20),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: OBColors.border),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.04),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Text(
+              '$goalLabel${_goalDateLabel(_speed, isRu)}',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 16, color: AppColors.text, height: 1.4),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Step: Reviews ─────────────────────────────────────────────────────────────
+class _ReviewsStep extends StatelessWidget {
+  final bool isRu;
+  const _ReviewsStep({required this.isRu});
+
+  @override
+  Widget build(BuildContext context) {
+    final title = isRu ? 'Покажите свою любовь' : 'Show your love';
+    final subtitle = isRu
+        ? 'Это приложение создано для таких, как вы'
+        : 'This app was made for people like you';
+    final countLabel = isRu ? '+ 2 000 000 человек' : '+ 2,000,000 people';
+
+    final reviews = isRu ? _reviewsRu : _reviewsEn;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 28,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.5,
+              color: AppColors.text,
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          // Stars
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: List.generate(5, (_) => const Icon(
+              Icons.star_rounded,
+              color: Color(0xFFFBBF24),
+              size: 36,
+            )),
+          ),
+          const SizedBox(height: 16),
+
+          // Subtitle
+          Text(
+            subtitle,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 15,
+              color: AppColors.textMuted,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          // User count with avatar circles
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              SizedBox(
+                width: 52,
+                height: 28,
+                child: Stack(
+                  children: [
+                    _AvatarCircle(color: const Color(0xFF60A5FA), offset: 0, initial: 'A'),
+                    _AvatarCircle(color: const Color(0xFF34D399), offset: 18, initial: 'M'),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                countLabel,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.text,
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 24),
+
+          // Review cards
+          ...reviews.map((r) => Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: _ReviewCard(review: r),
+          )),
+        ],
+      ),
+    );
+  }
+}
+
+class _AvatarCircle extends StatelessWidget {
+  final Color color;
+  final double offset;
+  final String initial;
+  const _AvatarCircle({required this.color, required this.offset, required this.initial});
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      left: offset,
+      child: Container(
+        width: 28,
+        height: 28,
+        decoration: BoxDecoration(
+          color: color,
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white, width: 2),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          initial,
+          style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700),
+        ),
+      ),
+    );
+  }
+}
+
+class _Review {
+  final String name;
+  final String text;
+  const _Review({required this.name, required this.text});
+}
+
+const _reviewsRu = [
+  _Review(
+    name: 'Антон К.',
+    text: 'Разобрался за минуту. Всё просто, быстро, и наконец-то вижу прогресс.',
+  ),
+  _Review(
+    name: 'София Л.',
+    text: 'Столько трекеров пробовала — всё бросала. А этот другой — пользуюсь каждый день.',
+  ),
+  _Review(
+    name: 'Данил Б.',
+    text: 'Сначала был скептичен, но приложение реально работает. За месяц минус 4 кг!',
+  ),
+];
+
+const _reviewsEn = [
+  _Review(
+    name: 'Anton K.',
+    text: 'Figured it out in a minute. Simple, fast, and I finally see real progress.',
+  ),
+  _Review(
+    name: 'Sofia L.',
+    text: 'Tried so many trackers — always quit. This one is different — use it every day.',
+  ),
+  _Review(
+    name: 'Daniel B.',
+    text: 'Was skeptical at first, but the app actually works. Minus 4 kg in one month!',
+  ),
+];
+
+class _ReviewCard extends StatelessWidget {
+  final _Review review;
+  const _ReviewCard({required this.review});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: OBColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: OBColors.pinkSoft,
+                  shape: BoxShape.circle,
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  review.name[0],
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: OBColors.pink,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    review.name,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.text,
+                    ),
+                  ),
+                  Row(
+                    children: List.generate(5, (_) => const Icon(
+                      Icons.star_rounded,
+                      color: Color(0xFFFBBF24),
+                      size: 14,
+                    )),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            review.text,
+            style: const TextStyle(
+              fontSize: 14,
+              color: AppColors.textMuted,
+              height: 1.45,
+            ),
+          ),
+        ],
       ),
     );
   }

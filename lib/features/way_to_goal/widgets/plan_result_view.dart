@@ -1,5 +1,4 @@
 import 'package:fl_chart/fl_chart.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../shared/models/calculation_result.dart';
@@ -7,12 +6,8 @@ import '../../../shared/theme/app_theme.dart';
 import '../../../core/i18n/generated/app_localizations.dart';
 
 /// Shared plan-result view used by WayToGoalScreen and OnboardingScreen (_ResultStep).
-/// CTA buttons are owned by the parent (sticky bottom in WayToGoalScreen,
-/// onboarding scaffold in onboarding) — this widget renders only the scroll
-/// content. [bottomPadding] reserves space below the last card so a fixed
-/// footer outside this widget does not occlude content.
-/// [currentWeight] enables maintenance detection: when |current - target| < 0.5 kg
-/// the chart and days-to-goal block are hidden in favour of a maintain message.
+/// CTA buttons are owned by the parent. [bottomPadding] reserves space below the last
+/// card so a fixed footer outside this widget does not occlude content.
 class PlanResultView extends StatelessWidget {
   final CalculationResult calc;
   final AppLocalizations l10n;
@@ -28,20 +23,14 @@ class PlanResultView extends StatelessWidget {
   });
 
   bool get _isMaintain {
-    // Detect by calorie target vs TDEE first — handles muscle-gain or
-    // recomposition where current_weight == target_weight but the user
-    // is actually on a surplus/deficit.
     final calDelta = (calc.targetCalories - calc.tdee).abs();
-    if (calDelta > 80) return false; // significant surplus or deficit
-    // Otherwise fall back to weight delta.
+    if (calDelta > 80) return false;
     final tw = calc.targetWeight;
     final cw = currentWeight;
     if (tw == null || cw == null) return false;
     return (tw - cw).abs() < 0.5;
   }
 
-  /// Direction of the plan: surplus / deficit / maintain.
-  /// Computed from calorie delta relative to TDEE (matches _isMaintain).
   _PlanDirection get _direction {
     final delta = calc.targetCalories - calc.tdee;
     if (delta > 80) return _PlanDirection.gain;
@@ -49,12 +38,8 @@ class PlanResultView extends StatelessWidget {
     return _PlanDirection.maintain;
   }
 
-  /// Local fallback for the personalised banner: shown when the backend
-  /// hasn't returned `personalizedPlan` yet (PR-4-BE not deployed).
-  /// Direction-aware copy + protein recommendation from current weight.
   String _localPlanFallback(bool isRu) {
     final cw = currentWeight ?? calc.targetWeight ?? 70;
-    // Roughly 1.6 g/kg for general goals, 1.8–2.0 g/kg for muscle gain.
     final dir = _direction;
     final perKg = dir == _PlanDirection.gain ? 1.8 : 1.6;
     final proteinG = (cw * perKg).round();
@@ -78,267 +63,200 @@ class PlanResultView extends StatelessWidget {
     }
   }
 
+  String _goalDateLabel(bool isRu) {
+    if (calc.daysToGoal == null || calc.targetWeight == null) return '';
+    final goalDate = DateTime.now().add(Duration(days: calc.daysToGoal!));
+    final monthsRu = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+                      'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+    final monthsEn = ['January', 'February', 'March', 'April', 'May', 'June',
+                      'July', 'August', 'September', 'October', 'November', 'December'];
+    final months = isRu ? monthsRu : monthsEn;
+    return '${goalDate.day} ${months[goalDate.month - 1]}';
+  }
+
   @override
   Widget build(BuildContext context) {
     final isRu = Localizations.localeOf(context).languageCode == 'ru';
     final maintain = _isMaintain;
-    final maintainTitle = isRu ? 'Поддержание веса' : 'Weight maintenance';
-    final maintainBody = isRu
-        ? 'Текущий и целевой вес совпадают. Эти калории помогут удержать форму без потери и набора.'
-        : 'Your current and target weight match. These calories will keep you steady — no loss, no gain.';
+
+    final planText = (calc.personalizedPlan != null && calc.personalizedPlan!.isNotEmpty)
+        ? calc.personalizedPlan!
+        : _localPlanFallback(isRu);
+
+    final headerTitle = isRu ? 'Отлично!' : 'Great!';
+    final headerSubtitle = isRu ? 'Ваш персональный план готов' : 'Your personal plan is ready';
+
+    final dailyRecTitle = isRu ? 'Рекомендация на день' : 'Daily recommendation';
+    final howToTitle = isRu ? 'Как достичь ваших целей:' : 'How to reach your goals:';
+    final scienceTitle = isRu
+        ? 'План основан на надёжных научных исследованиях и медицинской экспертизе'
+        : 'Plan based on trusted scientific research and medical expertise';
 
     return ListView(
-      padding: EdgeInsets.fromLTRB(12, 0, 12, bottomPadding),
+      padding: EdgeInsets.fromLTRB(16, 0, 16, bottomPadding),
       children: [
         const SizedBox(height: 24),
 
-        // ── Personalized AI plan banner (focal point — always visible) ──────
-        // Server text wins; otherwise we compute a direction-aware fallback
-        // locally so the focal banner is never empty.
-        _PersonalPlanBanner(
-          text: (calc.personalizedPlan != null &&
-                  calc.personalizedPlan!.isNotEmpty)
-              ? calc.personalizedPlan!
-              : _localPlanFallback(isRu),
-          isRu: isRu,
-        ),
-        const SizedBox(height: 12),
+        // ── Personalized plan banner ──────────────────────────────────────────
+        _PersonalPlanBanner(text: planText, isRu: isRu),
+        const SizedBox(height: 16),
 
-        // ── Hero gradient card ───────────────────────────────────────────────
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            gradient: OBColors.gradient,
-            borderRadius: BorderRadius.circular(26),
-            boxShadow: OBColors.buttonShadow,
-          ),
-          child: Column(
-            children: [
-              const Text('🎯', style: TextStyle(fontSize: 40)),
-              const SizedBox(height: 12),
-              Text(
-                l10n.wg_plan_ready,
-                style: const TextStyle(
-                  fontSize: 26,
-                  fontWeight: FontWeight.w800,
-                  color: Colors.white,
-                  letterSpacing: -0.5,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                l10n.wg_personal_calc,
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.white.withValues(alpha: 0.85),
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 20),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                child: Column(
-                  children: [
-                    Text(
-                      calc.targetCalories.toStringAsFixed(0),
-                      style: const TextStyle(
-                        fontSize: 52,
-                        fontWeight: FontWeight.w900,
-                        color: OBColors.pink,
-                        height: 1,
-                        letterSpacing: -2,
-                      ),
-                    ),
-                    Text(
-                      l10n.wg_kcal_day,
-                      style: const TextStyle(
-                        fontSize: 15,
-                        color: AppColors.textMuted,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+        // ── Celebration header ────────────────────────────────────────────────
+        Text(
+          headerTitle,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            fontSize: 32,
+            fontWeight: FontWeight.w900,
+            color: AppColors.text,
+            letterSpacing: -0.5,
           ),
         ),
+        const SizedBox(height: 4),
+        Text(
+          headerSubtitle,
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontSize: 15, color: AppColors.textMuted),
+        ),
+        const SizedBox(height: 16),
 
-        const SizedBox(height: 12),
-
-        // ── Macros card ──────────────────────────────────────────────────────
-        Container(
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(24),
+        // ── Goal date card (only when losing/gaining weight with a target) ────
+        if (!maintain && calc.daysToGoal != null && calc.targetWeight != null) ...[
+          _GoalDateCard(
+            targetWeight: calc.targetWeight!,
+            dateLabel: _goalDateLabel(isRu),
+            isRu: isRu,
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                l10n.wg_macronutrients,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.text,
-                ),
-              ),
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  _MacroChip(
-                    label: l10n.macro_protein,
-                    value: calc.protein,
-                    color: AppColors.accent,
-                    bgColor: AppColors.accentSoft,
-                    unit: l10n.macro_g,
-                  ),
-                  const SizedBox(width: 8),
-                  _MacroChip(
-                    label: l10n.macro_fat,
-                    value: calc.fat,
-                    color: AppColors.warm,
-                    bgColor: AppColors.warmSoft,
-                    unit: l10n.macro_g,
-                  ),
-                  const SizedBox(width: 8),
-                  _MacroChip(
-                    label: l10n.macro_carbs,
-                    value: calc.carbs,
-                    color: AppColors.support,
-                    bgColor: AppColors.supportSoft,
-                    unit: l10n.macro_g,
-                  ),
-                ],
-              ),
-            ],
+          const SizedBox(height: 16),
+        ],
+
+        // ── Daily recommendation section ──────────────────────────────────────
+        Text(
+          dailyRecTitle,
+          style: const TextStyle(
+            fontSize: 17,
+            fontWeight: FontWeight.w700,
+            color: AppColors.text,
           ),
         ),
+        const SizedBox(height: 10),
 
-        const SizedBox(height: 12),
+        // Calories card
+        _EditableStatCard(
+          label: isRu ? 'Калории' : 'Calories',
+          value: calc.targetCalories.toStringAsFixed(0),
+          unit: '',
+          badgeColor: null,
+          badgeInitial: null,
+        ),
+        const SizedBox(height: 8),
 
-        // ── Scientific source citation (prominent placement) ─────────────
-        _CitationCard(l10n: l10n),
+        // Protein card
+        _EditableStatCard(
+          label: isRu ? 'Белки' : 'Protein',
+          value: calc.protein.toStringAsFixed(0),
+          unit: isRu ? 'г' : 'g',
+          badgeColor: const Color(0xFF3B82F6),
+          badgeInitial: isRu ? 'Б' : 'P',
+        ),
+        const SizedBox(height: 8),
 
+        // Fat card
+        _EditableStatCard(
+          label: isRu ? 'Жиры' : 'Fat',
+          value: calc.fat.toStringAsFixed(0),
+          unit: isRu ? 'г' : 'g',
+          badgeColor: const Color(0xFFF59E0B),
+          badgeInitial: isRu ? 'Ж' : 'F',
+        ),
+        const SizedBox(height: 8),
+
+        // Carbs card
+        _EditableStatCard(
+          label: isRu ? 'Углеводы' : 'Carbs',
+          value: calc.carbs.toStringAsFixed(0),
+          unit: isRu ? 'г' : 'g',
+          badgeColor: const Color(0xFFEF4444),
+          badgeInitial: isRu ? 'У' : 'C',
+        ),
+        const SizedBox(height: 20),
+
+        // ── How to reach goals ────────────────────────────────────────────────
+        Text(
+          howToTitle,
+          style: const TextStyle(
+            fontSize: 17,
+            fontWeight: FontWeight.w700,
+            color: AppColors.text,
+          ),
+        ),
+        const SizedBox(height: 10),
+        _HowToCard(isRu: isRu, l10n: l10n),
+        const SizedBox(height: 20),
+
+        // ── Scientific citations ──────────────────────────────────────────────
+        Text(
+          scienceTitle,
+          style: const TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+            color: AppColors.text,
+            height: 1.4,
+          ),
+        ),
+        const SizedBox(height: 10),
+        _CitationLinks(isRu: isRu),
+        const SizedBox(height: 20),
+
+        // ── Weight forecast chart (skipped in maintain mode) ──────────────────
+        if (!maintain) ...[
+          _WeightChart(calc: calc, l10n: l10n),
+          const SizedBox(height: 20),
+        ],
+
+        // ── Maintain mode info ────────────────────────────────────────────────
         if (maintain) ...[
-          const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(
               color: AppColors.accentSoft,
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: AppColors.accent.withValues(alpha: 0.3)),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: const Color(0xFF3B82F6).withValues(alpha: 0.3)),
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.balance_rounded,
-                    size: 22, color: AppColors.accent),
+                const Icon(Icons.balance_rounded, size: 22, color: Color(0xFF3B82F6)),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(maintainTitle,
-                          style: const TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.text)),
+                      Text(
+                        isRu ? 'Поддержание веса' : 'Weight maintenance',
+                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.text),
+                      ),
                       const SizedBox(height: 4),
-                      Text(maintainBody,
-                          style: const TextStyle(
-                              fontSize: 13,
-                              color: AppColors.textMuted,
-                              height: 1.4)),
+                      Text(
+                        isRu
+                            ? 'Текущий и целевой вес совпадают. Эти калории помогут удержать форму.'
+                            : 'Your current and target weight match. These calories will keep you steady.',
+                        style: const TextStyle(fontSize: 13, color: AppColors.textMuted, height: 1.4),
+                      ),
                     ],
                   ),
                 ),
               ],
             ),
           ),
-        ] else if (calc.daysToGoal != null || calc.targetWeight != null) ...[
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(24),
-            ),
-            child: Column(
-              children: [
-                if (calc.daysToGoal != null)
-                  _InfoRow(
-                    icon: Icons.calendar_today_outlined,
-                    text: l10n.wg_days_to_goal(calc.daysToGoal as int),
-                  ),
-                if (calc.daysToGoal != null && calc.targetWeight != null)
-                  const SizedBox(height: 10),
-                if (calc.targetWeight != null)
-                  _InfoRow(
-                    icon: Icons.flag_outlined,
-                    text: l10n.wg_target_weight_val(
-                        (calc.targetWeight as double).toStringAsFixed(1)),
-                  ),
-              ],
-            ),
-          ),
+          const SizedBox(height: 20),
         ],
-
-        // ── Weight forecast chart (skipped in maintain mode) ─────────────────
-        if (!maintain) ...[
-          const SizedBox(height: 12),
-          _WeightChart(calc: calc, l10n: l10n),
-        ],
-
-        const SizedBox(height: 12),
-
-        // ── How to reach card ────────────────────────────────────────────────
-        Container(
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(24),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                l10n.wg_how_to_reach,
-                style: const TextStyle(
-                    fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.text),
-              ),
-              const SizedBox(height: 14),
-              _FeatureRow(
-                  emoji: '📸',
-                  title: l10n.wg_feature_photo_title,
-                  desc: l10n.wg_feature_photo_desc),
-              const SizedBox(height: 12),
-              _FeatureRow(
-                  emoji: '🎤',
-                  title: l10n.wg_feature_voice_title,
-                  desc: l10n.wg_feature_voice_desc),
-              const SizedBox(height: 12),
-              _FeatureRow(
-                  emoji: '📊',
-                  title: l10n.wg_feature_track_title,
-                  desc: l10n.wg_feature_track_desc),
-            ],
-          ),
-        ),
-
-        const SizedBox(height: 28),
       ],
     );
   }
 }
 
-// ── Personalized AI plan banner ─────────────────────────────────────────────
+// ── Personalized AI plan banner ──────────────────────────────────────────────
 
 class _PersonalPlanBanner extends StatelessWidget {
   final String text;
@@ -357,12 +275,12 @@ class _PersonalPlanBanner extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.circular(26),
+        borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF7C3AED).withValues(alpha: 0.35),
-            blurRadius: 24,
-            offset: const Offset(0, 8),
+            color: const Color(0xFF7C3AED).withValues(alpha: 0.3),
+            blurRadius: 20,
+            offset: const Offset(0, 6),
           ),
         ],
       ),
@@ -371,8 +289,7 @@ class _PersonalPlanBanner extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(Icons.auto_awesome_rounded,
-                  size: 20, color: Colors.white),
+              const Icon(Icons.auto_awesome_rounded, size: 18, color: Colors.white),
               const SizedBox(width: 8),
               Text(
                 label,
@@ -380,20 +297,19 @@ class _PersonalPlanBanner extends StatelessWidget {
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
                   color: Colors.white,
-                  letterSpacing: 0.3,
+                  letterSpacing: 0.2,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           Text(
             text,
             style: const TextStyle(
-              fontSize: 18,
+              fontSize: 16,
               fontWeight: FontWeight.w700,
               color: Colors.white,
               height: 1.35,
-              letterSpacing: -0.2,
             ),
           ),
         ],
@@ -402,195 +318,271 @@ class _PersonalPlanBanner extends StatelessWidget {
   }
 }
 
-enum _PlanDirection { gain, lose, maintain }
+// ── Goal date card with laurels ──────────────────────────────────────────────
 
-// ── Macro chip ──────────────────────────────────────────────────────────────
-
-class _MacroChip extends StatelessWidget {
-  final String label;
-  final double value;
-  final Color color;
-  final Color bgColor;
-  final String unit;
-
-  const _MacroChip({
-    required this.label,
-    required this.value,
-    required this.color,
-    required this.bgColor,
-    required this.unit,
-  });
+class _GoalDateCard extends StatelessWidget {
+  final double targetWeight;
+  final String dateLabel;
+  final bool isRu;
+  const _GoalDateCard({required this.targetWeight, required this.dateLabel, required this.isRu});
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-        decoration: BoxDecoration(
-          color: bgColor,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Column(
-          children: [
-            Text(
-              '${value.toStringAsFixed(0)}$unit',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: color),
+    final label = isRu
+        ? 'Вы должны достичь\n${targetWeight.toStringAsFixed(0)} кг к $dateLabel'
+        : 'You should reach\n${targetWeight.toStringAsFixed(0)} kg by $dateLabel';
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: OBColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          const Text('🏆', style: TextStyle(fontSize: 28)),
+          const SizedBox(width: 12),
+          Text(
+            label,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w800,
+              color: AppColors.text,
+              height: 1.3,
             ),
-            const SizedBox(height: 4),
-            Text(label,
-                style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
-          ],
-        ),
+          ),
+          const SizedBox(width: 12),
+          const Text('🏆', style: TextStyle(fontSize: 28)),
+        ],
       ),
     );
   }
 }
 
-// ── Info row ────────────────────────────────────────────────────────────────
+// ── Editable stat card (Calories / Protein / Fat / Carbs) ────────────────────
 
-class _InfoRow extends StatelessWidget {
-  final IconData icon;
-  final String text;
-  const _InfoRow({required this.icon, required this.text});
+class _EditableStatCard extends StatelessWidget {
+  final String label;
+  final String value;
+  final String unit;
+  final Color? badgeColor;
+  final String? badgeInitial;
 
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, size: 18, color: OBColors.pink),
-        const SizedBox(width: 10),
-        Text(text, style: const TextStyle(fontSize: 15, color: AppColors.text)),
-      ],
-    );
-  }
-}
-
-// ── Feature row ─────────────────────────────────────────────────────────────
-
-class _FeatureRow extends StatelessWidget {
-  final String emoji;
-  final String title;
-  final String desc;
-
-  const _FeatureRow({required this.emoji, required this.title, required this.desc});
+  const _EditableStatCard({
+    required this.label,
+    required this.value,
+    required this.unit,
+    required this.badgeColor,
+    required this.badgeInitial,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: OBColors.pinkSoft,
-            borderRadius: BorderRadius.circular(12),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: OBColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
           ),
-          alignment: Alignment.center,
-          child: Text(emoji, style: const TextStyle(fontSize: 20)),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(title,
-                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-              const SizedBox(height: 2),
-              Text(desc,
+        ],
+      ),
+      child: Row(
+        children: [
+          if (badgeColor != null && badgeInitial != null) ...[
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: badgeColor,
+                shape: BoxShape.circle,
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                badgeInitial!,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+          ],
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
                   style: const TextStyle(
-                      fontSize: 13, color: AppColors.textMuted, height: 1.3)),
-            ],
+                    fontSize: 12,
+                    color: AppColors.textMuted,
+                  ),
+                ),
+                Text(
+                  '$value$unit',
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.text,
+                    height: 1.1,
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-      ],
+          const Icon(Icons.edit_outlined, size: 18, color: AppColors.textMuted),
+        ],
+      ),
     );
   }
 }
 
-// ── Scientific source citation ───────────────────────────────────────────────
+// ── How to reach card ────────────────────────────────────────────────────────
 
-class _CitationCard extends StatelessWidget {
+class _HowToCard extends StatelessWidget {
+  final bool isRu;
   final AppLocalizations l10n;
-  const _CitationCard({required this.l10n});
-
-  static const _pubmedUrl = 'https://pubmed.ncbi.nlm.nih.gov/2305711/';
-  static const _whoUrl = 'https://www.who.int/news-room/fact-sheets/detail/healthy-diet';
+  const _HowToCard({required this.isRu, required this.l10n});
 
   @override
   Widget build(BuildContext context) {
-    final isRu = Localizations.localeOf(context).languageCode == 'ru';
-
-    final citationText = isRu
-        ? 'Расчёт калорий основан на формуле Mifflin-St Jeor (Mifflin MD et al., The American Journal of Clinical Nutrition, 1990). Коэффициенты активности — ВОЗ/ФАО. Нормы макронутриентов — по рекомендациям ВОЗ.'
-        : 'Calorie calculation is based on the Mifflin-St Jeor formula (Mifflin MD et al., The American Journal of Clinical Nutrition, 1990). Activity coefficients from WHO/FAO. Macronutrient ranges per WHO dietary guidelines.';
-    final pubmedLabel = isRu ? 'PubMed' : 'PubMed';
-    final whoLabel = isRu ? 'Рекомендации ВОЗ' : 'WHO Guidelines';
-    final disclaimerText = isRu
-        ? '\n\nЭто информационный расчёт. Проконсультируйтесь с врачом перед изменением рациона.'
-        : '\n\nThis is an informational estimate. Consult a healthcare professional before changing your diet.';
+    final items = isRu ? [
+      ('🍽️', 'Ешь, что любишь', 'Найдите вкусную и сытную еду, которая поможет вам достичь ваших целей.'),
+      ('📸', 'Лёгкий учёт питания', 'Щёлкните фото, оно распознаётся — и готово!'),
+      ('📊', 'Следуйте своему персональному плану калорий', 'Мы создали персональный план специально для вас на основе ваших данных.'),
+      ('⚖️', 'Поддерживайте баланс макроэлементов', 'Соблюдайте баланс белков, жиров и углеводов, чтобы оставаться на пути к цели.'),
+    ] : [
+      ('🍽️', 'Eat what you love', 'Find delicious and filling foods that help you reach your goals.'),
+      ('📸', 'Easy food tracking', 'Take a photo, it gets recognized — done!'),
+      ('📊', 'Follow your personal calorie plan', 'We built a personal plan just for you based on your data.'),
+      ('⚖️', 'Balance your macronutrients', 'Keep protein, fat, and carbs balanced to stay on track.'),
+    ];
 
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Icon(Icons.info_outline, size: 16, color: AppColors.textMuted),
-          const SizedBox(width: 10),
-          Expanded(
-            child: RichText(
-              text: TextSpan(
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: AppColors.textMuted,
-                  height: 1.4,
-                ),
-                children: [
-                  TextSpan(text: '$citationText\n'),
-                  TextSpan(
-                    text: pubmedLabel,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Color(0xFF3B82F6),
-                      decoration: TextDecoration.underline,
-                    ),
-                    recognizer: TapGestureRecognizer()
-                      ..onTap = () => launchUrl(
-                            Uri.parse(_pubmedUrl),
-                            mode: LaunchMode.externalApplication,
-                          ),
-                  ),
-                  const TextSpan(text: '  ·  '),
-                  TextSpan(
-                    text: whoLabel,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Color(0xFF3B82F6),
-                      decoration: TextDecoration.underline,
-                    ),
-                    recognizer: TapGestureRecognizer()
-                      ..onTap = () => launchUrl(
-                            Uri.parse(_whoUrl),
-                            mode: LaunchMode.externalApplication,
-                          ),
-                  ),
-                  TextSpan(text: disclaimerText),
-                ],
-              ),
-            ),
+        border: Border.all(color: OBColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
           ),
         ],
+      ),
+      child: Column(
+        children: items.asMap().entries.map((entry) {
+          final i = entry.key;
+          final item = entry.value;
+          return Column(
+            children: [
+              if (i > 0) const Divider(height: 20, color: OBColors.border),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(item.$1, style: const TextStyle(fontSize: 24)),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          item.$2,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.text,
+                            height: 1.3,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          item.$3,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: AppColors.textMuted,
+                            height: 1.35,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          );
+        }).toList(),
       ),
     );
   }
 }
 
-// ── Weight forecast chart ────────────────────────────────────────────────────
+// ── Citation links ────────────────────────────────────────────────────────────
+
+class _CitationLinks extends StatelessWidget {
+  final bool isRu;
+  const _CitationLinks({required this.isRu});
+
+  static const _harvardUrl = 'https://www.health.harvard.edu/diet-and-weight-loss/calorie-counting-made-easy';
+  static const _usdaUrl = 'https://www.dietaryguidelines.gov/';
+  static const _mifflinUrl = 'https://pubmed.ncbi.nlm.nih.gov/2305711/';
+
+  @override
+  Widget build(BuildContext context) {
+    final links = isRu ? [
+      ('Подсчёт калорий стал проще - Harvard', _harvardUrl),
+      ('Рекомендации по питанию на день - USDA', _usdaUrl),
+      ('Mifflin-St Jeor для специалистов по питанию', _mifflinUrl),
+    ] : [
+      ('Calorie counting made easy - Harvard', _harvardUrl),
+      ('Daily dietary guidelines - USDA', _usdaUrl),
+      ('Mifflin-St Jeor for nutrition specialists', _mifflinUrl),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: links.map((link) => Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: GestureDetector(
+          onTap: () => launchUrl(Uri.parse(link.$2), mode: LaunchMode.externalApplication),
+          child: Text(
+            '— ${link.$1}',
+            style: const TextStyle(
+              fontSize: 13,
+              color: Color(0xFF3B82F6),
+              decoration: TextDecoration.underline,
+              height: 1.4,
+            ),
+          ),
+        ),
+      )).toList(),
+    );
+  }
+}
+
+enum _PlanDirection { gain, lose, maintain }
+
+// ── Weight forecast chart ─────────────────────────────────────────────────────
 
 class _WeightChart extends StatelessWidget {
   final CalculationResult calc;
@@ -616,55 +608,38 @@ class _WeightChart extends StatelessWidget {
     final targetW = calc.targetWeight;
     final deficit = calc.tdee - calc.targetCalories;
 
-    if (deficit > 0) {
-      // Weight loss scenario
-      if (calc.daysToGoal != null && targetW != null) {
-        final days = calc.daysToGoal!.toDouble();
-        final totalKgLoss = deficit * days / 7700.0;
-        final startW = targetW + totalKgLoss;
-        const steps = 6;
-        return List.generate(steps + 1, (i) {
-          final t = i / steps;
-          return FlSpot(days * t, startW - totalKgLoss * t);
-        });
-      }
+    if (deficit > 0 && calc.daysToGoal != null && targetW != null) {
+      final days = calc.daysToGoal!.toDouble();
+      final totalKgLoss = deficit * days / 7700.0;
+      final startW = targetW + totalKgLoss;
+      const steps = 6;
+      return List.generate(steps + 1, (i) {
+        final t = i / steps;
+        return FlSpot(days * t, startW - totalKgLoss * t);
+      });
+    }
 
-      if (targetW != null) {
-        const projDays = 90.0;
-        final totalKgLoss = deficit * projDays / 7700.0;
-        final startW = targetW + totalKgLoss;
-        const steps = 6;
-        return List.generate(steps + 1, (i) {
-          final t = i / steps;
-          return FlSpot(projDays * t, startW - totalKgLoss * t);
-        });
-      }
-    } else {
-      // Weight gain / muscle surplus scenario
-      final surplus = calc.targetCalories - calc.tdee;
-      if (surplus > 0) {
-        if (calc.daysToGoal != null && targetW != null) {
-          final days = calc.daysToGoal!.toDouble();
-          final totalKgGain = surplus * days / 7700.0;
-          final startW = targetW - totalKgGain;
-          const steps = 6;
-          return List.generate(steps + 1, (i) {
-            final t = i / steps;
-            return FlSpot(days * t, startW + totalKgGain * t);
-          });
-        }
+    if (deficit > 0 && targetW != null) {
+      const projDays = 90.0;
+      final totalKgLoss = deficit * projDays / 7700.0;
+      final startW = targetW + totalKgLoss;
+      const steps = 6;
+      return List.generate(steps + 1, (i) {
+        final t = i / steps;
+        return FlSpot(projDays * t, startW - totalKgLoss * t);
+      });
+    }
 
-        if (targetW != null) {
-          const projDays = 90.0;
-          final totalKgGain = surplus * projDays / 7700.0;
-          final startW = targetW - totalKgGain;
-          const steps = 6;
-          return List.generate(steps + 1, (i) {
-            final t = i / steps;
-            return FlSpot(projDays * t, startW + totalKgGain * t);
-          });
-        }
-      }
+    final surplus = calc.targetCalories - calc.tdee;
+    if (surplus > 0 && targetW != null) {
+      final days = calc.daysToGoal != null ? calc.daysToGoal!.toDouble() : 90.0;
+      final totalKgGain = surplus * days / 7700.0;
+      final startW = targetW - totalKgGain;
+      const steps = 6;
+      return List.generate(steps + 1, (i) {
+        final t = i / steps;
+        return FlSpot(days * t, startW + totalKgGain * t);
+      });
     }
 
     return [];
@@ -677,7 +652,7 @@ class _WeightChart extends StatelessWidget {
 
     final isRu = Localizations.localeOf(context).languageCode == 'ru';
     final isGain = calc.targetCalories > calc.tdee;
-    final lineColor = isGain ? AppColors.accent : OBColors.pink;
+    final lineColor = isGain ? const Color(0xFF3B82F6) : OBColors.pink;
 
     final minY = spots.map((s) => s.y).reduce((a, b) => a < b ? a : b);
     final maxY = spots.map((s) => s.y).reduce((a, b) => a > b ? a : b);
@@ -691,7 +666,15 @@ class _WeightChart extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 18, 18, 12),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: OBColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -700,12 +683,11 @@ class _WeightChart extends StatelessWidget {
             padding: const EdgeInsets.only(left: 8, bottom: 12),
             child: Text(
               chartTitle,
-              style: const TextStyle(
-                  fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.text),
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.text),
             ),
           ),
           SizedBox(
-            height: 160,
+            height: 150,
             child: LineChart(
               LineChartData(
                 minY: minY - yPad,
@@ -714,7 +696,7 @@ class _WeightChart extends StatelessWidget {
                   show: true,
                   drawVerticalLine: false,
                   getDrawingHorizontalLine: (_) =>
-                      const FlLine(color: AppColors.border, strokeWidth: 1),
+                      const FlLine(color: OBColors.border, strokeWidth: 1),
                 ),
                 borderData: FlBorderData(show: false),
                 titlesData: FlTitlesData(
@@ -724,8 +706,7 @@ class _WeightChart extends StatelessWidget {
                       reservedSize: 40,
                       getTitlesWidget: (v, meta) => Text(
                         v.toStringAsFixed(1),
-                        style: const TextStyle(
-                            fontSize: 10, color: AppColors.textMuted),
+                        style: const TextStyle(fontSize: 10, color: AppColors.textMuted),
                       ),
                     ),
                   ),
@@ -737,23 +718,19 @@ class _WeightChart extends StatelessWidget {
                         final day = v.toInt();
                         if (day == 0) {
                           return Text(l10n.wg_now,
-                              style: const TextStyle(
-                                  fontSize: 9, color: AppColors.textMuted));
+                              style: const TextStyle(fontSize: 9, color: AppColors.textMuted));
                         }
                         final maxDay = spots.last.x.toInt();
                         if (day == maxDay) {
                           return Text('${day}d',
-                              style: const TextStyle(
-                                  fontSize: 9, color: AppColors.textMuted));
+                              style: const TextStyle(fontSize: 9, color: AppColors.textMuted));
                         }
                         return const SizedBox.shrink();
                       },
                     ),
                   ),
-                  topTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false)),
-                  rightTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false)),
+                  topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                 ),
                 lineBarsData: [
                   LineChartBarData(
@@ -778,7 +755,7 @@ class _WeightChart extends StatelessWidget {
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
                         colors: [
-                          lineColor.withValues(alpha: 0.2),
+                          lineColor.withValues(alpha: 0.18),
                           lineColor.withValues(alpha: 0.0),
                         ],
                       ),

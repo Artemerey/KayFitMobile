@@ -11,6 +11,7 @@ import 'features/auth/screens/login_screen.dart';
 import 'features/dashboard/screens/dashboard_screen.dart';
 import 'features/journal/screens/journal_screen.dart';
 import 'features/journal/screens/edit_meal_screen.dart';
+import 'shared/models/meal.dart';
 import 'features/settings/screens/settings_screen.dart';
 import 'features/settings/screens/settings_v2_screen.dart';
 import 'features/settings/screens/goals_screen.dart';
@@ -202,7 +203,11 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/meals/:id/edit',
         builder: (context, state) {
           final id = int.parse(state.pathParameters['id']!);
-          return EditMealScreen(mealId: id);
+          // When the caller has the Meal in hand (Journal list, dashboard) it
+          // passes it via `extra`, so we can render instantly without the
+          // /api/meals/history round-trip. Falls back to network when null.
+          final initial = state.extra is Meal ? state.extra as Meal : null;
+          return EditMealScreen(mealId: id, initial: initial);
         },
       ),
 
