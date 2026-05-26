@@ -2677,6 +2677,162 @@ abstract class AppLocalizations {
   /// In ru, this message translates to:
   /// **'{count} блюд'**
   String mealGroup_itemsCount(int count);
+
+  /// No description provided for @paywall_headline.
+  ///
+  /// In ru, this message translates to:
+  /// **'ИИ считает калории.\nТы просто ешь.'**
+  String get paywall_headline;
+
+  /// No description provided for @paywall_subtitle.
+  ///
+  /// In ru, this message translates to:
+  /// **'Сфотографируй тарелку, скажи голосом или спроси нутрициолога — KayFit запишет всё сам.'**
+  String get paywall_subtitle;
+
+  /// No description provided for @paywall_feature_photo_title.
+  ///
+  /// In ru, this message translates to:
+  /// **'Фото → КБЖУ за секунды'**
+  String get paywall_feature_photo_title;
+
+  /// No description provided for @paywall_feature_photo_sub.
+  ///
+  /// In ru, this message translates to:
+  /// **'ИИ определяет ингредиенты и вес порции'**
+  String get paywall_feature_photo_sub;
+
+  /// No description provided for @paywall_feature_voice_title.
+  ///
+  /// In ru, this message translates to:
+  /// **'Скажи вслух'**
+  String get paywall_feature_voice_title;
+
+  /// No description provided for @paywall_feature_voice_sub.
+  ///
+  /// In ru, this message translates to:
+  /// **'«Съел куриный плов» → залогировано сразу'**
+  String get paywall_feature_voice_sub;
+
+  /// No description provided for @paywall_feature_chat_title.
+  ///
+  /// In ru, this message translates to:
+  /// **'Нутрициолог в кармане'**
+  String get paywall_feature_chat_title;
+
+  /// No description provided for @paywall_feature_chat_sub.
+  ///
+  /// In ru, this message translates to:
+  /// **'Спроси о питании — ответит и запишет'**
+  String get paywall_feature_chat_sub;
+
+  /// No description provided for @paywall_plan_trial_title.
+  ///
+  /// In ru, this message translates to:
+  /// **'СТАРТ\n7 дней 🆓'**
+  String get paywall_plan_trial_title;
+
+  /// No description provided for @paywall_plan_monthly_title.
+  ///
+  /// In ru, this message translates to:
+  /// **'Месяц'**
+  String get paywall_plan_monthly_title;
+
+  /// No description provided for @paywall_plan_quarterly_title.
+  ///
+  /// In ru, this message translates to:
+  /// **'3 месяца'**
+  String get paywall_plan_quarterly_title;
+
+  /// No description provided for @paywall_plan_quarterly_badge.
+  ///
+  /// In ru, this message translates to:
+  /// **'★ ЛУЧШИЙ'**
+  String get paywall_plan_quarterly_badge;
+
+  /// No description provided for @paywall_plan_yearly_title.
+  ///
+  /// In ru, this message translates to:
+  /// **'Год'**
+  String get paywall_plan_yearly_title;
+
+  /// No description provided for @paywall_plan_yearly_badge.
+  ///
+  /// In ru, this message translates to:
+  /// **'🔥 −40%'**
+  String get paywall_plan_yearly_badge;
+
+  /// No description provided for @paywall_cta_trial.
+  ///
+  /// In ru, this message translates to:
+  /// **'Начать 7 дней бесплатно'**
+  String get paywall_cta_trial;
+
+  /// No description provided for @paywall_cta_buy.
+  ///
+  /// In ru, this message translates to:
+  /// **'Подписаться'**
+  String get paywall_cta_buy;
+
+  /// No description provided for @paywall_trial_note.
+  ///
+  /// In ru, this message translates to:
+  /// **'Отменить до конца 7 дней — ничего не спишется'**
+  String get paywall_trial_note;
+
+  /// No description provided for @paywall_dismiss.
+  ///
+  /// In ru, this message translates to:
+  /// **'Нет, буду вводить руками'**
+  String get paywall_dismiss;
+
+  /// No description provided for @paywall_restore.
+  ///
+  /// In ru, this message translates to:
+  /// **'Восстановить'**
+  String get paywall_restore;
+
+  /// No description provided for @paywall_terms.
+  ///
+  /// In ru, this message translates to:
+  /// **'Условия'**
+  String get paywall_terms;
+
+  /// No description provided for @paywall_privacy.
+  ///
+  /// In ru, this message translates to:
+  /// **'Политика'**
+  String get paywall_privacy;
+
+  /// No description provided for @paywall_pending_snack.
+  ///
+  /// In ru, this message translates to:
+  /// **'Платёж обрабатывается. Попробуйте позже.'**
+  String get paywall_pending_snack;
+
+  /// No description provided for @paywall_error_snack.
+  ///
+  /// In ru, this message translates to:
+  /// **'Ошибка покупки. Попробуйте ещё раз.'**
+  String get paywall_error_snack;
+
+  /// No description provided for @paywall_restored_snack.
+  ///
+  /// In ru, this message translates to:
+  /// **'Подписка восстановлена'**
+  String get paywall_restored_snack;
+
+  /// No description provided for @paywall_no_restore_snack.
+  ///
+  /// In ru, this message translates to:
+  /// **'Активная подписка не найдена'**
+  String get paywall_no_restore_snack;
+
+  /// No description provided for @paywall_restore_error_snack.
+  ///
+  /// In ru, this message translates to:
+  /// **'Ошибка восстановления. Попробуйте ещё раз.'**
+  String get paywall_restore_error_snack;
 }
 
 class _AppLocalizationsDelegate

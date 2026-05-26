@@ -1356,4 +1356,88 @@ class AppLocalizationsRu extends AppLocalizations {
   String mealGroup_itemsCount(int count) {
     return '$count блюд';
   }
+
+  @override
+  String get paywall_headline => 'ИИ считает калории.\nТы просто ешь.';
+
+  @override
+  String get paywall_subtitle =>
+      'Сфотографируй тарелку, скажи голосом или спроси нутрициолога — KayFit запишет всё сам.';
+
+  @override
+  String get paywall_feature_photo_title => 'Фото → КБЖУ за секунды';
+
+  @override
+  String get paywall_feature_photo_sub =>
+      'ИИ определяет ингредиенты и вес порции';
+
+  @override
+  String get paywall_feature_voice_title => 'Скажи вслух';
+
+  @override
+  String get paywall_feature_voice_sub =>
+      '«Съел куриный плов» → залогировано сразу';
+
+  @override
+  String get paywall_feature_chat_title => 'Нутрициолог в кармане';
+
+  @override
+  String get paywall_feature_chat_sub => 'Спроси о питании — ответит и запишет';
+
+  @override
+  String get paywall_plan_trial_title => 'СТАРТ\n7 дней 🆓';
+
+  @override
+  String get paywall_plan_monthly_title => 'Месяц';
+
+  @override
+  String get paywall_plan_quarterly_title => '3 месяца';
+
+  @override
+  String get paywall_plan_quarterly_badge => '★ ЛУЧШИЙ';
+
+  @override
+  String get paywall_plan_yearly_title => 'Год';
+
+  @override
+  String get paywall_plan_yearly_badge => '🔥 −40%';
+
+  @override
+  String get paywall_cta_trial => 'Начать 7 дней бесплатно';
+
+  @override
+  String get paywall_cta_buy => 'Подписаться';
+
+  @override
+  String get paywall_trial_note =>
+      'Отменить до конца 7 дней — ничего не спишется';
+
+  @override
+  String get paywall_dismiss => 'Нет, буду вводить руками';
+
+  @override
+  String get paywall_restore => 'Восстановить';
+
+  @override
+  String get paywall_terms => 'Условия';
+
+  @override
+  String get paywall_privacy => 'Политика';
+
+  @override
+  String get paywall_pending_snack =>
+      'Платёж обрабатывается. Попробуйте позже.';
+
+  @override
+  String get paywall_error_snack => 'Ошибка покупки. Попробуйте ещё раз.';
+
+  @override
+  String get paywall_restored_snack => 'Подписка восстановлена';
+
+  @override
+  String get paywall_no_restore_snack => 'Активная подписка не найдена';
+
+  @override
+  String get paywall_restore_error_snack =>
+      'Ошибка восстановления. Попробуйте ещё раз.';
 }

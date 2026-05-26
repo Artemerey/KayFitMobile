@@ -3,9 +3,11 @@ import 'dart:convert';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:purchases_flutter/purchases_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app.dart';
+import 'core/ai_consent/ai_consent_provider.dart';
 import 'core/analytics/analytics_service.dart';
 import 'core/api/api_client.dart';
 import 'core/auth/auth_provider.dart';
@@ -19,6 +21,12 @@ void main() async {
   // ── 1. Firebase first (Analytics + FCM both depend on it) ─────────────────
   await Firebase.initializeApp();
 
+  // ── 1b. RevenueCat — configure before any purchase calls ─────────────────
+  const rcApiKey = String.fromEnvironment('RC_IOS_KEY');
+  if (rcApiKey.isNotEmpty) {
+    await Purchases.configure(PurchasesConfiguration(rcApiKey));
+  }
+
   // ── 2. Parallel: Dio setup + prefs + Analytics + FCM setup ───────────────
   final results = await Future.wait([
     initApiClient(),                    // pure Dio — no network calls
@@ -29,6 +37,11 @@ void main() async {
 
   final prefs = results[1] as SharedPreferences;
   final onboardingDone = prefs.getBool('onboarding_done') ?? false;
+
+  // Read the cached consent synchronously so the router never sees null
+  // on first frame for users who have already answered — prevents the race
+  // where the router briefly redirects to /ai-consent for returning users.
+  final localConsent = prefs.getBool(kAiConsentLocalKey);
 
   // ── 3. Load cached user profile → skip loading screen for returning users ─
   UserProfile? cachedUser;
@@ -47,6 +60,11 @@ void main() async {
     ProviderScope(
       overrides: [
         onboardingDoneProvider.overrideWith((ref) => onboardingDone),
+        // Pre-seed aiConsentProvider with the locally cached value so the
+        // router's first evaluation never briefly redirects to /ai-consent
+        // for users who already answered. Null = first launch (no key yet).
+        if (localConsent != null)
+          aiConsentProvider.overrideWith(() => AiConsentNotifier(localConsent)),
       ],
       child: _AppInit(cachedUser: cachedUser),
     ),

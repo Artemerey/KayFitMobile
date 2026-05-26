@@ -36,6 +36,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/analytics/analytics_service.dart';
 import '../../../core/ai_consent/ai_consent_provider.dart';
 import '../../../core/api/api_client.dart';
+import '../../../core/subscription/require_subscription.dart';
 import '../../../features/add_meal/screens/barcode_scanner_screen_v2.dart';
 import '../../../features/add_meal/screens/recognition_result_sheet_kf2.dart';
 import '../providers/photo_recognition_provider.dart';
@@ -43,7 +44,6 @@ import '../../../features/dashboard/providers/dashboard_provider.dart';
 import '../../../features/journal/screens/journal_screen.dart'
     show journalDayMealsProvider;
 import '../../../shared/models/ingredient_v2.dart';
-import '../../../shared/models/nutrients_v2.dart';
 import '../providers/pending_meal_provider.dart';
 import '../../../shared/models/stats.dart';
 import '../../../shared/theme/kayfit2_theme.dart';
@@ -328,6 +328,10 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
   Future<void> _send() async {
     final text = _textController.text.trim();
     if (text.isEmpty || _isSending) return;
+
+    // Subscription gate — block AI chat for free users.
+    final ok = await requireSubscription(context, ref);
+    if (!ok || !mounted) return;
 
     // Consent gate — block if consent declined.
     final consent = ref.read(aiConsentProvider);
@@ -779,112 +783,82 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     if (items == null || index < 0 || index >= items.length) return;
     final original = items[index];
 
-    final result = await showModalBottomSheet<_EditPendingItemResult>(
+    final correction = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (sheetCtx) => _EditPendingItemSheet(original: original),
+      builder: (_) => _CorrectIngredientSheet(original: original),
     );
-    if (result == null || !mounted) return;
+    if (correction == null || correction.isEmpty || !mounted) return;
 
-    final nameChanged = result.name.trim() != original.name.trim();
-    final weightChanged =
-        (result.weightGrams - original.weightGrams).abs() > 0.5;
-    final origTotals = original.nutrientsTotal;
-    final kbjuChanged =
-        (result.calories - origTotals.calories).abs() > 0.5 ||
-            (result.protein - origTotals.protein).abs() > 0.05 ||
-            (result.fat - origTotals.fat).abs() > 0.05 ||
-            (result.carbs - origTotals.carbs).abs() > 0.05;
+    final lang = Localizations.localeOf(context).languageCode == 'ru'
+        ? 'ru'
+        : 'en';
+    final isRu = lang == 'ru';
+    final unit = isRu ? 'г' : 'g';
+    final composed = isRu
+        ? '${original.name}, ${original.weightGrams.toStringAsFixed(0)}$unit. '
+            'Уточнение: $correction'
+        : '${original.name}, ${original.weightGrams.toStringAsFixed(0)}$unit. '
+            'Correction: $correction';
 
-    IngredientV2? updated;
-
-    if (nameChanged) {
-      // DB re-search for the new name. Show a brief snackbar on miss/error.
-      final lang =
-          Localizations.localeOf(context).languageCode == 'ru' ? 'ru' : 'en';
-      final isRu = lang == 'ru';
-      try {
-        final resp = await apiDio.post(
-          '/api/v2/parse_meal_suggestions',
-          data: {'text': result.name, 'language': lang},
-        );
-        final raw = (resp.data['items'] as List?)
-            ?.cast<Map<String, dynamic>>();
-        if (raw == null || raw.isEmpty) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-              content: Text(
-                isRu
-                    ? 'Не нашли «${result.name}» в базе'
-                    : 'Couldn\'t find "${result.name}"',
-              ),
-              behavior: SnackBarBehavior.floating,
-            ));
-          }
-          return;
-        }
-        // Trust the user's weight if they typed one different from original;
-        // else use the backend's suggested portion.
-        final suggestedW =
-            (raw.first['weight_grams'] as num?)?.toDouble() ??
-                result.weightGrams;
-        final useW = weightChanged ? result.weightGrams : suggestedW;
-        updated = ingredientV2FromSuggestion(raw.first, useW);
-      } on Exception {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(isRu
-                ? 'Не удалось обновить — попробуй ещё раз'
-                : 'Could not update — please try again'),
-            behavior: SnackBarBehavior.floating,
-            backgroundColor: K2Colors.error,
-          ));
-        }
+    ref.read(pendingMealProvider.notifier).setAdding(true);
+    try {
+      final resp = await apiDio.post(
+        '/api/v2/parse_meal_suggestions',
+        data: {'text': composed, 'language': lang},
+      );
+      final raw = (resp.data['items'] as List?)?.cast<Map<String, dynamic>>();
+      if (raw == null || raw.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(isRu
+              ? 'Не удалось найти подходящий вариант'
+              : 'Could not find a matching item'),
+          behavior: SnackBarBehavior.floating,
+        ));
         return;
       }
-    } else if (kbjuChanged) {
-      // Manual KBJU override. Derive per-100g for the 4 macros from the
-      // user's totals so future weight tweaks still scale correctly. Other
-      // nutrient fields (fiber, sodium, vitamins) are preserved as-is on
-      // the per-100g object — they'll be re-scaled when totals are recomputed.
-      final w = result.weightGrams > 0 ? result.weightGrams : 100.0;
-      final factor = 100.0 / w;
-      final origPer100 = original.nutrientsPer100g;
-      final newPer100 = NutrientsV2(
-        calories: result.calories * factor,
-        protein: result.protein * factor,
-        fat: result.fat * factor,
-        carbs: result.carbs * factor,
-        fiber: origPer100.fiber,
-        sugar: origPer100.sugar,
-        sugarAlcohols: origPer100.sugarAlcohols,
-        netCarbs: origPer100.netCarbs,
-        saturatedFat: origPer100.saturatedFat,
-        monounsaturatedFat: origPer100.monounsaturatedFat,
-        polyunsaturatedFat: origPer100.polyunsaturatedFat,
-        sodiumMg: origPer100.sodiumMg,
-        cholesterolMg: origPer100.cholesterolMg,
-        potassiumMg: origPer100.potassiumMg,
-        calciumMg: origPer100.calciumMg,
-        ironMg: origPer100.ironMg,
-        vitaminAMcg: origPer100.vitaminAMcg,
-        vitaminCMg: origPer100.vitaminCMg,
-        vitaminDMcg: origPer100.vitaminDMcg,
-        glycemicIndex: origPer100.glycemicIndex,
-        glycemicIndexCategory: origPer100.glycemicIndexCategory,
-      );
-      // `withWeight` rebuilds nutrientsTotal from per-100g and the supplied
-      // weight, so the manually entered macro totals are honored exactly.
-      updated = original
-          .copyWith(nutrientsPer100g: newPer100)
-          .withWeight(w);
-    } else if (weightChanged) {
-      updated = original.withWeight(result.weightGrams);
-    } else {
-      return; // nothing actually changed
+      // Carry the user's current weight forward unless the backend explicitly
+      // overrides it (e.g. when correction itself implies a new portion).
+      final first = raw.first;
+      final suggestedW = (first['weight_grams'] as num?)?.toDouble();
+      final useW = suggestedW ?? original.weightGrams;
+      final updated = ingredientV2FromSuggestion(first, useW);
+      ref.read(pendingMealProvider.notifier).replaceItem(index, updated);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(isRu
+            ? 'Обновлено: ${updated.name} '
+                '${updated.weightGrams.toStringAsFixed(0)}$unit · '
+                '${updated.nutrientsTotal.calories.round()} ккал'
+            : 'Updated: ${updated.name} '
+                '${updated.weightGrams.toStringAsFixed(0)}$unit · '
+                '${updated.nutrientsTotal.calories.round()} kcal'),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ));
+    } on Exception {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(isRu
+            ? 'Ошибка обновления — попробуй ещё раз'
+            : 'Update failed — try again'),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: K2Colors.error,
+      ));
+    } finally {
+      if (mounted) ref.read(pendingMealProvider.notifier).setAdding(false);
     }
+  }
 
+  /// Inline weight change from a row's weight pill. Scales the item's macros
+  /// proportionally via `withWeight` and replaces it in the provider.
+  void _onPendingItemWeightChange(int index, double newWeight) {
+    final items = ref.read(pendingMealProvider).items;
+    if (items == null || index < 0 || index >= items.length) return;
+    if (newWeight <= 0) return;
+    final updated = items[index].withWeight(newWeight);
     ref.read(pendingMealProvider.notifier).replaceItem(index, updated);
   }
 
@@ -967,13 +941,23 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     _photoResultConsumed = false;
 
     final isRu = state.langCode == 'ru';
+    // Surface the real backend error in debug/profile builds — the bare
+    // "что-то пошло не так" message hides whether it was a 4xx, timeout,
+    // connectivity issue, or Claude vision failure. Strip generic
+    // "Exception:" prefix.
+    String details = (state.errorMessage ?? '').trim();
+    if (details.startsWith('Exception:')) {
+      details = details.substring('Exception:'.length).trim();
+    }
     final msg = state.isNotFood
         ? (isRu
             ? 'Это не похоже на еду. Попробуйте ещё раз.'
             : "That doesn't look like food. Please try again.")
         : (isRu
-            ? 'Что-то пошло не так. Попробуйте ещё раз.'
-            : 'Something went wrong. Please try again.');
+            ? 'Что-то пошло не так${details.isEmpty ? "" : ": $details"}. '
+                'Попробуйте ещё раз.'
+            : 'Something went wrong'
+                '${details.isEmpty ? "" : ": $details"}. Please try again.');
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -1299,6 +1283,7 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
                 onAdd: _confirmAddPendingMeal,
                 onCancel: _cancelPendingMeal,
                 onEditItem: _onEditPendingItem,
+                onWeightChange: _onPendingItemWeightChange,
                 theme: t,
               ),
 
@@ -2147,6 +2132,7 @@ class _PendingMealCard extends StatelessWidget {
     required this.onAdd,
     required this.onCancel,
     required this.onEditItem,
+    required this.onWeightChange,
     required this.theme,
   });
 
@@ -2157,10 +2143,16 @@ class _PendingMealCard extends StatelessWidget {
   final VoidCallback onAdd;
   final VoidCallback onCancel;
 
-  /// Triggered when the user taps the pencil on a row. The handler shows the
-  /// edit bottom-sheet, possibly re-searches the DB on name change, and
-  /// updates the pending-meal provider.
+  /// Triggered when the user taps the "correct" link on a row. Opens the
+  /// AI-correction sheet — user types a free-form correction, backend
+  /// re-parses through Claude + FatSecret and replaces the item.
   final void Function(int index) onEditItem;
+
+  /// Inline weight edit — committed when the user finishes editing the
+  /// weight pill on a row. Triggers a proportional macro recalculation via
+  /// `IngredientV2.withWeight`.
+  final void Function(int index, double newWeight) onWeightChange;
+
   final K2Theme theme;
 
   static const _kMealTypes = ['breakfast', 'lunch', 'snack', 'dinner'];
@@ -2220,61 +2212,53 @@ class _PendingMealCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
-          // Cap the items section so a long voice-parsed meal can't squeeze
-          // the chat ListView to zero height. ~120 logical px shows about
-          // 4 items at once; the rest is reachable via inner scroll.
+          if (isAdding)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.5,
+                      color: K2Colors.accent,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    isRu ? 'Перепроверяем через базу…' : 'Checking database…',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: theme.fgDim,
+                      fontFamily: K2Fonts.sans,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          // Cap items section so a long voice-parsed meal can't squeeze the
+          // chat ListView to zero height. ~210 px shows about 3 ingredient
+          // rows; longer lists scroll internally.
           ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 120),
-            child: ListView.builder(
+            constraints: const BoxConstraints(maxHeight: 210),
+            child: ListView.separated(
               shrinkWrap: true,
               padding: EdgeInsets.zero,
               itemCount: items.length,
-              itemBuilder: (_, idx) {
-                final i = items[idx];
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 3),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          '${i.name} (${i.weightGrams.toStringAsFixed(0)}${isRu ? "г" : "g"})',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: theme.fgDim,
-                            fontFamily: K2Fonts.sans,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      Text(
-                        '${i.nutrientsTotal.calories.round()}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: theme.fgDim,
-                          fontFamily: K2Fonts.mono,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      // Pencil — opens the per-item edit sheet (name / weight /
-                      // KBJU). Disabled while the parent is mid-save to avoid
-                      // racing with /api/meals/add_selected.
-                      GestureDetector(
-                        onTap: isAdding ? null : () => onEditItem(idx),
-                        behavior: HitTestBehavior.opaque,
-                        child: Padding(
-                          padding: const EdgeInsets.all(4),
-                          child: Icon(
-                            Icons.edit_outlined,
-                            size: 16,
-                            color: isAdding ? theme.fgMute : theme.fgDim,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              },
+              separatorBuilder: (_, __) => Divider(
+                height: 1,
+                thickness: 1,
+                color: theme.hairline,
+              ),
+              itemBuilder: (_, idx) => _PendingMealItemRow(
+                item: items[idx],
+                theme: theme,
+                isAdding: isAdding,
+                onCorrect: () => onEditItem(idx),
+                onWeightChange: (newW) => onWeightChange(idx, newW),
+              ),
             ),
           ),
           const SizedBox(height: 6),
@@ -2486,95 +2470,324 @@ class _ChatDisclaimerBanner extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Per-item edit sheet for the pending meal card
+// Pending meal item row — name + KBJU + inline-editable weight pill + "fix"
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Snapshot of the user's edits returned by [_EditPendingItemSheet]. The
-/// chat handler compares against the original to decide whether to re-search
-/// the DB (name change), override per-100g macros (KBJU change), or just
-/// re-scale on weight.
-class _EditPendingItemResult {
-  const _EditPendingItemResult({
-    required this.name,
-    required this.weightGrams,
-    required this.calories,
-    required this.protein,
-    required this.fat,
-    required this.carbs,
+/// Renders a single ingredient inside the pending meal card.
+///
+/// Two-line layout, K2 design tokens:
+///   1. Name (bold) ............................ "скорректировать" link
+///   2. [weight pill] · K · B · F · C ............................ kcal
+///
+/// The weight pill toggles into an inline TextField on tap — committing on
+/// submit or focus loss recalculates macros proportionally via
+/// `IngredientV2.withWeight`. The "fix" link opens [_CorrectIngredientSheet]
+/// for free-form AI corrections (re-parses through Claude + FatSecret).
+class _PendingMealItemRow extends StatefulWidget {
+  const _PendingMealItemRow({
+    required this.item,
+    required this.theme,
+    required this.isAdding,
+    required this.onCorrect,
+    required this.onWeightChange,
   });
 
-  final String name;
-  final double weightGrams;
-  final double calories;
-  final double protein;
-  final double fat;
-  final double carbs;
-}
-
-class _EditPendingItemSheet extends StatefulWidget {
-  const _EditPendingItemSheet({required this.original});
-
-  final IngredientV2 original;
+  final IngredientV2 item;
+  final K2Theme theme;
+  final bool isAdding;
+  final VoidCallback onCorrect;
+  final ValueChanged<double> onWeightChange;
 
   @override
-  State<_EditPendingItemSheet> createState() => _EditPendingItemSheetState();
+  State<_PendingMealItemRow> createState() => _PendingMealItemRowState();
 }
 
-class _EditPendingItemSheetState extends State<_EditPendingItemSheet> {
-  late final TextEditingController _nameCtrl;
+class _PendingMealItemRowState extends State<_PendingMealItemRow> {
   late final TextEditingController _weightCtrl;
-  late final TextEditingController _calCtrl;
-  late final TextEditingController _proCtrl;
-  late final TextEditingController _fatCtrl;
-  late final TextEditingController _carbCtrl;
+  late final FocusNode _weightFocus;
 
   @override
   void initState() {
     super.initState();
-    final o = widget.original;
-    _nameCtrl = TextEditingController(text: o.name);
-    _weightCtrl = TextEditingController(text: o.weightGrams.toStringAsFixed(0));
-    _calCtrl = TextEditingController(
-        text: o.nutrientsTotal.calories.toStringAsFixed(0));
-    _proCtrl = TextEditingController(
-        text: o.nutrientsTotal.protein.toStringAsFixed(1));
-    _fatCtrl = TextEditingController(
-        text: o.nutrientsTotal.fat.toStringAsFixed(1));
-    _carbCtrl = TextEditingController(
-        text: o.nutrientsTotal.carbs.toStringAsFixed(1));
+    _weightCtrl = TextEditingController(
+      text: widget.item.weightGrams.toStringAsFixed(0),
+    );
+    _weightFocus = FocusNode();
+    _weightFocus.addListener(_onFocusChange);
+  }
+
+  @override
+  void didUpdateWidget(covariant _PendingMealItemRow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Mirror provider-driven weight changes (e.g. AI correction) back into
+    // the field — but only when not actively editing, to avoid clobbering
+    // user keystrokes mid-typing.
+    if (!_weightFocus.hasFocus &&
+        oldWidget.item.weightGrams != widget.item.weightGrams) {
+      _weightCtrl.text = widget.item.weightGrams.toStringAsFixed(0);
+    }
   }
 
   @override
   void dispose() {
-    _nameCtrl.dispose();
+    _weightFocus.removeListener(_onFocusChange);
+    _weightFocus.dispose();
     _weightCtrl.dispose();
-    _calCtrl.dispose();
-    _proCtrl.dispose();
-    _fatCtrl.dispose();
-    _carbCtrl.dispose();
+    super.dispose();
+  }
+
+  void _onFocusChange() {
+    if (!_weightFocus.hasFocus) _commit();
+  }
+
+  void _commit() {
+    final raw = _weightCtrl.text.trim();
+    final v = double.tryParse(raw);
+    if (v == null || v <= 0) {
+      _weightCtrl.text = widget.item.weightGrams.toStringAsFixed(0);
+    } else if ((v - widget.item.weightGrams).abs() > 0.5) {
+      widget.onWeightChange(v);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = widget.theme;
+    final i = widget.item;
+    final n = i.nutrientsTotal;
+    final isRu = Localizations.localeOf(context).languageCode == 'ru';
+    final unit = isRu ? 'г' : 'g';
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Line 1 — name + correct link
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  i.name,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: t.fg,
+                    fontFamily: K2Fonts.sans,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: widget.isAdding ? null : widget.onCorrect,
+                behavior: HitTestBehavior.opaque,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 2,
+                  ),
+                  child: Text(
+                    isRu ? 'скорректировать' : 'fix',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: widget.isAdding ? t.fgMute : K2Colors.accent,
+                      fontFamily: K2Fonts.sans,
+                      decoration: TextDecoration.underline,
+                      decorationColor: K2Colors.accent.withValues(alpha: 0.4),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          // Line 2 — weight pill + macros + kcal
+          Row(
+            children: [
+              _WeightField(
+                controller: _weightCtrl,
+                focusNode: _weightFocus,
+                unit: unit,
+                onSubmitted: _commit,
+                theme: t,
+                readOnly: widget.isAdding,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _MacroLine(
+                  protein: n.protein,
+                  fat: n.fat,
+                  carbs: n.carbs,
+                  isRu: isRu,
+                  theme: t,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '${n.calories.round()} ${isRu ? "ккал" : "kcal"}',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: t.fg,
+                  fontFamily: K2Fonts.mono,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _WeightField extends StatelessWidget {
+  const _WeightField({
+    required this.controller,
+    required this.focusNode,
+    required this.unit,
+    required this.onSubmitted,
+    required this.theme,
+    this.readOnly = false,
+  });
+
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final String unit;
+  final VoidCallback onSubmitted;
+  final K2Theme theme;
+  final bool readOnly;
+
+  @override
+  Widget build(BuildContext context) {
+    final borderColor =
+        readOnly ? theme.border : K2Colors.accent.withValues(alpha: 0.7);
+    return SizedBox(
+      width: 80,
+      height: 26,
+      child: TextField(
+        controller: controller,
+        focusNode: focusNode,
+        readOnly: readOnly,
+        keyboardType: const TextInputType.numberWithOptions(decimal: false),
+        textAlign: TextAlign.center,
+        onSubmitted: (_) => onSubmitted(),
+        style: TextStyle(
+          fontSize: 12,
+          color: readOnly ? theme.fgMute : theme.fg,
+          fontFamily: K2Fonts.mono,
+          fontWeight: FontWeight.w600,
+        ),
+        decoration: InputDecoration(
+          isDense: true,
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(13),
+            borderSide: BorderSide(color: borderColor),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(13),
+            borderSide: BorderSide(color: K2Colors.accent, width: 1.5),
+          ),
+          suffixText: unit,
+          suffixStyle: TextStyle(
+            fontSize: 11,
+            color: theme.fgMute,
+            fontFamily: K2Fonts.mono,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MacroLine extends StatelessWidget {
+  const _MacroLine({
+    required this.protein,
+    required this.fat,
+    required this.carbs,
+    required this.isRu,
+    required this.theme,
+  });
+
+  final double protein;
+  final double fat;
+  final double carbs;
+  final bool isRu;
+  final K2Theme theme;
+
+  @override
+  Widget build(BuildContext context) {
+    final dim = TextStyle(
+      fontSize: 11,
+      color: theme.fgDim,
+      fontFamily: K2Fonts.mono,
+    );
+    final sep = dim.copyWith(color: theme.fgDim.withValues(alpha: 0.4));
+    return Text.rich(
+      TextSpan(
+        style: dim,
+        children: [
+          TextSpan(text: isRu ? 'Б ' : 'P '),
+          TextSpan(
+            text: protein.round().toString(),
+            style: dim.copyWith(color: theme.fg),
+          ),
+          TextSpan(text: '  ·  ', style: sep),
+          TextSpan(text: isRu ? 'Ж ' : 'F '),
+          TextSpan(
+            text: fat.round().toString(),
+            style: dim.copyWith(color: theme.fg),
+          ),
+          TextSpan(text: '  ·  ', style: sep),
+          TextSpan(text: isRu ? 'У ' : 'C '),
+          TextSpan(
+            text: carbs.round().toString(),
+            style: dim.copyWith(color: theme.fg),
+          ),
+        ],
+      ),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AI-correction sheet for a single ingredient
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Single free-form text input. Returns the user's correction string via
+/// `Navigator.pop`; the chat handler concatenates it with the original
+/// `(name, weight)` context and re-runs `/api/v2/parse_meal_suggestions` —
+/// which goes through Claude identify → FatSecret enrichment, exactly the
+/// same path as the initial voice/text parse. So whatever was wrong with
+/// the LLM's first guess gets a fresh resolution.
+class _CorrectIngredientSheet extends StatefulWidget {
+  const _CorrectIngredientSheet({required this.original});
+
+  final IngredientV2 original;
+
+  @override
+  State<_CorrectIngredientSheet> createState() =>
+      _CorrectIngredientSheetState();
+}
+
+class _CorrectIngredientSheetState extends State<_CorrectIngredientSheet> {
+  final _textCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _textCtrl.dispose();
     super.dispose();
   }
 
   void _submit() {
-    final name = _nameCtrl.text.trim();
-    if (name.isEmpty) return;
-    final weight = double.tryParse(_weightCtrl.text.trim());
-    final cal = double.tryParse(_calCtrl.text.trim());
-    final pro = double.tryParse(_proCtrl.text.trim());
-    final fat = double.tryParse(_fatCtrl.text.trim());
-    final carb = double.tryParse(_carbCtrl.text.trim());
-    if (weight == null || weight <= 0 ||
-        cal == null || pro == null || fat == null || carb == null) {
-      return; // invalid input — silently keep sheet open
-    }
-    Navigator.of(context).pop(_EditPendingItemResult(
-      name: name,
-      weightGrams: weight,
-      calories: cal,
-      protein: pro,
-      fat: fat,
-      carbs: carb,
-    ));
+    final txt = _textCtrl.text.trim();
+    if (txt.isEmpty) return;
+    Navigator.of(context).pop(txt);
   }
 
   @override
@@ -2582,6 +2795,8 @@ class _EditPendingItemSheetState extends State<_EditPendingItemSheet> {
     const t = K2Theme.light;
     final isRu = Localizations.localeOf(context).languageCode == 'ru';
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    final o = widget.original;
+    final unit = isRu ? 'г' : 'g';
 
     return Padding(
       padding: EdgeInsets.only(bottom: bottomInset),
@@ -2599,76 +2814,90 @@ class _EditPendingItemSheetState extends State<_EditPendingItemSheet> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                isRu ? 'Скорректировать' : 'Correct item',
+                isRu ? 'Скорректировать ингредиент' : 'Correct ingredient',
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w700,
                   color: t.fg,
+                  fontFamily: K2Fonts.sans,
                 ),
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: t.bg,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: t.border),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.restaurant_rounded,
+                      size: 14,
+                      color: t.fgMute,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        '${o.name} · ${o.weightGrams.toStringAsFixed(0)}$unit · '
+                        '${o.nutrientsTotal.calories.round()} ${isRu ? "ккал" : "kcal"}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: t.fgDim,
+                          fontFamily: K2Fonts.sans,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
               Text(
                 isRu
-                    ? 'Изменишь название — заново найдём в базе. Менять можно и КБЖУ напрямую.'
-                    : 'Change the name to re-search the DB. KBJU can also be edited directly.',
-                style: TextStyle(fontSize: 11, color: t.fgMute),
+                    ? 'Что не так? ИИ перепроверит блюдо через базу.'
+                    : 'What\'s wrong? AI will re-check via the database.',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: t.fgMute,
+                  fontFamily: K2Fonts.sans,
+                ),
               ),
-              const SizedBox(height: 14),
-              _SheetField(
-                label: isRu ? 'Название' : 'Name',
-                controller: _nameCtrl,
-                keyboardType: TextInputType.text,
-              ),
-              const SizedBox(height: 10),
-              _SheetField(
-                label: isRu ? 'Вес, г' : 'Weight, g',
-                controller: _weightCtrl,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: false),
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: _SheetField(
-                      label: isRu ? 'Ккал' : 'Kcal',
-                      controller: _calCtrl,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                    ),
+              const SizedBox(height: 6),
+              TextField(
+                controller: _textCtrl,
+                autofocus: true,
+                maxLines: 3,
+                minLines: 2,
+                onSubmitted: (_) => _submit(),
+                textInputAction: TextInputAction.done,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: t.fg,
+                  fontFamily: K2Fonts.sans,
+                ),
+                decoration: InputDecoration(
+                  hintText: isRu
+                      ? 'напр.: это с курицей, а не свининой'
+                      : 'e.g. chicken, not pork',
+                  hintStyle: TextStyle(
+                    fontSize: 13,
+                    color: t.fgMute,
+                    fontFamily: K2Fonts.sans,
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _SheetField(
-                      label: isRu ? 'Белки' : 'Protein',
-                      controller: _proCtrl,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                    ),
+                  isDense: true,
+                  contentPadding: const EdgeInsets.all(10),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: t.border),
                   ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: _SheetField(
-                      label: isRu ? 'Жиры' : 'Fat',
-                      controller: _fatCtrl,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                    ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: K2Colors.accent),
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _SheetField(
-                      label: isRu ? 'Углеводы' : 'Carbs',
-                      controller: _carbCtrl,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                    ),
-                  ),
-                ],
+                ),
               ),
               const SizedBox(height: 16),
               Row(
@@ -2676,6 +2905,7 @@ class _EditPendingItemSheetState extends State<_EditPendingItemSheet> {
                   Expanded(
                     child: GestureDetector(
                       onTap: () => Navigator.of(context).pop(),
+                      behavior: HitTestBehavior.opaque,
                       child: Container(
                         height: 42,
                         decoration: BoxDecoration(
@@ -2690,6 +2920,7 @@ class _EditPendingItemSheetState extends State<_EditPendingItemSheet> {
                               fontSize: 14,
                               fontWeight: FontWeight.w500,
                               color: t.fgDim,
+                              fontFamily: K2Fonts.sans,
                             ),
                           ),
                         ),
@@ -2701,6 +2932,7 @@ class _EditPendingItemSheetState extends State<_EditPendingItemSheet> {
                     flex: 2,
                     child: GestureDetector(
                       onTap: _submit,
+                      behavior: HitTestBehavior.opaque,
                       child: Container(
                         height: 42,
                         decoration: BoxDecoration(
@@ -2709,11 +2941,12 @@ class _EditPendingItemSheetState extends State<_EditPendingItemSheet> {
                         ),
                         child: Center(
                           child: Text(
-                            isRu ? 'Сохранить' : 'Save',
+                            isRu ? 'Применить' : 'Apply',
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
                               color: t.bg,
+                              fontFamily: K2Fonts.sans,
                             ),
                           ),
                         ),
@@ -2726,60 +2959,6 @@ class _EditPendingItemSheetState extends State<_EditPendingItemSheet> {
           ),
         ),
       ),
-    );
-  }
-}
-
-class _SheetField extends StatelessWidget {
-  const _SheetField({
-    required this.label,
-    required this.controller,
-    required this.keyboardType,
-  });
-
-  final String label;
-  final TextEditingController controller;
-  final TextInputType keyboardType;
-
-  @override
-  Widget build(BuildContext context) {
-    const t = K2Theme.light;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 11,
-            color: t.fgMute,
-            letterSpacing: 0.3,
-          ),
-        ),
-        const SizedBox(height: 2),
-        TextField(
-          controller: controller,
-          keyboardType: keyboardType,
-          style: TextStyle(
-            fontSize: 14,
-            color: t.fg,
-            fontFamily: K2Fonts.sans,
-          ),
-          decoration: InputDecoration(
-            isDense: true,
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: BorderSide(color: t.border),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: BorderSide(color: t.fg),
-            ),
-          ),
-        ),
-      ],
     );
   }
 }

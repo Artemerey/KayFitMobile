@@ -1356,4 +1356,87 @@ class AppLocalizationsEn extends AppLocalizations {
   String mealGroup_itemsCount(int count) {
     return '$count items';
   }
+
+  @override
+  String get paywall_headline => 'AI counts calories.\nYou just eat.';
+
+  @override
+  String get paywall_subtitle =>
+      'Take a photo, say it aloud, or ask the nutritionist — KayFit logs it all.';
+
+  @override
+  String get paywall_feature_photo_title => 'Photo → macros in seconds';
+
+  @override
+  String get paywall_feature_photo_sub =>
+      'AI identifies ingredients and portion weight';
+
+  @override
+  String get paywall_feature_voice_title => 'Just say it';
+
+  @override
+  String get paywall_feature_voice_sub =>
+      '\"Had chicken pilaf\" → logged instantly';
+
+  @override
+  String get paywall_feature_chat_title => 'Nutritionist in your pocket';
+
+  @override
+  String get paywall_feature_chat_sub =>
+      'Ask about nutrition — it answers and logs';
+
+  @override
+  String get paywall_plan_trial_title => 'START\n7 days 🆓';
+
+  @override
+  String get paywall_plan_monthly_title => 'Monthly';
+
+  @override
+  String get paywall_plan_quarterly_title => '3 months';
+
+  @override
+  String get paywall_plan_quarterly_badge => '★ BEST';
+
+  @override
+  String get paywall_plan_yearly_title => 'Yearly';
+
+  @override
+  String get paywall_plan_yearly_badge => '🔥 −40%';
+
+  @override
+  String get paywall_cta_trial => 'Start 7 days free';
+
+  @override
+  String get paywall_cta_buy => 'Subscribe';
+
+  @override
+  String get paywall_trial_note =>
+      'Cancel before 7 days — you won\'t be charged';
+
+  @override
+  String get paywall_dismiss => 'No, I\'ll enter manually';
+
+  @override
+  String get paywall_restore => 'Restore';
+
+  @override
+  String get paywall_terms => 'Terms';
+
+  @override
+  String get paywall_privacy => 'Privacy';
+
+  @override
+  String get paywall_pending_snack => 'Payment is processing. Try again later.';
+
+  @override
+  String get paywall_error_snack => 'Purchase failed. Please try again.';
+
+  @override
+  String get paywall_restored_snack => 'Subscription restored';
+
+  @override
+  String get paywall_no_restore_snack => 'No active subscription found';
+
+  @override
+  String get paywall_restore_error_snack => 'Restore failed. Please try again.';
 }

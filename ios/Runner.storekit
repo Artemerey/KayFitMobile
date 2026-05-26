@@ -1,0 +1,101 @@
+{
+  "identifier" : "runner_storekit",
+  "nonRenewingSubscriptions" : [],
+  "products" : [],
+  "settings" : {
+    "_applicationInternalID" : "com.kayfit.app",
+    "_storefront" : "RUS",
+    "_storeKitErrors" : []
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "kayfit_premium",
+      "localizations" : [],
+      "name" : "KayFit Premium",
+      "subscriptions" : [
+        {
+          "adHocOfferCodeRedemptions" : 0,
+          "displayPrice" : "549.00",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "com.kayfit.app.sub.monthly",
+          "introductoryOffer" : {
+            "duration" : 1,
+            "identifier" : "trial_monthly",
+            "numberOfPeriods" : 1,
+            "offerMode" : "freeTrial",
+            "periodUnit" : "week"
+          },
+          "localizations" : [
+            {
+              "description" : "Месячная подписка",
+              "displayName" : "KayFit Monthly",
+              "locale" : "ru_RU"
+            }
+          ],
+          "productID" : "com.kayfit.app.sub.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Monthly",
+          "subscriptionGroupID" : "kayfit_premium",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOfferCodeRedemptions" : 0,
+          "displayPrice" : "1390.00",
+          "familyShareable" : false,
+          "groupNumber" : 2,
+          "internalID" : "com.kayfit.app.sub.quarterly",
+          "introductoryOffer" : {
+            "duration" : 1,
+            "identifier" : "trial_quarterly",
+            "numberOfPeriods" : 1,
+            "offerMode" : "freeTrial",
+            "periodUnit" : "week"
+          },
+          "localizations" : [
+            {
+              "description" : "Квартальная подписка",
+              "displayName" : "KayFit 3 months",
+              "locale" : "ru_RU"
+            }
+          ],
+          "productID" : "com.kayfit.app.sub.quarterly",
+          "recurringSubscriptionPeriod" : "P3M",
+          "referenceName" : "Quarterly",
+          "subscriptionGroupID" : "kayfit_premium",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOfferCodeRedemptions" : 0,
+          "displayPrice" : "3990.00",
+          "familyShareable" : false,
+          "groupNumber" : 3,
+          "internalID" : "com.kayfit.app.sub.yearly",
+          "introductoryOffer" : {
+            "duration" : 1,
+            "identifier" : "trial_yearly",
+            "numberOfPeriods" : 1,
+            "offerMode" : "freeTrial",
+            "periodUnit" : "week"
+          },
+          "localizations" : [
+            {
+              "description" : "Годовая подписка",
+              "displayName" : "KayFit Yearly",
+              "locale" : "ru_RU"
+            }
+          ],
+          "productID" : "com.kayfit.app.sub.yearly",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Yearly",
+          "subscriptionGroupID" : "kayfit_premium",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 2,
+    "minor" : 0
+  }
+}

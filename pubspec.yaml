@@ -68,6 +68,9 @@ dependencies:
   # App Review
   in_app_review: ^2.0.9
 
+  # In-App Purchases (RevenueCat)
+  purchases_flutter: ^8.0.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

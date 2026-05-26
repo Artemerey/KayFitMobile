@@ -548,5 +548,32 @@
     "placeholders": {
       "count": {"type": "int"}
     }
-  }
+  },
+
+  "paywall_headline": "ИИ считает калории.\nТы просто ешь.",
+  "paywall_subtitle": "Сфотографируй тарелку, скажи голосом или спроси нутрициолога — KayFit запишет всё сам.",
+  "paywall_feature_photo_title": "Фото → КБЖУ за секунды",
+  "paywall_feature_photo_sub": "ИИ определяет ингредиенты и вес порции",
+  "paywall_feature_voice_title": "Скажи вслух",
+  "paywall_feature_voice_sub": "«Съел куриный плов» → залогировано сразу",
+  "paywall_feature_chat_title": "Нутрициолог в кармане",
+  "paywall_feature_chat_sub": "Спроси о питании — ответит и запишет",
+  "paywall_plan_trial_title": "СТАРТ\n7 дней 🆓",
+  "paywall_plan_monthly_title": "Месяц",
+  "paywall_plan_quarterly_title": "3 месяца",
+  "paywall_plan_quarterly_badge": "★ ЛУЧШИЙ",
+  "paywall_plan_yearly_title": "Год",
+  "paywall_plan_yearly_badge": "🔥 −40%",
+  "paywall_cta_trial": "Начать 7 дней бесплатно",
+  "paywall_cta_buy": "Подписаться",
+  "paywall_trial_note": "Отменить до конца 7 дней — ничего не спишется",
+  "paywall_dismiss": "Нет, буду вводить руками",
+  "paywall_restore": "Восстановить",
+  "paywall_terms": "Условия",
+  "paywall_privacy": "Политика",
+  "paywall_pending_snack": "Платёж обрабатывается. Попробуйте позже.",
+  "paywall_error_snack": "Ошибка покупки. Попробуйте ещё раз.",
+  "paywall_restored_snack": "Подписка восстановлена",
+  "paywall_no_restore_snack": "Активная подписка не найдена",
+  "paywall_restore_error_snack": "Ошибка восстановления. Попробуйте ещё раз."
 }

@@ -21,6 +21,7 @@ import 'kf2_capture_screen.dart';
 import 'kf2_recognizing_screen.dart';
 import 'recognition_result_sheet_kf2.dart';
 import 'recognition_result_sheet_v2.dart';
+import '../../../core/subscription/require_subscription.dart';
 
 // KF2_PREVIEW: set to false via --dart-define=KF2_PREVIEW=false to fall back.
 const _useKF2 =
@@ -483,12 +484,18 @@ class _AddMealSheetState extends ConsumerState<AddMealSheet>
                                     isRu: isRu,
                                     onText: () => _switchMode(_InputMode.text),
                                     onVoice: () async {
+                                      final ok = await requireSubscription(
+                                          context, ref);
+                                      if (!ok || !mounted) return;
                                       _switchMode(_InputMode.voice);
                                       Future.delayed(
                                           const Duration(milliseconds: 350),
                                           _startRecording);
                                     },
                                     onPhoto: () async {
+                                      final ok = await requireSubscription(
+                                          context, ref);
+                                      if (!ok || !mounted) return;
                                       if (_useKF2Recog) {
                                         // KF2 full-screen capture flow.
                                         // Use plain Navigator so the bottom-sheet
