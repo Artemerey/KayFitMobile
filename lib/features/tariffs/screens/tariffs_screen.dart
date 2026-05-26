@@ -9,6 +9,7 @@ import '../../../core/api/api_client.dart';
 import '../../../core/i18n/generated/app_localizations.dart';
 import '../../../shared/theme/app_theme.dart';
 import '../../../shared/widgets/loading_indicator.dart';
+import 'payment_method_sheet.dart';
 
 part 'tariffs_screen.g.dart';
 
@@ -188,8 +189,15 @@ class _TariffsScreenState extends ConsumerState<TariffsScreen> {
         (tariff['price'] as num?)?.toDouble() ?? 0,
       );
     }
-    // Payment via external WebView is disabled (Apple App Store Guideline 3.1.1).
-    // In-App Purchase will be implemented in a future release.
+    if (!context.mounted) return;
+    final selectedTariff = tariff;
+    if (selectedTariff == null) return;
+
+    await showPaymentMethodSheet(
+      context,
+      tariffTitle: _tariffLabel(selectedTariff, l10n),
+      price: _formatPrice(selectedTariff, l10n),
+    );
   }
 
   @override
