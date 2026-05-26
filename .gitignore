@@ -63,3 +63,4 @@ app.*.map.json
 # Screenshot generation tools
 specs/appstore_screenshots/node_modules/
 specs/appstore_screenshots/package-lock.json
+*.pbxproj.bak

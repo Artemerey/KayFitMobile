@@ -6,11 +6,6 @@
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
-	<key>CFBundleLocalizations</key>
-	<array>
-		<string>ru</string>
-		<string>en</string>
-	</array>
 	<key>CFBundleDisplayName</key>
 	<string>Kayfit</string>
 	<key>CFBundleExecutable</key>
@@ -19,6 +14,11 @@
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>ru</string>
+		<string>en</string>
+	</array>
 	<key>CFBundleName</key>
 	<string>kayfit</string>
 	<key>CFBundlePackageType</key>
@@ -50,10 +50,10 @@
 	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<key>NSFaceIDUsageDescription</key>
-	<string>Kayfit uses Face ID to protect your account data in the Keychain.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Kayfit uses the camera to recognize meals from photos</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Kayfit uses Face ID to protect your account data in the Keychain.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Kayfit uses the microphone for voice-based meal logging</string>
 	<key>NSPhotoLibraryUsageDescription</key>
