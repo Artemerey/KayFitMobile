@@ -484,6 +484,12 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
       final resp = await apiDio.post(
         '/api/v2/parse_meal_suggestions',
         data: {'text': text, 'language': lang},
+        // Claude + FatSecret round-trip can take 40-60 s; global 30 s
+        // receiveTimeout aborts too early on slow runs.
+        options: Options(
+          receiveTimeout: const Duration(seconds: 120),
+          sendTimeout: const Duration(seconds: 30),
+        ),
       );
       final rawItems = (resp.data['items'] as List<dynamic>?) ?? [];
       if (rawItems.isEmpty) return false;
@@ -807,6 +813,10 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
       final resp = await apiDio.post(
         '/api/v2/parse_meal_suggestions',
         data: {'text': composed, 'language': lang},
+        options: Options(
+          receiveTimeout: const Duration(seconds: 120),
+          sendTimeout: const Duration(seconds: 30),
+        ),
       );
       final raw = (resp.data['items'] as List?)?.cast<Map<String, dynamic>>();
       if (raw == null || raw.isEmpty) {

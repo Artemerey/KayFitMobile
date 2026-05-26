@@ -1,5 +1,6 @@
 import 'dart:math' show pi;
 
+import 'package:dio/dio.dart' show Options;
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -203,6 +204,12 @@ class _RecognitionResultSheetV2State
           'language': lang,
           if (widget.originalText != null) 'original_text': widget.originalText,
         },
+        // See recognition_result_sheet_kf2.dart for rationale: Claude
+        // correction calls routinely exceed the global 30 s receiveTimeout.
+        options: Options(
+          receiveTimeout: const Duration(seconds: 120),
+          sendTimeout: const Duration(seconds: 30),
+        ),
       );
       final rawItems = (resp.data['items'] as List<dynamic>?)
               ?.map((e) => e as Map<String, dynamic>)

@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart' show Options;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -231,6 +232,14 @@ class _RecognitionResultSheetKF2State
           if (widget.originalText != null)
             'original_text': widget.originalText,
         },
+        // Claude vision/text reasoning + FatSecret enrichment routinely
+        // takes 40-60 s on a free-tier Claude account. The global 30 s
+        // receiveTimeout aborts well before Claude responds — bump it
+        // locally so the correction round-trip can actually complete.
+        options: Options(
+          receiveTimeout: const Duration(seconds: 120),
+          sendTimeout: const Duration(seconds: 30),
+        ),
       );
       final rawItems = (resp.data['items'] as List<dynamic>?)
               ?.map((e) => e as Map<String, dynamic>)
