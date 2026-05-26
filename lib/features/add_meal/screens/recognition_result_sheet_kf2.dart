@@ -408,7 +408,11 @@ class _RecognitionResultSheetKF2State
 
                   // Hero total
                   SliverToBoxAdapter(
-                    child: KF2HeroTotal(totals: totals, theme: t),
+                    child: KF2HeroTotal(
+                      totals: totals,
+                      theme: t,
+                      items: _state.items,
+                    ),
                   ),
 
                   // Items label

@@ -18,6 +18,12 @@ import 'kayfit2_meal_photo.dart';
 ///
 /// Supports [dense] mode (12 pt vertical padding) and normal mode (14 pt).
 /// Tap is surfaced via the optional [onTap] callback.
+///
+/// When [onWeightChange] is supplied AND the row has a known weight, the
+/// weight is rendered as a tappable pill that morphs into an inline
+/// `TextField` on tap. On commit the callback is invoked with the new value
+/// in grams — the parent is responsible for PATCH-ing the meal and
+/// recomputing macros proportionally.
 class Kayfit2MealRow extends StatelessWidget {
   const Kayfit2MealRow({
     super.key,
@@ -26,6 +32,7 @@ class Kayfit2MealRow extends StatelessWidget {
     this.dense = false,
     this.onTap,
     this.onLongPress,
+    this.onWeightChange,
   });
 
   /// Meal data to render.
@@ -44,6 +51,12 @@ class Kayfit2MealRow extends StatelessWidget {
   /// surface the "Copy to another date" action — keeps the primary tap
   /// gesture available for the meal-edit screen.
   final VoidCallback? onLongPress;
+
+  /// Called when the user commits an inline weight edit on this row.
+  /// Receives the new weight in grams. Null disables the inline edit
+  /// (the pill is still shown read-only when [K2MealRowData.weightGrams]
+  /// is non-null).
+  final ValueChanged<double>? onWeightChange;
 
   @override
   Widget build(BuildContext context) {
@@ -67,8 +80,14 @@ class Kayfit2MealRow extends StatelessWidget {
 
             const SizedBox(width: 12),
 
-            // ── CENTER: type · name · macros ───────────────────────────────
-            Expanded(child: _CenterColumn(meal: meal, theme: theme)),
+            // ── CENTER: type · name · weight pill + macros ─────────────────
+            Expanded(
+              child: _CenterColumn(
+                meal: meal,
+                theme: theme,
+                onWeightChange: onWeightChange,
+              ),
+            ),
 
             const SizedBox(width: 12),
 
@@ -134,10 +153,15 @@ class _LeftColumn extends StatelessWidget {
 }
 
 class _CenterColumn extends StatelessWidget {
-  const _CenterColumn({required this.meal, required this.theme});
+  const _CenterColumn({
+    required this.meal,
+    required this.theme,
+    required this.onWeightChange,
+  });
 
   final K2MealRowData meal;
   final K2Theme theme;
+  final ValueChanged<double>? onWeightChange;
 
   @override
   Widget build(BuildContext context) {
@@ -185,10 +209,228 @@ class _CenterColumn extends StatelessWidget {
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
         ),
-        const SizedBox(height: 4),
-        // Macro string: P 12 · F 6 · C 54
-        _MacroLine(meal: meal, theme: theme),
+        const SizedBox(height: 6),
+        // Weight pill + macro line, side by side.
+        // The pill is ALWAYS rendered (when onWeightChange is wired up). When
+        // [meal.weightGrams] is null we show a placeholder ("+ масса") so the
+        // user can set the weight for the first time on legacy meals.
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            if (onWeightChange != null || meal.weightGrams != null) ...[
+              _WeightPill(
+                grams: meal.weightGrams,
+                theme: theme,
+                onCommit: onWeightChange,
+              ),
+              const SizedBox(width: 8),
+            ],
+            Expanded(child: _MacroLine(meal: meal, theme: theme)),
+          ],
+        ),
       ],
+    );
+  }
+}
+
+// ─── Inline-editable weight pill ─────────────────────────────────────────────
+//
+// Tap → morphs into a TextField with the current weight pre-selected. On
+// submit / focus-loss, commits the new value via [onCommit]. When [onCommit]
+// is null the pill is read-only (still visible).
+
+class _WeightPill extends StatefulWidget {
+  const _WeightPill({
+    required this.grams,
+    required this.theme,
+    required this.onCommit,
+  });
+
+  /// Current weight in grams. Null means "not set yet" — the pill renders as
+  /// a tappable placeholder ("+ масса") inviting the user to set it.
+  final double? grams;
+  final K2Theme theme;
+  final ValueChanged<double>? onCommit;
+
+  @override
+  State<_WeightPill> createState() => _WeightPillState();
+}
+
+class _WeightPillState extends State<_WeightPill> {
+  final _focus = FocusNode();
+  late final TextEditingController _ctrl;
+  bool _editing = false;
+
+  String _displayText(double? g) => g == null ? '' : g.toStringAsFixed(0);
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: _displayText(widget.grams));
+    _focus.addListener(_onFocus);
+  }
+
+  @override
+  void didUpdateWidget(covariant _WeightPill oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_editing && oldWidget.grams != widget.grams) {
+      _ctrl.text = _displayText(widget.grams);
+    }
+  }
+
+  @override
+  void dispose() {
+    _focus.removeListener(_onFocus);
+    _focus.dispose();
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _onFocus() {
+    if (!_focus.hasFocus && _editing) _commit();
+  }
+
+  void _startEdit() {
+    if (widget.onCommit == null) return;
+    setState(() => _editing = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _focus.requestFocus();
+      _ctrl.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: _ctrl.text.length,
+      );
+    });
+  }
+
+  void _commit() {
+    final v = double.tryParse(_ctrl.text.trim().replaceAll(',', '.'));
+    final cur = widget.grams;
+    if (v == null || v <= 0) {
+      _ctrl.text = _displayText(cur);
+    } else if (cur == null || (v - cur).abs() > 0.5) {
+      widget.onCommit?.call(v);
+    }
+    if (mounted) setState(() => _editing = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = widget.theme;
+    final accent = K2Colors.accent;
+    final editable = widget.onCommit != null;
+    final grams = widget.grams;
+    final isPlaceholder = grams == null;
+
+    if (_editing) {
+      // iOS number pad has no "Done" key, so we surface a tap-target check
+      // mark inside the pill to commit. Focus-loss commit still works for
+      // taps outside the pill on Android.
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 70,
+            height: 26,
+            child: TextField(
+              controller: _ctrl,
+              focusNode: _focus,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: false),
+              textAlign: TextAlign.center,
+              onSubmitted: (_) => _commit(),
+              style: TextStyle(
+                fontSize: 12,
+                color: t.fg,
+                fontFamily: K2Fonts.mono,
+                fontWeight: FontWeight.w600,
+              ),
+              decoration: InputDecoration(
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 6),
+                hintText: '0',
+                hintStyle: TextStyle(
+                  fontSize: 12,
+                  color: t.fgMute,
+                  fontFamily: K2Fonts.mono,
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(13),
+                  borderSide: BorderSide(color: accent),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(13),
+                  borderSide: BorderSide(color: accent, width: 1.5),
+                ),
+                suffixText: 'г',
+                suffixStyle: TextStyle(
+                  fontSize: 10,
+                  color: t.fgMute,
+                  fontFamily: K2Fonts.mono,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+          GestureDetector(
+            onTap: _commit,
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              width: 26,
+              height: 26,
+              decoration: BoxDecoration(
+                color: accent,
+                borderRadius: BorderRadius.circular(13),
+              ),
+              child: const Icon(Icons.check_rounded,
+                  size: 16, color: Colors.white),
+            ),
+          ),
+        ],
+      );
+    }
+
+    final label = isPlaceholder ? '+ масса' : '${grams.toStringAsFixed(0)} г';
+    final borderColor = editable
+        ? accent.withValues(alpha: isPlaceholder ? 0.7 : 0.4)
+        : t.border;
+    final bgColor = isPlaceholder
+        ? accent.withValues(alpha: 0.06)
+        : t.bg;
+
+    return GestureDetector(
+      onTap: editable ? _startEdit : null,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        height: 26,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.circular(13),
+          border: Border.all(
+            color: borderColor,
+            width: isPlaceholder ? 1.2 : 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                color: isPlaceholder ? accent : t.fg,
+                fontFamily: K2Fonts.mono,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            if (editable && !isPlaceholder) ...[
+              const SizedBox(width: 4),
+              Icon(Icons.edit_outlined, size: 11, color: accent),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }

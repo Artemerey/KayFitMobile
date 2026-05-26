@@ -77,6 +77,28 @@ String _todayIso() {
       '${n.day.toString().padLeft(2, '0')}';
 }
 
+/// Matches a trailing `(NNNg)` / `(NNN g)` / `(NNN гр)` suffix and captures
+/// the numeric value. Legacy meals were stored with weight embedded in
+/// `display_name` (`add_selected_meals` did `f"{name} ({int(w)}g)"`). The
+/// new pipeline keeps weight in its own column, but old rows in the DB
+/// still carry the suffix — extract it so the pill has a value to show.
+final _kWeightSuffixRe = RegExp(
+  r'\s*[\(\[]\s*(\d+(?:[.,]\d+)?)\s*(?:g|г|gr|гр)\s*[\)\]]\s*$',
+  caseSensitive: false,
+);
+
+/// Strips the legacy weight suffix from a meal name (see [_kWeightSuffixRe]).
+String _stripWeightSuffix(String name) =>
+    name.replaceAll(_kWeightSuffixRe, '').trim();
+
+/// Extracts the numeric weight from a legacy `(NNNg)` suffix, if present.
+/// Returns null when the suffix isn't there or the number is unparseable.
+double? _extractWeightFromName(String name) {
+  final m = _kWeightSuffixRe.firstMatch(name);
+  if (m == null) return null;
+  return double.tryParse(m.group(1)!.replaceAll(',', '.'));
+}
+
 /// Converts a [Meal] from the API into the KF2 view-model.
 K2MealRowData _toRowData(Meal m) {
   // Extract HH:MM from ISO createdAt, fallback to '--:--'.
@@ -95,16 +117,30 @@ K2MealRowData _toRowData(Meal m) {
   final source = isPhoto ? K2MealSource.photo : K2MealSource.text;
   final photoSeed = isPhoto ? m.id.hashCode % 3 : null;
 
+  // Prefer dishName when present; clean either source from the legacy
+  // "(NNN g)" suffix so the row can show the weight as its own pill.
+  final rawName = m.dishName ?? m.name;
+  final cleanName = _stripWeightSuffix(rawName);
+
+  // weightGrams resolution order:
+  //   1. Backend column `weight` (new pipeline, after 2026-05-26)
+  //   2. Parsed from legacy `(NNNg)` suffix in the original name (old rows)
+  //   3. null — pill shows "+ масса" placeholder for the user to fill in
+  final double? weightGrams = (m.weight != null && m.weight! > 0)
+      ? m.weight
+      : _extractWeightFromName(rawName);
+
   return K2MealRowData(
     id: m.id.toString(),
     time: time,
     type: m.mealType?.toLowerCase() ?? 'other',
-    name: m.dishName ?? m.name,
+    name: cleanName,
     kcal: m.calories.round(),
     protein: m.protein.round(),
     fat: m.fat.round(),
     carbs: m.carbs.round(),
     source: source,
+    weightGrams: weightGrams,
     photoSeed: photoSeed,
     photoUrl: m.sourceUrl,
   );
@@ -206,6 +242,89 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
   /// Tracks in-flight copy requests so a double long-press doesn't fire the
   /// same copy twice.
   bool _isCopying = false;
+
+  /// Tracks in-flight inline weight PATCHes per meal id so a fast double-tap
+  /// can't fire two requests for the same row.
+  final Set<int> _weightInflight = <int>{};
+
+  /// Inline weight pill handler — PATCHes the meal with the new weight AND
+  /// macros scaled proportionally to the new/old weight ratio, then refreshes
+  /// rings + list. Falls back gracefully (snackbar) on bad input or HTTP
+  /// failure.
+  Future<void> _onRowWeightChange(String idStr, double newGrams) async {
+    final intId = int.tryParse(idStr);
+    if (intId == null || newGrams <= 0 || _weightInflight.contains(intId)) {
+      return;
+    }
+    final meals = ref.read(journalDayMealsProvider(_dateKey)).valueOrNull;
+    final meal = meals?.firstWhere(
+      (m) => m.id == intId,
+      orElse: () => meals.first,
+    );
+    if (meal == null) return;
+    // Resolve the baseline weight the same way _toRowData does: column first,
+    // legacy `(NNNg)` suffix second. This keeps macro scaling consistent for
+    // pre-2026-05-26 rows that only carry the weight in the display name.
+    final rawName = meal.dishName ?? meal.name;
+    final oldGrams = (meal.weight != null && meal.weight! > 0)
+        ? meal.weight
+        : _extractWeightFromName(rawName);
+    if (oldGrams == null || oldGrams <= 0) {
+      // No prior weight at all (truly legacy row). Commit weight alone and
+      // leave macros — user can then edit macros from the detail screen.
+      await _patchMealWeight(intId, newGrams: newGrams);
+      return;
+    }
+    if ((newGrams - oldGrams).abs() < 0.5) return; // unchanged
+    final ratio = newGrams / oldGrams;
+    await _patchMealWeight(
+      intId,
+      newGrams: newGrams,
+      calories: meal.calories * ratio,
+      protein: meal.protein * ratio,
+      fat: meal.fat * ratio,
+      carbs: meal.carbs * ratio,
+    );
+  }
+
+  Future<void> _patchMealWeight(
+    int mealId, {
+    required double newGrams,
+    double? calories,
+    double? protein,
+    double? fat,
+    double? carbs,
+  }) async {
+    _weightInflight.add(mealId);
+    HapticFeedback.selectionClick();
+    try {
+      await apiDio.patch('/api/meals/$mealId', data: {
+        'weight_grams': newGrams,
+        'calories': ?calories,
+        'protein': ?protein,
+        'fat': ?fat,
+        'carbs': ?carbs,
+      });
+      // Refresh everything that displays this meal so the row + rings update.
+      ref.invalidate(journalDayMealsProvider(_dateKey));
+      ref.invalidate(todayStatsProvider);
+      ref.invalidate(todayMealsProvider);
+      ref.invalidate(dailyKcalHistoryProvider);
+    } on Exception {
+      if (mounted) {
+        final isRu = Localizations.localeOf(context).languageCode == 'ru';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(
+            isRu ? 'Не удалось обновить вес' : 'Could not update weight',
+          ),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: Colors.red,
+        ));
+      }
+    } finally {
+      _weightInflight.remove(mealId);
+    }
+  }
 
   /// Long-press handler — confirms the intent, picks a target date, copies
   /// the meal, refreshes the affected day's provider, shows a snackbar with
@@ -390,30 +509,31 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
             // calendar-selected day. /api/stats is intentionally NOT used here:
             // it only returns "today", which would desync the rings whenever
             // the user picks a different date.
-            mealsAsync.when(
-              loading: () => const _RingsLoading(),
-              error: (_, __) => const _RingsFallback(),
-              data: (meals) {
-                final eaten = _sumMeals(meals);
-                final g = _resolveGoals(goalsAsync);
-                return Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
-                  child: KayfitRingsSummary(
-                    theme: t,
-                    values: KayfitRingsValues(
-                      kcal: eaten.kcal,
-                      kcalGoal: g.kcal,
-                      protein: eaten.protein,
-                      proteinGoal: g.protein,
-                      carbs: eaten.carbs,
-                      carbsGoal: g.carbs,
-                      fat: eaten.fat,
-                      fatGoal: g.fat,
-                    ),
+            // Rings: while meals are loading we render empty rings (0/goal)
+            // rather than a second CircularProgressIndicator — the meal list
+            // below already shows one, and stacking two indicators on the
+            // same screen looked like a glitch.
+            Builder(builder: (_) {
+              final meals = mealsAsync.valueOrNull ?? const <Meal>[];
+              final eaten = _sumMeals(meals);
+              final g = _resolveGoals(goalsAsync);
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
+                child: KayfitRingsSummary(
+                  theme: t,
+                  values: KayfitRingsValues(
+                    kcal: eaten.kcal,
+                    kcalGoal: g.kcal,
+                    protein: eaten.protein,
+                    proteinGoal: g.protein,
+                    carbs: eaten.carbs,
+                    carbsGoal: g.carbs,
+                    fat: eaten.fat,
+                    fatGoal: g.fat,
                   ),
-                );
-              },
-            ),
+                ),
+              );
+            }),
 
             // Guideline 1.4.1 — disclaimer required on every screen with
             // calculated health values.
@@ -466,15 +586,25 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
                       );
                     }
                     final rows = meals.map(_toRowData).toList();
+                    // Build a lookup so the row tap can hand the Meal to
+                    // EditMealScreen via `extra` — skips the history fetch.
+                    final mealById = {
+                      for (final m in meals) m.id.toString(): m,
+                    };
                     return _MealList(
                       rows: rows,
                       theme: t,
                       onRowTap: (id) {
                         final intId = int.tryParse(id);
-                        if (intId != null) context.push('/meals/$intId/edit');
+                        if (intId == null) return;
+                        context.push(
+                          '/meals/$intId/edit',
+                          extra: mealById[id],
+                        );
                       },
                       onDelete: _deleteMeal,
                       onCopy: _onCopyTapped,
+                      onWeightChange: _onRowWeightChange,
                     );
                   },
                 ),
@@ -547,48 +677,6 @@ class _TopBar extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Rings loading / fallback placeholders
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _RingsLoading extends StatelessWidget {
-  const _RingsLoading();
-
-  @override
-  Widget build(BuildContext context) {
-    return const SizedBox(
-      height: 140 + 24 + 16, // ringSize + top + bottom padding
-      child: Center(
-        child: CircularProgressIndicator(strokeWidth: 2),
-      ),
-    );
-  }
-}
-
-class _RingsFallback extends StatelessWidget {
-  const _RingsFallback();
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
-      child: KayfitRingsSummary(
-        theme: K2Theme.light,
-        values: const KayfitRingsValues(
-          kcal: 0,
-          kcalGoal: 2100,
-          protein: 0,
-          proteinGoal: 130,
-          carbs: 0,
-          carbsGoal: 250,
-          fat: 0,
-          fatGoal: 70,
-        ),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Meal list (grouped)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -599,6 +687,7 @@ class _MealList extends StatelessWidget {
     required this.onRowTap,
     this.onDelete,
     this.onCopy,
+    this.onWeightChange,
   });
 
   final List<K2MealRowData> rows;
@@ -612,6 +701,10 @@ class _MealList extends StatelessWidget {
 
   /// Long-press handler that copies the meal to another date.
   final void Function(String id)? onCopy;
+
+  /// Inline weight edit committed on a row. Receives `(mealId, newGrams)`.
+  /// Null disables the inline edit (pill becomes read-only).
+  final void Function(String id, double grams)? onWeightChange;
 
   @override
   Widget build(BuildContext context) {
@@ -637,6 +730,9 @@ class _MealList extends StatelessWidget {
                   theme: theme,
                   onTap: () => onRowTap(meal.id),
                   onLongPress: onCopy == null ? null : () => onCopy!(meal.id),
+                  onWeightChange: onWeightChange == null
+                      ? null
+                      : (g) => onWeightChange!(meal.id, g),
                 ),
               )
             else
@@ -646,6 +742,9 @@ class _MealList extends StatelessWidget {
                 theme: theme,
                 onTap: () => onRowTap(meal.id),
                 onLongPress: onCopy == null ? null : () => onCopy!(meal.id),
+                onWeightChange: onWeightChange == null
+                    ? null
+                    : (g) => onWeightChange!(meal.id, g),
               ),
         ],
         const SizedBox(height: 16),

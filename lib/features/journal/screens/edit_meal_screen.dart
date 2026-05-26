@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,15 +8,40 @@ import '../../../core/i18n/generated/app_localizations.dart';
 import '../../../features/dashboard/providers/dashboard_provider.dart';
 import '../../../features/journal/screens/journal_screen.dart'
     show journalDayMealsProvider;
+import '../../../shared/models/meal.dart';
 import '../../../shared/theme/app_theme.dart';
+import '../../../shared/theme/kayfit2_theme.dart';
 import '../../../shared/widgets/keyboard_dismisser.dart';
 import '../../../shared/widgets/loading_indicator.dart';
+
+// Legacy meals (pre-2026-05-26) stored weight as a `(NNNg)` suffix inside the
+// display name. New meals keep it in the dedicated `weight` column. These two
+// helpers normalise both formats so the edit screen always shows a clean name
+// AND a populated weight field.
+final _kWeightSuffixRe = RegExp(
+  r'\s*[\(\[]\s*(\d+(?:[.,]\d+)?)\s*(?:g|г|gr|гр)\s*[\)\]]\s*$',
+  caseSensitive: false,
+);
+String _stripWeightSuffix(String name) =>
+    name.replaceAll(_kWeightSuffixRe, '').trim();
+double? _extractWeightFromName(String name) {
+  final m = _kWeightSuffixRe.firstMatch(name);
+  if (m == null) return null;
+  return double.tryParse(m.group(1)!.replaceAll(',', '.'));
+}
 
 // ─── Screen ──────────────────────────────────────────────────────────────────
 
 class EditMealScreen extends ConsumerStatefulWidget {
   final int mealId;
-  const EditMealScreen({super.key, required this.mealId});
+
+  /// Optional pre-loaded Meal passed from the caller (Journal list / dashboard)
+  /// so the screen can populate its fields synchronously without the
+  /// `/api/meals/history` round-trip. Falls back to the network fetch when
+  /// null (deep links, push notifications).
+  final Meal? initial;
+
+  const EditMealScreen({super.key, required this.mealId, this.initial});
 
   @override
   ConsumerState<EditMealScreen> createState() => _EditMealScreenState();
@@ -76,7 +100,50 @@ class _EditMealScreenState extends ConsumerState<EditMealScreen>
     _weightCtrl.addListener(_onWeightChanged);
 
     AnalyticsService.editMealOpened(widget.mealId);
-    _loadMeal();
+
+    // Fast path: caller passed the Meal directly (Journal row tap). Populate
+    // synchronously and start the entrance animation right away — no spinner.
+    final pre = widget.initial;
+    if (pre != null) {
+      _hydrateFromMeal(pre);
+      _loading = false;
+      _enterCtrl.forward().then((_) => _macroCtrl.forward());
+    } else {
+      _loadMeal();
+    }
+  }
+
+  /// Mirrors `_loadMeal`'s field population from an in-memory Meal. Strips
+  /// the legacy `(NNNg)` weight suffix from the name and uses the parsed
+  /// number as the weight when the dedicated column is empty.
+  void _hydrateFromMeal(Meal m) {
+    final rawName = m.dishName ?? m.name;
+    _nameCtrl.text = _stripWeightSuffix(rawName);
+    _caloriesCtrl.text = m.calories.toStringAsFixed(1);
+    _proteinCtrl.text = m.protein.toStringAsFixed(1);
+    _fatCtrl.text = m.fat.toStringAsFixed(1);
+    _carbsCtrl.text = m.carbs.toStringAsFixed(1);
+
+    final colWeight = (m.weight != null && m.weight! > 0) ? m.weight : null;
+    final legacyWeight = _extractWeightFromName(rawName);
+    final w = colWeight ?? legacyWeight;
+    _weightCtrl.text = w != null ? w.toStringAsFixed(0) : '';
+
+    _origCalories = m.calories;
+    _origProtein = m.protein;
+    _origFat = m.fat;
+    _origCarbs = m.carbs;
+    _origWeight = w ?? 0;
+
+    final raw = m.createdAt;
+    if (raw != null) {
+      final dt = DateTime.tryParse(raw)?.toLocal();
+      if (dt != null) {
+        _mealDateKey = '${dt.year.toString().padLeft(4, '0')}-'
+            '${dt.month.toString().padLeft(2, '0')}-'
+            '${dt.day.toString().padLeft(2, '0')}';
+      }
+    }
   }
 
   void _onMacroChanged() {
@@ -130,12 +197,18 @@ class _EditMealScreenState extends ConsumerState<EditMealScreen>
       final meal = list
           .cast<Map<String, dynamic>>()
           .firstWhere((m) => m['id'] == widget.mealId);
-      _nameCtrl.text = meal['name'] as String? ?? '';
+      final rawName = (meal['dish_name'] as String?)
+          ?? (meal['name'] as String?)
+          ?? '';
+      _nameCtrl.text = _stripWeightSuffix(rawName);
       _caloriesCtrl.text = (meal['calories'] as num).toStringAsFixed(1);
       _proteinCtrl.text = (meal['protein'] as num).toStringAsFixed(1);
       _fatCtrl.text = (meal['fat'] as num).toStringAsFixed(1);
       _carbsCtrl.text = (meal['carbs'] as num).toStringAsFixed(1);
-      final w = meal['weight'] as num?;
+      final colW = (meal['weight'] as num?)?.toDouble();
+      final w = (colW != null && colW > 0)
+          ? colW
+          : _extractWeightFromName(rawName);
       _weightCtrl.text = w != null ? w.toStringAsFixed(0) : '';
 
       // Capture baseline for proportional recalc
@@ -143,7 +216,7 @@ class _EditMealScreenState extends ConsumerState<EditMealScreen>
       _origProtein = (meal['protein'] as num).toDouble();
       _origFat = (meal['fat'] as num).toDouble();
       _origCarbs = (meal['carbs'] as num).toDouble();
-      _origWeight = w?.toDouble() ?? 0;
+      _origWeight = w ?? 0;
 
       // Capture the meal's actual date so we invalidate the right provider.
       final timeRaw = meal['time'] as String?;
@@ -307,220 +380,80 @@ class _EditMealScreenState extends ConsumerState<EditMealScreen>
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
+    const t = K2Theme.light;
+    final isRu = Localizations.localeOf(context).languageCode == 'ru';
 
     return KeyboardDismisser(
       child: Scaffold(
-        // iOS Settings system background
-        backgroundColor: const Color(0xFFF2F2F7),
+        backgroundColor: t.bg,
         body: _loading
             ? const Center(child: LoadingIndicator())
             : Form(
                 key: _formKey,
                 child: CustomScrollView(
                   slivers: [
-                    // ── iOS-style white AppBar with hairline border ───
+                    // ── K2 top bar ────────────────────────────────────
                     SliverAppBar(
-                      backgroundColor: Colors.white,
+                      backgroundColor: t.bg,
                       surfaceTintColor: Colors.transparent,
                       shadowColor: Colors.transparent,
                       pinned: true,
                       elevation: 0,
                       leading: GestureDetector(
                         onTap: () => Navigator.of(context).pop(),
-                        child: const Icon(
+                        child: Icon(
                           Icons.arrow_back_ios_new_rounded,
                           size: 18,
-                          color: Color(0xFF007AFF),
+                          color: t.fg,
                         ),
                       ),
                       title: Text(
                         l10n.edit_meal_title,
-                        style: const TextStyle(
-                          color: Colors.black,
-                          fontSize: 17,
+                        style: TextStyle(
+                          color: t.fg,
+                          fontSize: 15,
                           fontWeight: FontWeight.w600,
-                          letterSpacing: -0.3,
+                          letterSpacing: 0.2,
+                          fontFamily: K2Fonts.sans,
                         ),
                       ),
                       bottom: PreferredSize(
                         preferredSize: const Size.fromHeight(0),
-                        child: Container(
-                          height: 0.5,
-                          color: const Color(0xFFE5E5EA),
-                        ),
+                        child: Container(height: 1, color: t.hairline),
                       ),
                     ),
 
-                    // ── Content ───────────────────────────────────────
+                    // ── Content card ─────────────────────────────────
                     SliverPadding(
                       padding: const EdgeInsets.fromLTRB(16, 20, 16, 40),
                       sliver: SliverList(
                         delegate: SliverChildListDelegate([
-                          // Compact neutral macro preview
                           _buildFade(
                             0,
-                            _CompactMacroPreview(
+                            _K2IngredientCard(
+                              theme: t,
+                              nameCtrl: _nameCtrl,
+                              weightCtrl: _weightCtrl,
+                              caloriesCtrl: _caloriesCtrl,
+                              proteinCtrl: _proteinCtrl,
+                              fatCtrl: _fatCtrl,
+                              carbsCtrl: _carbsCtrl,
+                              calories: _calories,
                               protein: _protein,
                               fat: _fat,
                               carbs: _carbs,
-                              calories: _calories,
-                              macroCtrl: _macroCtrl,
+                              isRu: isRu,
                               l10n: l10n,
                             ),
                           ),
-                          const SizedBox(height: 24),
-
-                          // Section: DETAILS
+                          const SizedBox(height: 28),
                           _buildFade(
                             1,
-                            _SectionHeader(label: l10n.edit_meal_section_details),
-                          ),
-                          const SizedBox(height: 6),
-                          _buildFade(
-                            2,
-                            _InsetGroup(
-                              children: [
-                                _GroupRow(
-                                  label: l10n.edit_meal_name_label,
-                                  child: _InlineTextField(
-                                    controller: _nameCtrl,
-                                    textAlign: TextAlign.end,
-                                    keyboardType: TextInputType.text,
-                                    validator: (v) =>
-                                        v == null || v.trim().isEmpty
-                                            ? l10n.edit_meal_name_error
-                                            : null,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 24),
-
-                          // Section: PORTION
-                          _buildFade(
-                            3,
-                            _SectionHeader(label: l10n.edit_meal_section_portion),
-                          ),
-                          const SizedBox(height: 6),
-                          _buildFade(
-                            4,
-                            _InsetGroup(
-                              children: [
-                                _GroupRow(
-                                  label: l10n.edit_meal_weight_label,
-                                  child: _InlineNumField(
-                                    controller: _weightCtrl,
-                                    suffix: l10n.macro_g,
-                                    validator: (v) {
-                                      if (v == null || v.isEmpty) return null;
-                                      final n = double.tryParse(v);
-                                      if (n == null || n < 0) {
-                                        return l10n.edit_meal_err_invalid_number;
-                                      }
-                                      return null;
-                                    },
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 24),
-
-                          // Section: NUTRITION
-                          _buildFade(
-                            5,
-                            _SectionHeader(
-                                label: l10n.edit_meal_section_nutrition),
-                          ),
-                          const SizedBox(height: 6),
-                          _buildFade(
-                            6,
-                            _InsetGroup(
-                              children: [
-                                _GroupRow(
-                                  label: l10n.macro_calories,
-                                  child: _InlineNumField(
-                                    controller: _caloriesCtrl,
-                                    suffix: l10n.macro_kcal,
-                                    validator: (v) {
-                                      if (v == null || v.isEmpty) {
-                                        return l10n.edit_meal_err_enter_value;
-                                      }
-                                      final n = double.tryParse(v);
-                                      if (n == null || n < 0) {
-                                        return l10n.edit_meal_err_invalid_number;
-                                      }
-                                      return null;
-                                    },
-                                  ),
-                                ),
-                                _GroupDivider(),
-                                _GroupRow(
-                                  label: l10n.macro_protein,
-                                  child: _InlineNumField(
-                                    controller: _proteinCtrl,
-                                    suffix: l10n.macro_g,
-                                    validator: (v) {
-                                      if (v == null || v.isEmpty) {
-                                        return l10n.edit_meal_err_enter_value;
-                                      }
-                                      final n = double.tryParse(v);
-                                      if (n == null || n < 0) {
-                                        return l10n.edit_meal_err_invalid_number;
-                                      }
-                                      return null;
-                                    },
-                                  ),
-                                ),
-                                _GroupDivider(),
-                                _GroupRow(
-                                  label: l10n.macro_fat,
-                                  child: _InlineNumField(
-                                    controller: _fatCtrl,
-                                    suffix: l10n.macro_g,
-                                    validator: (v) {
-                                      if (v == null || v.isEmpty) {
-                                        return l10n.edit_meal_err_enter_value;
-                                      }
-                                      final n = double.tryParse(v);
-                                      if (n == null || n < 0) {
-                                        return l10n.edit_meal_err_invalid_number;
-                                      }
-                                      return null;
-                                    },
-                                  ),
-                                ),
-                                _GroupDivider(),
-                                _GroupRow(
-                                  label: l10n.macro_carbs,
-                                  child: _InlineNumField(
-                                    controller: _carbsCtrl,
-                                    suffix: l10n.macro_g,
-                                    validator: (v) {
-                                      if (v == null || v.isEmpty) {
-                                        return l10n.edit_meal_err_enter_value;
-                                      }
-                                      final n = double.tryParse(v);
-                                      if (n == null || n < 0) {
-                                        return l10n.edit_meal_err_invalid_number;
-                                      }
-                                      return null;
-                                    },
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 32),
-
-                          // iOS blue filled Save button
-                          _buildFade(
-                            7,
-                            _IosBlueButton(
+                            _K2SaveButton(
                               saving: _saving,
                               label: l10n.common_save,
                               onTap: _save,
+                              theme: t,
                             ),
                           ),
                         ]),
@@ -534,167 +467,85 @@ class _EditMealScreenState extends ConsumerState<EditMealScreen>
   }
 }
 
-// ─── Section header ───────────────────────────────────────────────────────────
+// ─── K2 ingredient card — name + weight pill + filled KБЖУ row ───────────────
+//
+// Single self-contained card. Each numeric value (weight / kcal / protein /
+// fat / carbs) is a tappable chip that morphs into an inline TextField on
+// tap. Weight edits propagate to macros via the listener wired in initState
+// (`_onWeightChanged`); the macro chips also commit their controllers via
+// `_onMacroChanged` so the live preview stays in sync.
 
-class _SectionHeader extends StatelessWidget {
-  final String label;
-  const _SectionHeader({required this.label});
+class _K2IngredientCard extends StatelessWidget {
+  const _K2IngredientCard({
+    required this.theme,
+    required this.nameCtrl,
+    required this.weightCtrl,
+    required this.caloriesCtrl,
+    required this.proteinCtrl,
+    required this.fatCtrl,
+    required this.carbsCtrl,
+    required this.calories,
+    required this.protein,
+    required this.fat,
+    required this.carbs,
+    required this.isRu,
+    required this.l10n,
+  });
+
+  final K2Theme theme;
+  final TextEditingController nameCtrl;
+  final TextEditingController weightCtrl;
+  final TextEditingController caloriesCtrl;
+  final TextEditingController proteinCtrl;
+  final TextEditingController fatCtrl;
+  final TextEditingController carbsCtrl;
+  final double calories;
+  final double protein;
+  final double fat;
+  final double carbs;
+  final bool isRu;
+  final AppLocalizations l10n;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(left: 16, bottom: 0),
-      child: Text(
-        label.toUpperCase(),
-        style: const TextStyle(
-          fontSize: 13,
-          fontWeight: FontWeight.w400,
-          color: Color(0xFF8E8E93),
-          letterSpacing: 0.1,
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Inset grouped container ──────────────────────────────────────────────────
-
-class _InsetGroup extends StatelessWidget {
-  final List<Widget> children;
-  const _InsetGroup({required this.children});
-
-  @override
-  Widget build(BuildContext context) {
+    final unit = isRu ? 'г' : 'g';
     return Container(
+      padding: const EdgeInsets.fromLTRB(16, 18, 16, 18),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        color: theme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: theme.border, width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: children,
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Row inside group ─────────────────────────────────────────────────────────
-
-class _GroupRow extends StatelessWidget {
-  final String label;
-  final Widget child;
-  const _GroupRow({required this.label, required this.child});
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 44,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Row(
-          children: [
-            Text(
-              label,
-              style: const TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w400,
-                color: Colors.black,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(child: child),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _GroupDivider extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.only(left: 16),
-      child: Divider(height: 0.5, thickness: 0.5, color: Color(0xFFE5E5EA)),
-    );
-  }
-}
-
-// ─── Inline text field (right-aligned value) ──────────────────────────────────
-
-class _InlineTextField extends StatelessWidget {
-  final TextEditingController controller;
-  final TextAlign textAlign;
-  final TextInputType keyboardType;
-  final String? Function(String?)? validator;
-
-  const _InlineTextField({
-    required this.controller,
-    this.textAlign = TextAlign.end,
-    this.keyboardType = TextInputType.text,
-    this.validator,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return TextFormField(
-      controller: controller,
-      textAlign: textAlign,
-      keyboardType: keyboardType,
-      validator: validator,
-      style: const TextStyle(
-        fontSize: 17,
-        fontWeight: FontWeight.w400,
-        color: Color(0xFF8E8E93),
-      ),
-      decoration: const InputDecoration(
-        border: InputBorder.none,
-        enabledBorder: InputBorder.none,
-        focusedBorder: InputBorder.none,
-        errorBorder: InputBorder.none,
-        focusedErrorBorder: InputBorder.none,
-        isDense: true,
-        contentPadding: EdgeInsets.zero,
-        errorStyle: TextStyle(height: 0, fontSize: 0),
-      ),
-    );
-  }
-}
-
-// ─── Inline numeric field (right-aligned value + blue suffix) ─────────────────
-
-class _InlineNumField extends StatelessWidget {
-  final TextEditingController controller;
-  final String suffix;
-  final String? Function(String?)? validator;
-
-  const _InlineNumField({
-    required this.controller,
-    required this.suffix,
-    this.validator,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.end,
-      children: [
-        Expanded(
-          child: TextFormField(
-            controller: controller,
-            textAlign: TextAlign.end,
-            keyboardType:
-                const TextInputType.numberWithOptions(decimal: true),
-            validator: validator,
-            style: const TextStyle(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Name (header) ────────────────────────────────────────
+          TextFormField(
+            controller: nameCtrl,
+            validator: (v) => v == null || v.trim().isEmpty
+                ? l10n.edit_meal_name_error
+                : null,
+            textInputAction: TextInputAction.next,
+            style: TextStyle(
               fontSize: 17,
-              fontWeight: FontWeight.w400,
-              color: Color(0xFF8E8E93),
+              fontWeight: FontWeight.w700,
+              color: theme.fg,
+              fontFamily: K2Fonts.sans,
             ),
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
+              hintText: l10n.edit_meal_name_label,
+              hintStyle: TextStyle(
+                fontSize: 17,
+                color: theme.fgMute,
+                fontFamily: K2Fonts.sans,
+              ),
               border: InputBorder.none,
               enabledBorder: InputBorder.none,
               focusedBorder: InputBorder.none,
@@ -702,125 +553,84 @@ class _InlineNumField extends StatelessWidget {
               focusedErrorBorder: InputBorder.none,
               isDense: true,
               contentPadding: EdgeInsets.zero,
-              errorStyle: TextStyle(height: 0, fontSize: 0),
+              errorStyle: const TextStyle(height: 0, fontSize: 0),
             ),
           ),
-        ),
-        const SizedBox(width: 4),
-        Text(
-          suffix,
-          style: const TextStyle(
-            fontSize: 17,
-            fontWeight: FontWeight.w400,
-            color: Color(0xFF007AFF),
-          ),
-        ),
-      ],
-    );
-  }
-}
+          const SizedBox(height: 4),
+          Container(height: 1, color: theme.hairline),
+          const SizedBox(height: 14),
 
-// ─── Compact neutral macro preview card ──────────────────────────────────────
-
-class _CompactMacroPreview extends StatelessWidget {
-  final double protein;
-  final double fat;
-  final double carbs;
-  final double calories;
-  final AnimationController macroCtrl;
-  final AppLocalizations l10n;
-
-  const _CompactMacroPreview({
-    required this.protein,
-    required this.fat,
-    required this.carbs,
-    required this.calories,
-    required this.macroCtrl,
-    required this.l10n,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final total = protein + fat + carbs;
-    final proteinFrac = total > 0 ? protein / total : 0.0;
-    final fatFrac = total > 0 ? fat / total : 0.0;
-    final carbsFrac = total > 0 ? carbs / total : 0.0;
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
-          // Simple neutral ring 80×80
-          SizedBox(
-            width: 80,
-            height: 80,
-            child: AnimatedBuilder(
-              animation: macroCtrl,
-              builder: (_, _) => CustomPaint(
-                painter: _NeutralRingPainter(
-                  proteinFrac: proteinFrac,
-                  fatFrac: fatFrac,
-                  carbsFrac: carbsFrac,
-                  progress: macroCtrl.value,
-                ),
-                child: Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        calories > 0
-                            ? calories.toStringAsFixed(0)
-                            : '—',
-                        style: const TextStyle(
-                          color: Colors.black,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          height: 1.1,
-                        ),
-                      ),
-                      Text(
-                        l10n.macro_kcal,
-                        style: const TextStyle(
-                          color: Color(0xFF8E8E93),
-                          fontSize: 9,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
+          // ── Weight pill (standalone button, inline editable) ─────
+          Row(
+            children: [
+              Text(
+                isRu ? 'Вес' : 'Weight',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: theme.fgMute,
+                  fontFamily: K2Fonts.sans,
+                  letterSpacing: 0.4,
                 ),
               ),
+              const Spacer(),
+              _InlinePill(
+                controller: weightCtrl,
+                suffix: unit,
+                width: 110,
+                fontSize: 16,
+                bold: true,
+                theme: theme,
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // ── Filled KБЖУ row — 4 tappable chips ───────────────────
+          Text(
+            isRu ? 'КБЖУ' : 'KBJU',
+            style: TextStyle(
+              fontSize: 11,
+              color: theme.fgMute,
+              fontFamily: K2Fonts.sans,
+              letterSpacing: 0.4,
             ),
           ),
-          const SizedBox(width: 16),
-          // Macro legend
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _PreviewLegendRow(
-                  color: const Color(0xFF34C759),
-                  label: l10n.macro_protein,
-                  value: '${protein.toStringAsFixed(1)} ${l10n.macro_g}',
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: _MacroCell(
+                  label: isRu ? 'ккал' : 'kcal',
+                  controller: caloriesCtrl,
+                  highlighted: true,
+                  theme: theme,
                 ),
-                const SizedBox(height: 8),
-                _PreviewLegendRow(
-                  color: const Color(0xFFFF9500),
-                  label: l10n.macro_fat,
-                  value: '${fat.toStringAsFixed(1)} ${l10n.macro_g}',
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: _MacroCell(
+                  label: isRu ? 'Б' : 'P',
+                  controller: proteinCtrl,
+                  theme: theme,
                 ),
-                const SizedBox(height: 8),
-                _PreviewLegendRow(
-                  color: const Color(0xFF007AFF),
-                  label: l10n.macro_carbs,
-                  value: '${carbs.toStringAsFixed(1)} ${l10n.macro_g}',
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: _MacroCell(
+                  label: isRu ? 'Ж' : 'F',
+                  controller: fatCtrl,
+                  theme: theme,
                 ),
-              ],
-            ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: _MacroCell(
+                  label: isRu ? 'У' : 'C',
+                  controller: carbsCtrl,
+                  theme: theme,
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -828,202 +638,381 @@ class _CompactMacroPreview extends StatelessWidget {
   }
 }
 
-class _PreviewLegendRow extends StatelessWidget {
-  final Color color;
-  final String label;
-  final String value;
+// ─── Inline editable pill (used for the weight button) ───────────────────────
+//
+// Renders as a chip with the controller's text + suffix + edit icon. Tap →
+// expands to a TextField focused on the value. On submit / focus loss the
+// pill returns and the listener attached to `controller` (in the parent
+// State) fires its recalc logic.
 
-  const _PreviewLegendRow({
-    required this.color,
-    required this.label,
-    required this.value,
+class _InlinePill extends StatefulWidget {
+  const _InlinePill({
+    required this.controller,
+    required this.suffix,
+    required this.theme,
+    this.width = 96,
+    this.fontSize = 14,
+    this.bold = false,
   });
 
+  final TextEditingController controller;
+  final String suffix;
+  final K2Theme theme;
+  final double width;
+  final double fontSize;
+  final bool bold;
+
   @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-        ),
-        const SizedBox(width: 6),
-        Text(
-          label,
-          style: const TextStyle(
-            color: Color(0xFF8E8E93),
-            fontSize: 12,
-            fontWeight: FontWeight.w400,
-          ),
-        ),
-        const Spacer(),
-        Text(
-          value,
-          style: const TextStyle(
-            color: Colors.black,
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ],
-    );
-  }
+  State<_InlinePill> createState() => _InlinePillState();
 }
 
-// ─── Neutral ring painter ─────────────────────────────────────────────────────
-
-class _NeutralRingPainter extends CustomPainter {
-  final double proteinFrac;
-  final double fatFrac;
-  final double carbsFrac;
-  final double progress;
-
-  _NeutralRingPainter({
-    required this.proteinFrac,
-    required this.fatFrac,
-    required this.carbsFrac,
-    required this.progress,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.width / 2 - 7;
-    const strokeWidth = 9.0;
-
-    // Track
-    canvas.drawArc(
-      Rect.fromCircle(center: center, radius: radius),
-      0,
-      2 * math.pi,
-      false,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = strokeWidth
-        ..color = const Color(0xFFF2F2F7),
-    );
-
-    if (proteinFrac + fatFrac + carbsFrac == 0) return;
-
-    final segments = [
-      (proteinFrac, const Color(0xFF34C759)),
-      (fatFrac, const Color(0xFFFF9500)),
-      (carbsFrac, const Color(0xFF007AFF)),
-    ];
-
-    double startAngle = -math.pi / 2;
-    const gap = 0.04;
-
-    for (final (frac, color) in segments) {
-      if (frac <= 0) continue;
-      final sweep = frac * 2 * math.pi * progress - gap;
-      if (sweep <= 0) {
-        startAngle += frac * 2 * math.pi * progress;
-        continue;
-      }
-      canvas.drawArc(
-        Rect.fromCircle(center: center, radius: radius),
-        startAngle + gap / 2,
-        sweep,
-        false,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = strokeWidth
-          ..strokeCap = StrokeCap.round
-          ..color = color,
-      );
-      startAngle += frac * 2 * math.pi * progress;
-    }
-  }
-
-  @override
-  bool shouldRepaint(_NeutralRingPainter old) =>
-      old.proteinFrac != proteinFrac ||
-      old.fatFrac != fatFrac ||
-      old.carbsFrac != carbsFrac ||
-      old.progress != progress;
-}
-
-// ─── iOS blue filled Save button ──────────────────────────────────────────────
-
-class _IosBlueButton extends StatefulWidget {
-  final bool saving;
-  final String label;
-  final VoidCallback onTap;
-
-  const _IosBlueButton({
-    required this.saving,
-    required this.label,
-    required this.onTap,
-  });
-
-  @override
-  State<_IosBlueButton> createState() => _IosBlueButtonState();
-}
-
-class _IosBlueButtonState extends State<_IosBlueButton>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
-  late final Animation<double> _scale;
+class _InlinePillState extends State<_InlinePill> {
+  final _focus = FocusNode();
+  bool _editing = false;
 
   @override
   void initState() {
     super.initState();
-    _ctrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 130));
-    _scale = Tween(begin: 1.0, end: 0.97).animate(
-        CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut));
+    _focus.addListener(_onFocus);
   }
 
   @override
   void dispose() {
-    _ctrl.dispose();
+    _focus.removeListener(_onFocus);
+    _focus.dispose();
+    super.dispose();
+  }
+
+  void _onFocus() {
+    if (!_focus.hasFocus && _editing) {
+      setState(() => _editing = false);
+    }
+  }
+
+  void _start() {
+    setState(() => _editing = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _focus.requestFocus();
+      widget.controller.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: widget.controller.text.length,
+      );
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = widget.theme;
+    if (_editing) {
+      return SizedBox(
+        width: widget.width,
+        height: 36,
+        child: TextField(
+          controller: widget.controller,
+          focusNode: _focus,
+          keyboardType: const TextInputType.numberWithOptions(decimal: false),
+          textAlign: TextAlign.center,
+          onSubmitted: (_) => setState(() => _editing = false),
+          style: TextStyle(
+            fontSize: widget.fontSize,
+            color: t.fg,
+            fontFamily: K2Fonts.mono,
+            fontWeight: widget.bold ? FontWeight.w700 : FontWeight.w600,
+          ),
+          decoration: InputDecoration(
+            isDense: true,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(18),
+              borderSide: BorderSide(color: K2Colors.accent),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(18),
+              borderSide: BorderSide(color: K2Colors.accent, width: 1.5),
+            ),
+            suffixText: widget.suffix,
+            suffixStyle: TextStyle(
+              fontSize: 12,
+              color: t.fgMute,
+              fontFamily: K2Fonts.mono,
+            ),
+          ),
+        ),
+      );
+    }
+    return GestureDetector(
+      onTap: _start,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        height: 36,
+        width: widget.width,
+        decoration: BoxDecoration(
+          color: t.bg,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: K2Colors.accent.withValues(alpha: 0.4)),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              widget.controller.text.isEmpty ? '—' : widget.controller.text,
+              style: TextStyle(
+                fontSize: widget.fontSize,
+                color: t.fg,
+                fontFamily: K2Fonts.mono,
+                fontWeight: widget.bold ? FontWeight.w700 : FontWeight.w600,
+              ),
+            ),
+            const SizedBox(width: 4),
+            Text(
+              widget.suffix,
+              style: TextStyle(
+                fontSize: 12,
+                color: t.fgMute,
+                fontFamily: K2Fonts.mono,
+              ),
+            ),
+            const SizedBox(width: 6),
+            Icon(
+              Icons.edit_outlined,
+              size: 13,
+              color: K2Colors.accent,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Single KБЖУ cell (label below value, tappable to edit) ──────────────────
+
+class _MacroCell extends StatefulWidget {
+  const _MacroCell({
+    required this.label,
+    required this.controller,
+    required this.theme,
+    this.highlighted = false,
+  });
+
+  final String label;
+  final TextEditingController controller;
+  final K2Theme theme;
+  final bool highlighted;
+
+  @override
+  State<_MacroCell> createState() => _MacroCellState();
+}
+
+class _MacroCellState extends State<_MacroCell> {
+  final _focus = FocusNode();
+  bool _editing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _focus.addListener(_onFocus);
+    widget.controller.addListener(_listen);
+  }
+
+  void _listen() => mounted ? setState(() {}) : null;
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_listen);
+    _focus.removeListener(_onFocus);
+    _focus.dispose();
+    super.dispose();
+  }
+
+  void _onFocus() {
+    if (!_focus.hasFocus && _editing) {
+      setState(() => _editing = false);
+    }
+  }
+
+  void _start() {
+    setState(() => _editing = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _focus.requestFocus();
+      widget.controller.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: widget.controller.text.length,
+      );
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = widget.theme;
+    final bg = widget.highlighted ? K2Colors.accent.withValues(alpha: 0.08) : t.bg;
+    final borderColor = widget.highlighted
+        ? K2Colors.accent.withValues(alpha: 0.35)
+        : t.border;
+    final valueColor = widget.highlighted ? K2Colors.accent : t.fg;
+
+    return GestureDetector(
+      onTap: _editing ? null : _start,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        height: 64,
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: borderColor),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            if (_editing)
+              SizedBox(
+                height: 24,
+                child: TextField(
+                  controller: widget.controller,
+                  focusNode: _focus,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  textAlign: TextAlign.center,
+                  onSubmitted: (_) => setState(() => _editing = false),
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: valueColor,
+                    fontFamily: K2Fonts.mono,
+                  ),
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    contentPadding: EdgeInsets.zero,
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    errorBorder: InputBorder.none,
+                    focusedErrorBorder: InputBorder.none,
+                  ),
+                ),
+              )
+            else
+              Text(
+                _displayValue(widget.controller.text),
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: valueColor,
+                  fontFamily: K2Fonts.mono,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            const SizedBox(height: 2),
+            Text(
+              widget.label,
+              style: TextStyle(
+                fontSize: 10,
+                color: t.fgMute,
+                fontFamily: K2Fonts.sans,
+                letterSpacing: 0.4,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Show a rounded integer when the controller has a fractional zero
+  /// (`120.0` → `120`); else show the raw text so user edits aren't reformatted.
+  String _displayValue(String raw) {
+    if (raw.isEmpty) return '—';
+    final v = double.tryParse(raw);
+    if (v == null) return raw;
+    if (v == v.roundToDouble()) return v.round().toString();
+    return v.toStringAsFixed(1);
+  }
+}
+
+// ─── K2 save button — full-width black/white pill ────────────────────────────
+
+class _K2SaveButton extends StatefulWidget {
+  const _K2SaveButton({
+    required this.saving,
+    required this.label,
+    required this.onTap,
+    required this.theme,
+  });
+
+  final bool saving;
+  final String label;
+  final VoidCallback onTap;
+  final K2Theme theme;
+
+  @override
+  State<_K2SaveButton> createState() => _K2SaveButtonState();
+}
+
+class _K2SaveButtonState extends State<_K2SaveButton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _press;
+
+  @override
+  void initState() {
+    super.initState();
+    _press = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 90),
+      lowerBound: 0.97,
+      upperBound: 1.0,
+      value: 1.0,
+    );
+  }
+
+  @override
+  void dispose() {
+    _press.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final t = widget.theme;
     return ScaleTransition(
-      scale: _scale,
+      scale: _press,
       child: GestureDetector(
-        onTapDown: widget.saving ? null : (_) => _ctrl.forward(),
-        onTapUp: widget.saving
-            ? null
-            : (_) {
-                _ctrl.reverse();
-                widget.onTap();
-              },
-        onTapCancel: () => _ctrl.reverse(),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
+        onTapDown: (_) => _press.reverse(),
+        onTapUp: (_) {
+          _press.forward();
+          if (!widget.saving) widget.onTap();
+        },
+        onTapCancel: () => _press.forward(),
+        child: Container(
           height: 50,
           decoration: BoxDecoration(
-            color: widget.saving
-                ? const Color(0xFFADB5BD)
-                : const Color(0xFF007AFF),
+            color: widget.saving ? t.fgMute : t.fg,
             borderRadius: BorderRadius.circular(14),
           ),
-          child: Center(
-            child: widget.saving
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2.5,
-                      color: Colors.white,
-                    ),
-                  )
-                : Text(
-                    widget.label,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 17,
-                      letterSpacing: -0.2,
-                    ),
+          alignment: Alignment.center,
+          child: widget.saving
+              ? SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: t.bg,
                   ),
-          ),
+                )
+              : Text(
+                  widget.label,
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: t.bg,
+                    fontFamily: K2Fonts.sans,
+                    letterSpacing: 0.2,
+                  ),
+                ),
         ),
       ),
     );

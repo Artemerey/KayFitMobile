@@ -35,6 +35,7 @@ class K2MealRowData {
     required this.fat,
     required this.carbs,
     required this.source,
+    this.weightGrams,
     this.photoSeed,
     this.photoUrl,
   });
@@ -66,6 +67,11 @@ class K2MealRowData {
   /// How the meal was logged.
   final K2MealSource source;
 
+  /// Weight in grams when known. Surface separately from `name` so the row
+  /// can render a tappable pill that's inline-editable in the journal list.
+  /// Null when the meal was logged without a weight (legacy).
+  final double? weightGrams;
+
   /// Deterministic seed for the striped photo placeholder gradient.
   /// Only meaningful when [source] == [K2MealSource.photo].
   final int? photoSeed;
@@ -88,6 +94,7 @@ class K2MealRowData {
     int? fat,
     int? carbs,
     K2MealSource? source,
+    double? weightGrams,
     int? photoSeed,
     String? photoUrl,
   }) {
@@ -101,6 +108,7 @@ class K2MealRowData {
       fat: fat ?? this.fat,
       carbs: carbs ?? this.carbs,
       source: source ?? this.source,
+      weightGrams: weightGrams ?? this.weightGrams,
       photoSeed: photoSeed ?? this.photoSeed,
       photoUrl: photoUrl ?? this.photoUrl,
     );
@@ -119,6 +127,7 @@ class K2MealRowData {
         other.fat == fat &&
         other.carbs == carbs &&
         other.source == source &&
+        other.weightGrams == weightGrams &&
         other.photoSeed == photoSeed &&
         other.photoUrl == photoUrl;
   }
@@ -134,6 +143,7 @@ class K2MealRowData {
         fat,
         carbs,
         source,
+        weightGrams,
         photoSeed,
         photoUrl,
       );

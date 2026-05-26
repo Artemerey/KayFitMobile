@@ -1,130 +1,279 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
+import '../../../shared/models/ingredient_v2.dart';
 import '../../../shared/models/nutrients_v2.dart';
 import '../../../shared/theme/kayfit2_theme.dart';
 
-/// Hero section that displays the total kcal in a large JetBrains Mono
-/// typeface, followed by a P·F·C summary line.
+// ── Macro ring colors ──────────────────────────────────────────────────────────
+
+const _kcalColor = K2Colors.accent; // Apple blue
+const _proteinColor = Color(0xFF22C55E); // green
+const _fatColor = Color(0xFFF59E0B); // amber
+const _carbsColor = Color(0xFF8B5CF6); // purple
+
+// ── Public widget ─────────────────────────────────────────────────────────────
+
+/// Hero section: 4 decorative macro circles + optional glycemic-index badge.
 class KF2HeroTotal extends StatelessWidget {
   const KF2HeroTotal({
     super.key,
     required this.totals,
     required this.theme,
+    this.items = const [],
   });
 
   final NutrientsV2 totals;
   final K2Theme theme;
 
+  /// Used to compute the average glycemic index badge.
+  final List<IngredientV2> items;
+
+  // ── GI computation ───────────────────────────────────────────────────────
+
+  ({int gi, String category})? _avgGi() {
+    final giItems = items
+        .where((i) => i.nutrientsPer100g.glycemicIndex != null)
+        .toList();
+    if (giItems.isEmpty) return null;
+    final sum = giItems.fold<int>(
+      0,
+      (s, i) => s + i.nutrientsPer100g.glycemicIndex!,
+    );
+    final avg = (sum / giItems.length).round();
+    final category = avg < 55
+        ? 'Low'
+        : avg < 70
+            ? 'Med'
+            : 'High';
+    return (gi: avg, category: category);
+  }
+
   @override
   Widget build(BuildContext context) {
-    final kcal = totals.calories.toStringAsFixed(0);
-    final p = totals.protein.toStringAsFixed(0);
-    final f = totals.fat.toStringAsFixed(0);
-    final c = totals.carbs.toStringAsFixed(0);
+    final gi = _avgGi();
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'TOTAL',
-            style: TextStyle(
-              fontFamily: K2Fonts.sans,
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 1.2,
-              color: theme.fgMute,
-            ),
+          // ── "TOTAL" label + optional GI badge ─────────────────────────
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Text(
+                'TOTAL',
+                style: TextStyle(
+                  fontFamily: K2Fonts.sans,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.2,
+                  color: theme.fgMute,
+                ),
+              ),
+              if (gi != null) ...[
+                const SizedBox(width: 10),
+                _GiBadge(gi: gi.gi, category: gi.category),
+              ],
+            ],
           ),
-          const SizedBox(height: 4),
-          Text(
-            '$kcal kcal',
-            style: TextStyle(
-              fontFamily: K2Fonts.mono,
-              fontSize: 56,
-              fontWeight: FontWeight.w500,
-              letterSpacing: -2.5,
-              height: 1,
-              color: theme.fg,
-            ),
+
+          const SizedBox(height: 16),
+
+          // ── Four macro circles ────────────────────────────────────────
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _MacroCircle(
+                value: totals.calories.toStringAsFixed(0),
+                unit: 'kcal',
+                label: 'kcal',
+                color: _kcalColor,
+                theme: theme,
+              ),
+              _MacroCircle(
+                value: totals.protein.toStringAsFixed(0),
+                unit: 'g',
+                label: 'Protein',
+                color: _proteinColor,
+                theme: theme,
+              ),
+              _MacroCircle(
+                value: totals.fat.toStringAsFixed(0),
+                unit: 'g',
+                label: 'Fat',
+                color: _fatColor,
+                theme: theme,
+              ),
+              _MacroCircle(
+                value: totals.carbs.toStringAsFixed(0),
+                unit: 'g',
+                label: 'Carbs',
+                color: _carbsColor,
+                theme: theme,
+              ),
+            ],
           ),
-          const SizedBox(height: 6),
-          _MacroSubline(p: p, f: f, c: c, theme: theme),
         ],
       ),
     );
   }
 }
 
-class _MacroSubline extends StatelessWidget {
-  const _MacroSubline({
-    required this.p,
-    required this.f,
-    required this.c,
+// ── Glycemic index badge ──────────────────────────────────────────────────────
+
+class _GiBadge extends StatelessWidget {
+  const _GiBadge({required this.gi, required this.category});
+
+  final int gi;
+  final String category;
+
+  Color get _bg {
+    if (gi < 55) return const Color(0xFF22C55E);
+    if (gi < 70) return const Color(0xFFF59E0B);
+    return const Color(0xFFEF4444);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: _bg.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: _bg.withValues(alpha: 0.35), width: 1),
+      ),
+      child: Text(
+        'GI $gi · $category',
+        style: TextStyle(
+          fontFamily: K2Fonts.mono,
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.2,
+          color: _bg,
+        ),
+      ),
+    );
+  }
+}
+
+// ── Single macro circle ───────────────────────────────────────────────────────
+
+class _MacroCircle extends StatelessWidget {
+  const _MacroCircle({
+    required this.value,
+    required this.unit,
+    required this.label,
+    required this.color,
     required this.theme,
   });
 
-  final String p;
-  final String f;
-  final String c;
+  final String value;
+  final String unit;
+  final String label;
+  final Color color;
   final K2Theme theme;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        _Macro(label: 'P', value: p, theme: theme),
-        _Dot(theme: theme),
-        _Macro(label: 'F', value: f, theme: theme),
-        _Dot(theme: theme),
-        _Macro(label: 'C', value: c, theme: theme),
+        SizedBox(
+          width: 68,
+          height: 68,
+          child: CustomPaint(
+            painter: _MacroRingPainter(color: color),
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    value,
+                    style: TextStyle(
+                      fontFamily: K2Fonts.mono,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      height: 1,
+                      letterSpacing: -0.5,
+                      color: theme.fg,
+                    ),
+                  ),
+                  const SizedBox(height: 1),
+                  Text(
+                    unit,
+                    style: TextStyle(
+                      fontFamily: K2Fonts.mono,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w400,
+                      color: theme.fgMute,
+                      height: 1,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          label,
+          style: TextStyle(
+            fontFamily: K2Fonts.sans,
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+            color: theme.fgDim,
+          ),
+        ),
       ],
     );
   }
 }
 
-class _Macro extends StatelessWidget {
-  const _Macro({
-    required this.label,
-    required this.value,
-    required this.theme,
-  });
+// ── Ring painter — decorative full circle, no progress ────────────────────────
 
-  final String label;
-  final String value;
-  final K2Theme theme;
+class _MacroRingPainter extends CustomPainter {
+  const _MacroRingPainter({required this.color});
+
+  final Color color;
+
+  static const _strokeWidth = 6.0;
 
   @override
-  Widget build(BuildContext context) {
-    return Text(
-      '$label ${value}g',
-      style: TextStyle(
-        fontFamily: K2Fonts.mono,
-        fontSize: 13,
-        color: theme.fgDim,
-      ),
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = (size.width - _strokeWidth) / 2;
+    final rect = Rect.fromCircle(center: center, radius: radius);
+
+    // Track: full circle, muted
+    canvas.drawArc(
+      rect,
+      -math.pi / 2,
+      2 * math.pi,
+      false,
+      Paint()
+        ..color = color.withValues(alpha: 0.15)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = _strokeWidth
+        ..strokeCap = StrokeCap.round,
+    );
+
+    // Fill: full solid circle (decorative, progress = 1.0)
+    canvas.drawArc(
+      rect,
+      -math.pi / 2,
+      2 * math.pi,
+      false,
+      Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = _strokeWidth
+        ..strokeCap = StrokeCap.round,
     );
   }
-}
-
-class _Dot extends StatelessWidget {
-  const _Dot({required this.theme});
-
-  final K2Theme theme;
 
   @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 6),
-      child: Text(
-        '·',
-        style: TextStyle(
-          fontFamily: K2Fonts.mono,
-          fontSize: 13,
-          color: theme.fgMute,
-        ),
-      ),
-    );
-  }
+  bool shouldRepaint(_MacroRingPainter old) => old.color != color;
 }
