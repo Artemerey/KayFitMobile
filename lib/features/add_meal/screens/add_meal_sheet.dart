@@ -182,24 +182,25 @@ class _AddMealSheetState extends ConsumerState<AddMealSheet>
           isDismissible: true,
           enableDrag: true,
           showDragHandle: false,
-          builder: (_) => DraggableScrollableSheet(
-            initialChildSize: 0.92,
-            minChildSize: 0.5,
-            maxChildSize: 0.95,
-            builder: (_, __) => _useKF2
-                ? RecognitionResultSheetKF2(
-                    dishName: summaryName,
-                    ingredients: v2items,
-                    mealDate: widget.mealDate,
-                    originalText: text,
-                  )
-                : RecognitionResultSheetV2(
-              dishName: summaryName,
-              ingredients: v2items,
-              mealDate: widget.mealDate,
-              originalText: text,
-            ),
-          ),
+          builder: (ctx) {
+            final h = MediaQuery.of(ctx).size.height;
+            return SizedBox(
+              height: h * 0.92,
+              child: _useKF2
+                  ? RecognitionResultSheetKF2(
+                      dishName: summaryName,
+                      ingredients: v2items,
+                      mealDate: widget.mealDate,
+                      originalText: text,
+                    )
+                  : RecognitionResultSheetV2(
+                      dishName: summaryName,
+                      ingredients: v2items,
+                      mealDate: widget.mealDate,
+                      originalText: text,
+                    ),
+            );
+          },
         );
 
         if (saved == true && mounted) {
@@ -388,24 +389,25 @@ class _AddMealSheetState extends ConsumerState<AddMealSheet>
           isDismissible: true,
           enableDrag: true,
           showDragHandle: false,
-          builder: (_) => DraggableScrollableSheet(
-            initialChildSize: 0.92,
-            minChildSize: 0.5,
-            maxChildSize: 0.95,
-            builder: (_, __) => _useKF2
-                ? RecognitionResultSheetKF2(
-                    dishName: dishName,
-                    ingredients: v2items,
-                    mealDate: widget.mealDate,
-                    originalText: null,
-                  )
-                : RecognitionResultSheetV2(
-              dishName: dishName,
-              ingredients: v2items,
-              mealDate: widget.mealDate,
-              originalText: null,
-            ),
-          ),
+          builder: (ctx) {
+            final h = MediaQuery.of(ctx).size.height;
+            return SizedBox(
+              height: h * 0.92,
+              child: _useKF2
+                  ? RecognitionResultSheetKF2(
+                      dishName: dishName,
+                      ingredients: v2items,
+                      mealDate: widget.mealDate,
+                      originalText: null,
+                    )
+                  : RecognitionResultSheetV2(
+                      dishName: dishName,
+                      ingredients: v2items,
+                      mealDate: widget.mealDate,
+                      originalText: null,
+                    ),
+            );
+          },
         );
 
         if (saved == true && mounted) {

@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
 import '../../../shared/theme/app_theme.dart';
 
-enum DocumentType { privacyPolicy, termsOfService }
+enum DocumentType {
+  privacyPolicy,
+  termsOfService,
+  subscriptionTerms,
+  subscriptionPrivacy,
+}
 
 class DocumentScreen extends StatelessWidget {
   final DocumentType type;
@@ -11,18 +16,30 @@ class DocumentScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isRu = Localizations.localeOf(context).languageCode == 'ru';
-    final title = type == DocumentType.privacyPolicy
-        ? (isRu ? 'Политика конфиденциальности' : 'Privacy Policy')
-        : (isRu ? 'Пользовательское соглашение' : 'Terms of Service');
+    final title = switch (type) {
+      DocumentType.privacyPolicy =>
+        isRu ? 'Политика конфиденциальности' : 'Privacy Policy',
+      DocumentType.termsOfService =>
+        isRu ? 'Пользовательское соглашение' : 'Terms of Service',
+      DocumentType.subscriptionTerms =>
+        isRu ? 'Условия подписки' : 'Subscription Terms',
+      DocumentType.subscriptionPrivacy =>
+        isRu ? 'Политика обработки данных' : 'Data Processing Policy',
+    };
 
     return Scaffold(
       backgroundColor: AppColors.bg,
       appBar: AppBar(title: Text(title)),
       body: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 48),
-        child: type == DocumentType.privacyPolicy
-            ? _PrivacyPolicy(isRu: isRu)
-            : _TermsOfService(isRu: isRu),
+        child: switch (type) {
+          DocumentType.privacyPolicy => _PrivacyPolicy(isRu: isRu),
+          DocumentType.termsOfService => _TermsOfService(isRu: isRu),
+          DocumentType.subscriptionTerms =>
+            _SubscriptionTerms(isRu: isRu),
+          DocumentType.subscriptionPrivacy =>
+            _SubscriptionPrivacy(isRu: isRu),
+        },
       ),
     );
   }
@@ -597,5 +614,256 @@ class _SectionWidget extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+// ─── Subscription Terms ────────────────────────────────────────────────────────
+
+class _SubscriptionTerms extends StatelessWidget {
+  final bool isRu;
+  const _SubscriptionTerms({required this.isRu});
+
+  @override
+  Widget build(BuildContext context) =>
+      isRu ? const _SubscriptionTermsRu() : const _SubscriptionTermsEn();
+}
+
+class _SubscriptionTermsRu extends StatelessWidget {
+  const _SubscriptionTermsRu();
+
+  @override
+  Widget build(BuildContext context) {
+    return const _DocContent(sections: [
+      _Section(
+        title: 'Условия подписки Kayfit',
+        body: '',
+        isHeadline: true,
+      ),
+      _Section(
+        title: '1. Подписка',
+        body:
+            'Подписка Kayfit Premium открывает полный доступ к функциям приложения: '
+            'распознавание блюд с помощью ИИ, расчёт КБЖУ, анализ питания и '
+            'персональный план целей.\n\n'
+            'Доступные планы:\n'
+            '• 1 месяц — 1 190 ₽\n'
+            '• 6 месяцев — 3 590 ₽ (экономия 50%)\n'
+            '• 1 год — 2 890 ₽ (экономия 80%)',
+      ),
+      _Section(
+        title: '2. Пробный период',
+        body:
+            'Каждый план включает 7-дневный бесплатный пробный период. '
+            'Списание происходит после его окончания.\n\n'
+            'Чтобы не платить — отмените подписку в App Store до истечения '
+            'пробного периода.',
+      ),
+      _Section(
+        title: '3. Автоматическое продление',
+        body:
+            'Подписка продлевается автоматически, если не была отменена '
+            'не менее чем за 24 часа до окончания текущего периода. '
+            'Оплата списывается за 24 часа до начала нового периода.',
+      ),
+      _Section(
+        title: '4. Отмена',
+        body:
+            'Отменить подписку можно в любое время через App Store:\n\n'
+            'Настройки iPhone → ваш Apple ID → Подписки → Kayfit → Отменить подписку\n\n'
+            'После отмены доступ к Premium сохраняется до конца оплаченного периода.',
+      ),
+      _Section(
+        title: '5. Возврат средств',
+        body:
+            'Возврат средств осуществляется в соответствии с правилами '
+            'Apple App Store. Для запроса обратитесь в поддержку Apple или '
+            'напишите нам на support@kayfit.app.',
+      ),
+      _Section(
+        title: '6. Изменение цен',
+        body:
+            'Мы оставляем за собой право изменять стоимость подписки. '
+            'Об изменениях мы уведомим вас заблаговременно через приложение '
+            'или по электронной почте.',
+      ),
+    ]);
+  }
+}
+
+class _SubscriptionTermsEn extends StatelessWidget {
+  const _SubscriptionTermsEn();
+
+  @override
+  Widget build(BuildContext context) {
+    return const _DocContent(sections: [
+      _Section(
+        title: 'Kayfit Subscription Terms',
+        body: '',
+        isHeadline: true,
+      ),
+      _Section(
+        title: '1. Subscription',
+        body:
+            'A Kayfit Premium subscription unlocks full access to the app: '
+            'AI-powered food recognition, macro tracking, nutrition analysis, '
+            'and a personalised goal plan.\n\n'
+            'Available plans:\n'
+            '• 1 month\n'
+            '• 6 months (save 50%)\n'
+            '• 1 year (save 80%)',
+      ),
+      _Section(
+        title: '2. Free Trial',
+        body:
+            'Every plan includes a 7-day free trial. '
+            'You will not be charged until the trial ends.\n\n'
+            'To avoid being charged, cancel in the App Store before '
+            'the trial period expires.',
+      ),
+      _Section(
+        title: '3. Auto-Renewal',
+        body:
+            'Your subscription renews automatically unless cancelled at least '
+            '24 hours before the end of the current period. '
+            'Payment is charged within 24 hours of the renewal date.',
+      ),
+      _Section(
+        title: '4. Cancellation',
+        body:
+            'You may cancel at any time via the App Store:\n\n'
+            'iPhone Settings → your Apple ID → Subscriptions → Kayfit → Cancel\n\n'
+            'Access to Premium continues until the end of the paid period.',
+      ),
+      _Section(
+        title: '5. Refunds',
+        body:
+            'Refunds are handled in accordance with Apple App Store policies. '
+            'To request a refund, contact Apple Support or reach us at '
+            'support@kayfit.app.',
+      ),
+      _Section(
+        title: '6. Price Changes',
+        body:
+            'We reserve the right to change subscription pricing. '
+            'You will be notified in advance through the app or by email.',
+      ),
+    ]);
+  }
+}
+
+// ─── Subscription Privacy ──────────────────────────────────────────────────────
+
+class _SubscriptionPrivacy extends StatelessWidget {
+  final bool isRu;
+  const _SubscriptionPrivacy({required this.isRu});
+
+  @override
+  Widget build(BuildContext context) =>
+      isRu ? const _SubscriptionPrivacyRu() : const _SubscriptionPrivacyEn();
+}
+
+class _SubscriptionPrivacyRu extends StatelessWidget {
+  const _SubscriptionPrivacyRu();
+
+  @override
+  Widget build(BuildContext context) {
+    return const _DocContent(sections: [
+      _Section(
+        title: 'Политика обработки данных при подписке',
+        body: '',
+        isHeadline: true,
+      ),
+      _Section(
+        title: '1. Какие данные обрабатываются',
+        body:
+            'При оформлении подписки через App Store платёжные данные '
+            '(номер карты, данные Apple Pay) обрабатываются исключительно '
+            'компанией Apple и не передаются нам.\n\n'
+            'Мы получаем только:\n'
+            '• Факт активации подписки и её статус\n'
+            '• Идентификатор транзакции App Store\n'
+            '• Дату начала и окончания подписки',
+      ),
+      _Section(
+        title: '2. Цель обработки',
+        body:
+            'Полученные данные используются исключительно для:\n'
+            '• Предоставления доступа к функциям Premium\n'
+            '• Восстановления покупок при переустановке приложения\n'
+            '• Обработки запросов на возврат средств',
+      ),
+      _Section(
+        title: '3. Хранение данных',
+        body:
+            'Данные о подписке хранятся на защищённых серверах в течение '
+            'срока действия подписки и 1 года после её окончания — '
+            'для обработки возможных споров.',
+      ),
+      _Section(
+        title: '4. Передача третьим лицам',
+        body:
+            'Мы не продаём и не передаём данные о вашей подписке третьим '
+            'лицам, за исключением случаев, предусмотренных законодательством.',
+      ),
+      _Section(
+        title: '5. Ваши права',
+        body:
+            'Вы вправе запросить удаление данных о подписке. '
+            'Обратитесь на support@kayfit.app. '
+            'Удаление данных влечёт прекращение доступа к Premium.',
+      ),
+    ]);
+  }
+}
+
+class _SubscriptionPrivacyEn extends StatelessWidget {
+  const _SubscriptionPrivacyEn();
+
+  @override
+  Widget build(BuildContext context) {
+    return const _DocContent(sections: [
+      _Section(
+        title: 'Subscription Data Processing Policy',
+        body: '',
+        isHeadline: true,
+      ),
+      _Section(
+        title: '1. What data is processed',
+        body:
+            'When subscribing via the App Store, payment details (card number, '
+            'Apple Pay data) are processed exclusively by Apple and are never '
+            'shared with us.\n\n'
+            'We only receive:\n'
+            '• Subscription activation status\n'
+            '• App Store transaction identifier\n'
+            '• Subscription start and end dates',
+      ),
+      _Section(
+        title: '2. Purpose of processing',
+        body:
+            'The data we receive is used solely to:\n'
+            '• Grant access to Premium features\n'
+            '• Restore purchases after reinstalling the app\n'
+            '• Handle refund requests',
+      ),
+      _Section(
+        title: '3. Data retention',
+        body:
+            'Subscription data is stored on secure servers for the duration of '
+            'the subscription and for 1 year after it ends, to handle possible disputes.',
+      ),
+      _Section(
+        title: '4. Third-party sharing',
+        body:
+            'We do not sell or share your subscription data with third parties, '
+            'except as required by applicable law.',
+      ),
+      _Section(
+        title: '5. Your rights',
+        body:
+            'You may request deletion of your subscription data by contacting '
+            'support@kayfit.app. Deletion will result in loss of Premium access.',
+      ),
+    ]);
   }
 }

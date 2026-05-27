@@ -95,8 +95,17 @@ class _RouterNotifier extends ChangeNotifier {
     }
 
     // Logged in
-    if (loc == '/login' || loc == '/email-auth' || loc == '/onboarding') {
+    if (loc == '/login' || loc == '/email-auth') {
       return _kfJournal ? '/journal-v2' : '/';
+    }
+    // After completing onboarding, leave /onboarding
+    if (loc == '/onboarding' && onboardingDone) {
+      return _kfJournal ? '/journal-v2' : '/';
+    }
+    // Reinstall case: Keychain auth token survives reinstall but SharedPreferences
+    // are cleared — user is logged in but onboarding not done. Show onboarding.
+    if (!onboardingDone && loc != '/onboarding') {
+      return '/onboarding';
     }
 
     if (showWayToGoal && loc != '/way-to-goal') {

@@ -15,6 +15,8 @@ import 'package:kayfit/features/body_form/body_form_prefs.dart';
 import 'package:kayfit/features/body_form/i18n/body_form_strings.dart';
 import 'package:kayfit/features/body_form/screens/body_form_screen.dart';
 import 'package:kayfit/features/settings/screens/document_screen.dart';
+import 'package:kayfit/features/paywall/screens/paywall_sheet.dart';
+import 'package:kayfit/features/tariffs/screens/tariffs_screen.dart';
 import 'package:kayfit/shared/theme/kayfit2_theme.dart';
 
 // Provider that surfaces the singleton Dio instance for fire-and-forget
@@ -173,6 +175,36 @@ class _SettingsV2ScreenState extends ConsumerState<SettingsV2Screen> {
                         icon: Icons.psychology_outlined,
                         label: l10n.settings_ai_consent,
                         onTap: () => context.push('/ai-consent'),
+                      ),
+                    ],
+                  ),
+
+                  // ── Subscription ─────────────────────────────────────────
+                  const SizedBox(height: 20),
+                  _SectionHeader(t: t, label: 'Subscription'),
+                  const SizedBox(height: 4),
+                  _SectionGroup(
+                    t: t,
+                    children: [
+                      _Row(
+                        t: t,
+                        icon: Icons.star_outline_rounded,
+                        label: 'Купить подписку',
+                        onTap: () {
+                          final isRu = Localizations.localeOf(context)
+                                  .languageCode ==
+                              'ru';
+                          if (isRu) {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute<void>(
+                                builder: (_) => const TariffsScreen(),
+                              ),
+                            );
+                          } else {
+                            showPaywallSheet(context);
+                          }
+                        },
                       ),
                     ],
                   ),
