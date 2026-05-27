@@ -1060,30 +1060,36 @@ class _LandingStep extends StatelessWidget {
             child: Column(
               children: [
                 _GradientButton(label: l10n.ob_landing_cta, onTap: onNext),
-                if (onboardingDone) ...[
-                  const SizedBox(height: 12),
-                  GestureDetector(
-                    onTap: onLogin,
-                    child: Container(
-                      width: double.infinity,
-                      height: 52,
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(18),
-                        border: Border.all(color: OBColors.border, width: 1.5),
-                      ),
-                      alignment: Alignment.center,
-                      child: Text(
-                        AppLocalizations.of(context)!.ob_already_account,
-                        style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: OBColors.pink,
-                        ),
+                // "I already have an account" — always shown so first-time
+                // users with an existing account can skip the entire onboarding
+                // flow and go straight to login. Previously gated behind
+                // `onboardingDone` which meant only returning users (who'd
+                // already finished onboarding once) saw it — the exact users
+                // who didn't need it. Inverted: first-timers benefit most.
+                const SizedBox(height: 12),
+                GestureDetector(
+                  onTap: onLogin,
+                  behavior: HitTestBehavior.opaque,
+                  child: Container(
+                    width: double.infinity,
+                    height: 52,
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: OBColors.border, width: 1.5),
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      AppLocalizations.of(context)!.ob_already_account,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: OBColors.pink,
                       ),
                     ),
                   ),
-                ] else ...[
+                ),
+                if (!onboardingDone) ...[
                   const SizedBox(height: 8),
                   Text(
                     '${l10n.ob_landing_cta_sub1} — ${l10n.ob_landing_cta_sub2}',
