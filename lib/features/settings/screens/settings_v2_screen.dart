@@ -15,7 +15,7 @@ import 'package:kayfit/features/body_form/body_form_prefs.dart';
 import 'package:kayfit/features/body_form/i18n/body_form_strings.dart';
 import 'package:kayfit/features/body_form/screens/body_form_screen.dart';
 import 'package:kayfit/features/settings/screens/document_screen.dart';
-import 'package:kayfit/features/paywall/screens/paywall_sheet.dart';
+import 'package:kayfit/core/subscription/subscription_provider.dart';
 import 'package:kayfit/features/tariffs/screens/tariffs_screen.dart';
 import 'package:kayfit/shared/theme/kayfit2_theme.dart';
 
@@ -89,6 +89,24 @@ class _SettingsV2ScreenState extends ConsumerState<SettingsV2Screen> {
     final user = ref.watch(authNotifierProvider).value;
     final currentLocale = ref.watch(localeProvider);
     final isRu = currentLocale.languageCode == 'ru';
+    final backendSub = ref.watch(backendSubscriptionProvider);
+    final isSubActive = backendSub.maybeWhen(
+      data: (s) {
+        if (s == null) return false;
+        final expiresAt = DateTime.tryParse(s['expires_at'] as String? ?? '');
+        return expiresAt != null && expiresAt.isAfter(DateTime.now());
+      },
+      orElse: () => false,
+    );
+    final subExpiresText = backendSub.maybeWhen(
+      data: (s) {
+        if (s == null) return null;
+        final expiresAt = DateTime.tryParse(s['expires_at'] as String? ?? '');
+        if (expiresAt == null) return null;
+        return 'до ${expiresAt.day}.${expiresAt.month.toString().padLeft(2, '0')}.${expiresAt.year}';
+      },
+      orElse: () => null,
+    );
 
     // Resolve K2 theme from system brightness.
     final brightness = MediaQuery.platformBrightnessOf(context);
@@ -186,26 +204,36 @@ class _SettingsV2ScreenState extends ConsumerState<SettingsV2Screen> {
                   _SectionGroup(
                     t: t,
                     children: [
-                      _Row(
-                        t: t,
-                        icon: Icons.star_outline_rounded,
-                        label: 'Купить подписку',
-                        onTap: () {
-                          final isRu = Localizations.localeOf(context)
-                                  .languageCode ==
-                              'ru';
-                          if (isRu) {
+                      if (isSubActive)
+                        _Row(
+                          t: t,
+                          icon: Icons.verified_rounded,
+                          label: 'Подписка активна',
+                          trailing: Text(
+                            subExpiresText ?? '',
+                            style: const TextStyle(
+                              fontSize: 13,
+                              color: K2Colors.accent,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          showChevron: false,
+                          onTap: null,
+                        )
+                      else
+                        _Row(
+                          t: t,
+                          icon: Icons.star_outline_rounded,
+                          label: 'Купить подписку',
+                          onTap: () {
                             Navigator.push(
                               context,
                               MaterialPageRoute<void>(
                                 builder: (_) => const TariffsScreen(),
                               ),
                             );
-                          } else {
-                            showPaywallSheet(context);
-                          }
-                        },
-                      ),
+                          },
+                        ),
                     ],
                   ),
 

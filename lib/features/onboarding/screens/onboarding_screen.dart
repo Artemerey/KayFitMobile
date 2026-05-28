@@ -15,6 +15,7 @@ import 'package:dio/dio.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../../core/ai_consent/ai_consent_provider.dart';
 import '../../../core/api/api_client.dart';
+import '../../../core/auth/auth_provider.dart';
 import '../../../core/locale/locale_provider.dart';
 import '../../../core/storage/onboarding_pending_storage.dart';
 import '../../../router.dart';
@@ -65,6 +66,17 @@ const _ageOptions = [
   ('25–34', 30),
   ('35–44', 40),
   ('45+', 50),
+];
+
+// Hero text outline — four hard 1.4-pixel offsets simulate a stroke, then a
+// soft drop shadow lifts the text off the photo regardless of which area
+// happens to land behind a given letter.
+const List<Shadow> _kHeroTextShadows = [
+  Shadow(color: Color(0xCC000000), offset: Offset(-1.4, 0)),
+  Shadow(color: Color(0xCC000000), offset: Offset(1.4, 0)),
+  Shadow(color: Color(0xCC000000), offset: Offset(0, -1.4)),
+  Shadow(color: Color(0xCC000000), offset: Offset(0, 1.4)),
+  Shadow(color: Color(0x99000000), blurRadius: 10, offset: Offset(0, 2)),
 ];
 
 // ─── Calculation helpers ───────────────────────────────────────────────────────
@@ -709,7 +721,16 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
         return _LandingStep(
           l10n: l10n,
           onNext: _goNext,
-          onLogin: () => context.go('/login'),
+          // iOS keeps Keychain across app uninstalls, so a stale auth token
+          // can survive a reinstall while SharedPreferences is wiped. If we
+          // call context.go('/login') directly, the router sees isLoggedIn=true
+          // → bounces to /journal-v2 → bounces back to /onboarding (because
+          // onboarding_done=false). User ends up where they started. Clearing
+          // auth state first makes the redirect chain land cleanly on /login.
+          onLogin: () async {
+            await ref.read(authNotifierProvider.notifier).logout();
+            if (mounted) context.go('/login');
+          },
           locale: ref.watch(localeProvider),
           onLocaleChange: (loc) => ref.read(localeProvider.notifier).setLocale(loc),
           onboardingDone: ref.watch(onboardingDoneProvider),
@@ -959,79 +980,111 @@ class _LandingStep extends StatelessWidget {
   Widget build(BuildContext context) {
     final isRu = locale.languageCode == 'ru';
 
+    final heroHeight = MediaQuery.of(context).size.height * 0.5;
+
     return Column(
       children: [
-        // Blue header
-        Container(
+        // Hero header — landing photo fills the top half of the screen;
+        // title + subtitle overlay the bottom of the photo.
+        SizedBox(
+          height: heroHeight,
           width: double.infinity,
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFF007AFF), Color(0xFF0062CC)],
-            ),
-            borderRadius: BorderRadius.vertical(bottom: Radius.circular(32)),
-          ),
-          child: SafeArea(
-            bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(24, 16, 24, 40),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Language toggle
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: _LangToggle(isRu: isRu, onToggle: onLocaleChange),
-                  ),
-                  const SizedBox(height: 24),
-                  Container(
-                    width: 64,
-                    height: 64,
+          child: ClipRRect(
+            borderRadius:
+                const BorderRadius.vertical(bottom: Radius.circular(32)),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                // Background photo. cover keeps aspect ratio and crops
+                // horizontally — the girl stays visible because she is
+                // close to centre; some of the left wall + right food bowl
+                // may be trimmed on tall screens.
+                Image.asset(
+                  'assets/onboarding/landing_hero.jpg',
+                  fit: BoxFit.cover,
+                  // Bias the visible window toward the right side of the
+                  // image so the phone + meal-scan card stay in frame; the
+                  // far-left wall background gets cropped instead.
+                  alignment: const Alignment(0.3, 0),
+                ),
+                // Bottom gradient for text legibility.
+                Positioned.fill(
+                  child: DecoratedBox(
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(20),
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.black.withValues(alpha: 0.0),
+                          Colors.black.withValues(alpha: 0.65),
+                        ],
+                        stops: const [0.45, 1.0],
+                      ),
                     ),
-                    child: const Icon(Icons.local_fire_department_rounded,
-                        color: Colors.white, size: 36),
                   ),
-                  const SizedBox(height: 16),
-                  RichText(
-                    text: TextSpan(
+                ),
+                // Language toggle pinned to the top-right under the status bar.
+                SafeArea(
+                  bottom: false,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+                    child: Align(
+                      alignment: Alignment.topRight,
+                      child: _LangToggle(isRu: isRu, onToggle: onLocaleChange),
+                    ),
+                  ),
+                ),
+                // Title + subtitle pinned to the bottom-left of the hero.
+                Align(
+                  alignment: Alignment.bottomLeft,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        TextSpan(
-                          text: '${l10n.ob_landing_title1} ',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 36,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -1,
+                        RichText(
+                          text: TextSpan(
+                            children: [
+                              TextSpan(
+                                text: '${l10n.ob_landing_title1} ',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 36,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: -1,
+                                  shadows: _kHeroTextShadows,
+                                ),
+                              ),
+                              TextSpan(
+                                text: l10n.ob_landing_title2,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 36,
+                                  fontWeight: FontWeight.w400,
+                                  letterSpacing: -1,
+                                  fontStyle: FontStyle.italic,
+                                  shadows: _kHeroTextShadows,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                        TextSpan(
-                          text: l10n.ob_landing_title2,
-                          style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.8),
-                            fontSize: 36,
-                            fontWeight: FontWeight.w400,
-                            letterSpacing: -1,
-                            fontStyle: FontStyle.italic,
+                        const SizedBox(height: 8),
+                        Text(
+                          l10n.ob_landing_sub,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            height: 1.4,
+                            shadows: _kHeroTextShadows,
                           ),
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    l10n.ob_landing_sub,
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.85),
-                      fontSize: 15,
-                      height: 1.4,
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         ),
@@ -1067,24 +1120,30 @@ class _LandingStep extends StatelessWidget {
                 // already finished onboarding once) saw it — the exact users
                 // who didn't need it. Inverted: first-timers benefit most.
                 const SizedBox(height: 12),
-                GestureDetector(
-                  onTap: onLogin,
-                  behavior: HitTestBehavior.opaque,
-                  child: Container(
-                    width: double.infinity,
-                    height: 52,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(18),
-                      border: Border.all(color: OBColors.border, width: 1.5),
-                    ),
-                    alignment: Alignment.center,
-                    child: Text(
-                      AppLocalizations.of(context)!.ob_already_account,
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: OBColors.pink,
+                Material(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(18),
+                  child: InkWell(
+                    onTap: () {
+                      debugPrint('[onboarding] "already have account" tapped');
+                      onLogin();
+                    },
+                    borderRadius: BorderRadius.circular(18),
+                    child: Container(
+                      width: double.infinity,
+                      height: 52,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: OBColors.border, width: 1.5),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        AppLocalizations.of(context)!.ob_already_account,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: OBColors.pink,
+                        ),
                       ),
                     ),
                   ),

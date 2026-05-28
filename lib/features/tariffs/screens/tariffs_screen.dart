@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../../core/analytics/analytics_service.dart';
+import '../../../core/subscription/subscription_provider.dart';
 import 'payment_help_screen.dart';
 import '../../../core/api/api_client.dart';
 import '../../../shared/theme/app_theme.dart';
@@ -27,49 +28,84 @@ Future<Map<String, dynamic>> tariffsData(TariffsDataRef ref) async {
 bool _isTrial(Map<String, dynamic> t) =>
     (t['is_trial'] as bool? ?? false) || t['code'] == 'trial';
 
-String _tariffLabel(Map<String, dynamic> t) {
+String _tariffLabel(Map<String, dynamic> t, {bool isRu = true}) {
   final code = t['code'] as String? ?? '';
-  if (code == 'monthly') return '1 месяц';
-  if (code == 'biannual') return '6 месяцев';
-  if (code == 'yearly') return '1 год';
-  return t['title'] as String? ?? code;
+  if (isRu) {
+    if (code == 'monthly') return '1 месяц';
+    if (code == 'biannual') return '6 месяцев';
+    if (code == 'quarterly') return '3 месяца';
+    if (code == 'yearly') return '1 год';
+    return t['title'] as String? ?? code;
+  } else {
+    if (code == 'monthly') return '1 month';
+    if (code == 'biannual') return '6 months';
+    if (code == 'quarterly') return '3 months';
+    if (code == 'yearly') return '1 year';
+    return t['title'] as String? ?? code;
+  }
 }
 
 String _rubFormatted(num value) {
   final s = value
       .toInt()
       .toString()
-      .replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (_) => ' ');
-  return '$s ₽';
+      .replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (_) => ' ');
+  return '$s ₽';
 }
 
-String _totalPrice(Map<String, dynamic> t) =>
-    _rubFormatted((t['price'] as num?) ?? 0);
+String _usdFormatted(num rubles) {
+  final dollars = (rubles / 90).round();
+  return '\$$dollars';
+}
 
-String? _perMonthPrice(Map<String, dynamic> t) {
+String _totalPrice(Map<String, dynamic> t, {bool isRu = true}) {
+  final price = (t['price'] as num?) ?? 0;
+  return isRu ? _rubFormatted(price) : _usdFormatted(price);
+}
+
+String? _perMonthPrice(Map<String, dynamic> t, {bool isRu = true}) {
   final price = (t['price'] as num?)?.toDouble() ?? 0;
   final code = t['code'] as String? ?? '';
-  if (code == 'yearly') return '${_rubFormatted(price / 12)}/мес';
-  if (code == 'biannual') return '${_rubFormatted(price / 6)}/мес';
-  return null;
-}
-
-String _billedAfterTrial(Map<String, dynamic> t) {
-  final code = t['code'] as String? ?? '';
-  if (code == 'monthly') return 'Списание ежемесячно после 7-дневного триала';
-  if (code == 'biannual') {
-    return 'Списание каждые 6 мес. после 7-дневного триала';
+  if (isRu) {
+    if (code == 'yearly') return '${_rubFormatted(price / 12)}/мес';
+    if (code == 'biannual') return '${_rubFormatted(price / 6)}/мес';
+    if (code == 'quarterly') return '${_rubFormatted(price / 3)}/мес';
+    return null;
+  } else {
+    if (code == 'yearly') return '${_usdFormatted(price / 12)}/mo';
+    if (code == 'biannual') return '${_usdFormatted(price / 6)}/mo';
+    if (code == 'quarterly') return '${_usdFormatted(price / 3)}/mo';
+    return null;
   }
-  if (code == 'yearly') return 'Списание ежегодно после 7-дневного триала';
-  return 'После 7-дневного пробного периода';
 }
 
-String? _savingsBadge(Map<String, dynamic> t) {
+String _billedAfterTrial(Map<String, dynamic> t, {bool isRu = true}) {
+  final code = t['code'] as String? ?? '';
+  if (isRu) {
+    if (code == 'monthly') return 'Списание ежемесячно после 7-дневного триала';
+    if (code == 'biannual') {
+      return 'Списание каждые 6 мес. после 7-дневного триала';
+    }
+    if (code == 'quarterly') {
+      return 'Списание ежеквартально после 7-дневного триала';
+    }
+    if (code == 'yearly') return 'Списание ежегодно после 7-дневного триала';
+    return 'После 7-дневного пробного периода';
+  } else {
+    if (code == 'monthly') return 'Billed monthly after 7-day trial';
+    if (code == 'biannual') return 'Billed every 6 months after 7-day trial';
+    if (code == 'quarterly') return 'Billed every 3 months after 7-day trial';
+    if (code == 'yearly') return 'Billed yearly after 7-day trial';
+    return 'After 7-day trial period';
+  }
+}
+
+String? _savingsBadge(Map<String, dynamic> t, {bool isRu = true}) {
   final price = (t['price'] as num?)?.toDouble() ?? 0;
   final full = (t['full_price'] as num?)?.toDouble() ?? 0;
   if (full <= price || full == 0) return null;
   final pct = ((1 - price / full) * 100).round();
-  return 'Экономия $pct%';
+  return isRu ? 'Экономия $pct%' : 'Save $pct%';
 }
 
 bool _isPopular(Map<String, dynamic> t) =>
@@ -79,6 +115,7 @@ int _order(Map<String, dynamic> t) {
   final code = t['code'] as String? ?? '';
   if (code == 'monthly') return 1;
   if (code == 'biannual') return 2;
+  if (code == 'quarterly') return 2;
   if (code == 'yearly') return 3;
   return 10;
 }
@@ -98,7 +135,8 @@ class TariffsScreen extends ConsumerStatefulWidget {
   ConsumerState<TariffsScreen> createState() => _TariffsScreenState();
 }
 
-class _TariffsScreenState extends ConsumerState<TariffsScreen> {
+class _TariffsScreenState extends ConsumerState<TariffsScreen>
+    with WidgetsBindingObserver {
   int? _selectedId;
   bool _paying = false;
 
@@ -110,12 +148,21 @@ class _TariffsScreenState extends ConsumerState<TariffsScreen> {
   void initState() {
     super.initState();
     AnalyticsService.tariffsViewed();
+    WidgetsBinding.instance.addObserver(this);
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      ref.invalidate(backendSubscriptionProvider);
+    }
   }
 
   void _startTimer(DateTime endsAt) {
@@ -180,6 +227,9 @@ class _TariffsScreenState extends ConsumerState<TariffsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final locale = Localizations.localeOf(context);
+    final isRu = locale.languageCode == 'ru';
+
     final data = ref.watch(tariffsDataProvider);
     final bottom = MediaQuery.paddingOf(context).bottom;
     final top = MediaQuery.paddingOf(context).top;
@@ -188,10 +238,10 @@ class _TariffsScreenState extends ConsumerState<TariffsScreen> {
       backgroundColor: Colors.white,
       body: data.when(
         loading: () => const Center(child: LoadingIndicator()),
-        error: (e, _) => const Center(
+        error: (e, _) => Center(
           child: Text(
-            'Не удалось загрузить тарифы',
-            style: TextStyle(color: AppColors.textMuted),
+            isRu ? 'Не удалось загрузить тарифы' : 'Failed to load plans',
+            style: const TextStyle(color: AppColors.textMuted),
           ),
         ),
         data: (d) {
@@ -220,9 +270,11 @@ class _TariffsScreenState extends ConsumerState<TariffsScreen> {
                           ),
                         ),
                         const SizedBox(height: 8),
-                        const Text(
-                          'Распознавание блюд с помощью ИИ,\nанализ КБЖУ и персональный план.',
-                          style: TextStyle(
+                        Text(
+                          isRu
+                              ? 'Распознавание блюд с помощью ИИ,\nанализ КБЖУ и персональный план.'
+                              : 'AI-powered food recognition,\nnutrition tracking and personal plan.',
+                          style: const TextStyle(
                             fontSize: 15,
                             color: _kMuted,
                             height: 1.5,
@@ -231,7 +283,7 @@ class _TariffsScreenState extends ConsumerState<TariffsScreen> {
                         const SizedBox(height: 28),
 
                         if (showTimer) ...[
-                          _DiscountTimer(timeLeft: _timeLeft),
+                          _DiscountTimer(timeLeft: _timeLeft, isRu: isRu),
                           const SizedBox(height: 20),
                         ],
 
@@ -242,6 +294,7 @@ class _TariffsScreenState extends ConsumerState<TariffsScreen> {
                             child: _PlanCard(
                               tariff: t,
                               selected: t['id'] == _selectedId,
+                              isRu: isRu,
                               onTap: () {
                                 setState(() => _selectedId = t['id'] as int?);
                                 AnalyticsService.tariffSelected(
@@ -255,47 +308,48 @@ class _TariffsScreenState extends ConsumerState<TariffsScreen> {
 
                         const SizedBox(height: 8),
 
-                        // ── Russia payment banner ────────────────────────────
-                        GestureDetector(
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute<void>(
-                              builder: (_) => const PaymentHelpScreen(),
+                        // ── Russia payment banner (Russian only) ─────────────
+                        if (isRu)
+                          GestureDetector(
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute<void>(
+                                builder: (_) => const PaymentHelpScreen(),
+                              ),
                             ),
-                          ),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 14,
-                            ),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF9FAFB),
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(color: _kBorder),
-                            ),
-                            child: Row(
-                              children: const [
-                                Text('💳', style: TextStyle(fontSize: 18)),
-                                SizedBox(width: 10),
-                                Expanded(
-                                  child: Text(
-                                    'Оплата в России. Узнайте как',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w500,
-                                      color: _kDark,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 14,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF9FAFB),
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(color: _kBorder),
+                              ),
+                              child: Row(
+                                children: const [
+                                  Text('💳', style: TextStyle(fontSize: 18)),
+                                  SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      'Оплата в России. Узнайте как',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w500,
+                                        color: _kDark,
+                                      ),
                                     ),
                                   ),
-                                ),
-                                Icon(
-                                  Icons.arrow_forward_ios_rounded,
-                                  size: 13,
-                                  color: _kMuted,
-                                ),
-                              ],
+                                  Icon(
+                                    Icons.arrow_forward_ios_rounded,
+                                    size: 13,
+                                    color: _kMuted,
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
-                        ),
                       ]),
                     ),
                   ),
@@ -348,9 +402,11 @@ class _TariffsScreenState extends ConsumerState<TariffsScreen> {
                                         color: Colors.white,
                                       ),
                                     )
-                                  : const Text(
-                                      'Подписаться и начать 7-дневный триал',
-                                      style: TextStyle(
+                                  : Text(
+                                      isRu
+                                          ? 'Подписаться и начать 7-дневный триал'
+                                          : 'Subscribe and start 7-day trial',
+                                      style: const TextStyle(
                                         fontSize: 16,
                                         fontWeight: FontWeight.w600,
                                       ),
@@ -358,13 +414,16 @@ class _TariffsScreenState extends ConsumerState<TariffsScreen> {
                             ),
                           ),
                           const SizedBox(height: 8),
-                          const Text(
-                            'Отмена через App Store в любое время',
-                            style: TextStyle(fontSize: 12, color: _kMuted),
+                          Text(
+                            isRu
+                                ? 'Отмена через App Store в любое время'
+                                : 'Cancel in App Store anytime',
+                            style:
+                                const TextStyle(fontSize: 12, color: _kMuted),
                             textAlign: TextAlign.center,
                           ),
                           const SizedBox(height: 8),
-                          _FooterLinks(),
+                          _FooterLinks(isRu: isRu),
                         ],
                       ),
                     ),
@@ -408,19 +467,21 @@ class _PlanCard extends StatelessWidget {
   final Map<String, dynamic> tariff;
   final bool selected;
   final VoidCallback onTap;
+  final bool isRu;
 
   const _PlanCard({
     required this.tariff,
     required this.selected,
     required this.onTap,
+    this.isRu = true,
   });
 
   @override
   Widget build(BuildContext context) {
     final popular = _isPopular(tariff);
-    final savings = _savingsBadge(tariff);
-    final perMonth = _perMonthPrice(tariff);
-    final billedNote = _billedAfterTrial(tariff);
+    final savings = _savingsBadge(tariff, isRu: isRu);
+    final perMonth = _perMonthPrice(tariff, isRu: isRu);
+    final billedNote = _billedAfterTrial(tariff, isRu: isRu);
 
     return GestureDetector(
       onTap: onTap,
@@ -452,9 +513,9 @@ class _PlanCard extends StatelessWidget {
                         color: _kDark,
                         borderRadius: BorderRadius.circular(20),
                       ),
-                      child: const Text(
-                        'ПОПУЛЯРНОЕ',
-                        style: TextStyle(
+                      child: Text(
+                        isRu ? 'ПОПУЛЯРНОЕ' : 'POPULAR',
+                        style: const TextStyle(
                           color: Colors.white,
                           fontSize: 10,
                           fontWeight: FontWeight.w700,
@@ -489,7 +550,7 @@ class _PlanCard extends StatelessWidget {
 
             // Plan name
             Text(
-              _tariffLabel(tariff),
+              _tariffLabel(tariff, isRu: isRu),
               style: const TextStyle(
                 fontSize: 17,
                 fontWeight: FontWeight.w700,
@@ -504,7 +565,7 @@ class _PlanCard extends StatelessWidget {
               textBaseline: TextBaseline.alphabetic,
               children: [
                 Text(
-                  _totalPrice(tariff),
+                  _totalPrice(tariff, isRu: isRu),
                   style: const TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.w800,
@@ -548,7 +609,8 @@ class _PlanCard extends StatelessWidget {
 
 class _DiscountTimer extends StatelessWidget {
   final Duration timeLeft;
-  const _DiscountTimer({required this.timeLeft});
+  final bool isRu;
+  const _DiscountTimer({required this.timeLeft, this.isRu = true});
 
   String _pad(int n) => n.toString().padLeft(2, '0');
 
@@ -568,9 +630,9 @@ class _DiscountTimer extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          const Text(
-            '🔥 Скидка заканчивается через',
-            style: TextStyle(
+          Text(
+            isRu ? '🔥 Скидка заканчивается через' : '🔥 Discount ends in',
+            style: const TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w600,
               color: _kDark,
@@ -594,13 +656,16 @@ class _DiscountTimer extends StatelessWidget {
 // ─── Footer links ──────────────────────────────────────────────────────────────
 
 class _FooterLinks extends StatelessWidget {
+  final bool isRu;
+  const _FooterLinks({this.isRu = true});
+
   @override
   Widget build(BuildContext context) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         _Link(
-          'Условия подписки',
+          isRu ? 'Условия подписки' : 'Terms',
           onTap: () => Navigator.push(
             context,
             MaterialPageRoute<void>(
@@ -612,7 +677,7 @@ class _FooterLinks extends StatelessWidget {
         ),
         const _Dot(),
         _Link(
-          'Политика',
+          isRu ? 'Политика' : 'Privacy',
           onTap: () => Navigator.push(
             context,
             MaterialPageRoute<void>(

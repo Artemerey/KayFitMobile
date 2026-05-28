@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:purchases_flutter/purchases_flutter.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
+import '../api/api_client.dart';
 import 'subscription_state.dart';
 
 part 'subscription_provider.g.dart';
@@ -82,3 +83,13 @@ Future<Offering?> currentOffering(Ref ref) async {
     return null;
   }
 }
+
+/// Backend subscription check (for YooKassa web payments).
+final backendSubscriptionProvider = FutureProvider.autoDispose<Map<String, dynamic>?>((ref) async {
+  try {
+    final resp = await apiDio.get<Map<String, dynamic>>('/api/payments/subscription');
+    return resp.data;
+  } catch (_) {
+    return null;
+  }
+});
