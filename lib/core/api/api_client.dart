@@ -29,7 +29,11 @@ Future<void> initApiClient({
 
   apiDio = Dio(BaseOptions(
     baseUrl: _baseUrl,
-    connectTimeout: const Duration(seconds: 15),
+    // 30s connect — production tester hit `[connection timeout]` after 15s on
+    // weak LTE because the TLS handshake couldn't complete in time. Server
+    // round-trip from a healthy network is <100ms, so 30s only kicks in when
+    // the radio is genuinely degraded and we'd rather wait than instantly fail.
+    connectTimeout: const Duration(seconds: 30),
     receiveTimeout: const Duration(seconds: 30),
     headers: {'Content-Type': 'application/json'},
   ));
@@ -136,7 +140,7 @@ class _AuthInterceptor extends Interceptor {
           ? _refreshDioFactory()
           : Dio(BaseOptions(
               baseUrl: _baseUrl,
-              connectTimeout: const Duration(seconds: 15),
+              connectTimeout: const Duration(seconds: 30),
               receiveTimeout: const Duration(seconds: 15),
             ));
       final resp = await refreshDio.post(
