@@ -426,6 +426,13 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
           'language': lang,
           'utc_offset_hours': utcOffsetHours,
         },
+        // Claude responses regularly take 40–60 s on slow LTE; the default
+        // apiDio receiveTimeout (30 s) fires too early and the user sees
+        // "Could not reach AI coach" even though the backend is working.
+        options: Options(
+          receiveTimeout: const Duration(seconds: 120),
+          sendTimeout: const Duration(seconds: 30),
+        ),
       );
       final reply = ChatMessage.fromJson(
         resp.data['message'] as Map<String, dynamic>,

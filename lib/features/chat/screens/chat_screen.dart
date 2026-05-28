@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:dio/dio.dart' show Options;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -134,6 +135,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           'language': lang,
           'utc_offset_hours': utcOffsetHours,
         },
+        // Claude responses regularly take 40–60 s on slow LTE; the default
+        // apiDio receiveTimeout (30 s) fires too early.
+        options: Options(
+          receiveTimeout: const Duration(seconds: 120),
+          sendTimeout: const Duration(seconds: 30),
+        ),
       );
       final reply = ChatMessage.fromJson(
         resp.data['message'] as Map<String, dynamic>,
