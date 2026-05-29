@@ -395,6 +395,8 @@
   "settings_ai_consent": "Обработка данных ИИ",
   "settings_privacy_policy": "Политика конфиденциальности",
   "settings_terms": "Пользовательское соглашение",
+  "settings_subscription_terms": "Условия подписки",
+  "settings_subscription_privacy": "Обработка данных подписки",
   "settings_sub_promo": "Оформите подписку чтобы разблокировать ИИ-распознавание, голос и фото.",
   "settings_sale_ends": "Скидка заканчивается через:",
   "settings_sub_active_badge": "✓ Активна",

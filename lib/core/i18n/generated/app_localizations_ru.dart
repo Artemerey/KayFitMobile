@@ -951,6 +951,12 @@ class AppLocalizationsRu extends AppLocalizations {
   String get settings_terms => 'Пользовательское соглашение';
 
   @override
+  String get settings_subscription_terms => 'Условия подписки';
+
+  @override
+  String get settings_subscription_privacy => 'Обработка данных подписки';
+
+  @override
   String get settings_sub_promo =>
       'Оформите подписку чтобы разблокировать ИИ-распознавание, голос и фото.';
 

@@ -1886,6 +1886,18 @@ abstract class AppLocalizations {
   /// **'Пользовательское соглашение'**
   String get settings_terms;
 
+  /// No description provided for @settings_subscription_terms.
+  ///
+  /// In ru, this message translates to:
+  /// **'Условия подписки'**
+  String get settings_subscription_terms;
+
+  /// No description provided for @settings_subscription_privacy.
+  ///
+  /// In ru, this message translates to:
+  /// **'Обработка данных подписки'**
+  String get settings_subscription_privacy;
+
   /// No description provided for @settings_sub_promo.
   ///
   /// In ru, this message translates to:

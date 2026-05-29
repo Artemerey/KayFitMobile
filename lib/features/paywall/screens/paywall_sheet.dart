@@ -6,6 +6,7 @@ import 'package:purchases_flutter/purchases_flutter.dart';
 
 import '../../../core/subscription/subscription_provider.dart';
 import '../../../core/subscription/subscription_state.dart';
+import '../../settings/screens/document_screen.dart';
 import '../widgets/paywall_feature_row.dart';
 import '../widgets/paywall_plan_card.dart';
 
@@ -354,6 +355,10 @@ class _PaywallSheetContentState extends ConsumerState<_PaywallSheetContent> {
                       _FooterLink('Восстановить', onTap: _loading ? null : _onRestore),
                       const Text(' · ',
                           style: TextStyle(fontSize: 11, color: _kDimText)),
+                      _FooterLink('Условия подписки',
+                          onTap: () => _openDoc(context, _DocType.subscriptionTerms)),
+                      const Text(' · ',
+                          style: TextStyle(fontSize: 11, color: _kDimText)),
                       _FooterLink('Условия',
                           onTap: () => _openDoc(context, _DocType.terms)),
                       const Text(' · ',
@@ -372,41 +377,20 @@ class _PaywallSheetContentState extends ConsumerState<_PaywallSheetContent> {
   }
 
   void _openDoc(BuildContext context, _DocType type) {
-    // Reuse the existing DocumentScreen via GoRouter
-    // We navigate without closing the paywall so the user can return
+    final docType = switch (type) {
+      _DocType.terms => DocumentType.termsOfService,
+      _DocType.privacy => DocumentType.privacyPolicy,
+      _DocType.subscriptionTerms => DocumentType.subscriptionTerms,
+    };
     Navigator.of(context, rootNavigator: true).push<void>(
       MaterialPageRoute<void>(
-        builder: (_) => _DocScreen(type: type),
+        builder: (_) => DocumentScreen(type: docType),
       ),
     );
   }
 }
 
-enum _DocType { terms, privacy }
-
-class _DocScreen extends StatelessWidget {
-  const _DocScreen({required this.type});
-  final _DocType type;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          type == _DocType.privacy ? 'Политика конфиденциальности' : 'Условия',
-        ),
-      ),
-      body: Center(
-        child: Text(
-          type == _DocType.privacy
-              ? 'Политика конфиденциальности'
-              : 'Пользовательское соглашение',
-          style: const TextStyle(fontSize: 16),
-        ),
-      ),
-    );
-  }
-}
+enum _DocType { terms, privacy, subscriptionTerms }
 
 class _FooterLink extends StatelessWidget {
   const _FooterLink(this.label, {required this.onTap});

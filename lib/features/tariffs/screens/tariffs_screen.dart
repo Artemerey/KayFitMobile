@@ -379,10 +379,9 @@ class _TariffsScreenState extends ConsumerState<TariffsScreen>
                             width: double.infinity,
                             height: 56,
                             child: ElevatedButton(
-                              onPressed:
-                                  (_paying || _selectedId == null)
-                                      ? null
-                                      : () => _pay(selectedTariff),
+                              onPressed: (!isRu || _paying || _selectedId == null)
+                                  ? null
+                                  : () => _pay(selectedTariff),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: AppColors.accent,
                                 foregroundColor: Colors.white,
@@ -405,7 +404,7 @@ class _TariffsScreenState extends ConsumerState<TariffsScreen>
                                   : Text(
                                       isRu
                                           ? 'Подписаться и начать 7-дневный триал'
-                                          : 'Subscribe and start 7-day trial',
+                                          : 'Coming soon',
                                       style: const TextStyle(
                                         fontSize: 16,
                                         fontWeight: FontWeight.w600,
@@ -417,7 +416,7 @@ class _TariffsScreenState extends ConsumerState<TariffsScreen>
                           Text(
                             isRu
                                 ? 'Отмена через App Store в любое время'
-                                : 'Cancel in App Store anytime',
+                                : 'International payments coming soon',
                             style:
                                 const TextStyle(fontSize: 12, color: _kMuted),
                             textAlign: TextAlign.center,

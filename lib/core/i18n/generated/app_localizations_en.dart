@@ -951,6 +951,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settings_terms => 'Terms of Service';
 
   @override
+  String get settings_subscription_terms => 'Subscription Terms';
+
+  @override
+  String get settings_subscription_privacy => 'Subscription Data Policy';
+
+  @override
   String get settings_sub_promo =>
       'Subscribe to unlock AI recognition, voice and photo.';
 

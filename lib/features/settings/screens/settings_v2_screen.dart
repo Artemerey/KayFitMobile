@@ -160,22 +160,16 @@ class _SettingsV2ScreenState extends ConsumerState<SettingsV2Screen> {
                   _SectionGroup(
                     t: t,
                     children: [
-                      _Row(
+                      _LanguageToggleRow(
                         t: t,
-                        icon: Icons.language_outlined,
-                        label: l10n.settings_language,
-                        trailing: Text(
-                          isRu ? 'RU' : 'EN',
-                          style: TextStyle(
-                            fontFamily: K2Fonts.mono,
-                            fontSize: 13,
-                            color: t.fgDim,
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                        onTap: () {
+                        l10n: l10n,
+                        isRu: isRu,
+                        onSelect: (locale) {
                           _track(AnalyticsService.settingsLanguageTapped);
-                          _showLangSheet(context, l10n, isRu, t);
+                          ref
+                              .read(localeProvider.notifier)
+                              .setLocale(locale);
+                          _syncLanguageToBackend(locale.languageCode);
                         },
                       ),
                     ],
@@ -224,7 +218,7 @@ class _SettingsV2ScreenState extends ConsumerState<SettingsV2Screen> {
                         _Row(
                           t: t,
                           icon: Icons.star_outline_rounded,
-                          label: 'Купить подписку',
+                          label: l10n.subscription_view_tariffs,
                           onTap: () {
                             Navigator.push(
                               context,
@@ -274,6 +268,32 @@ class _SettingsV2ScreenState extends ConsumerState<SettingsV2Screen> {
                             ),
                           );
                         },
+                      ),
+                      _HairlineDivider(t: t),
+                      _Row(
+                        t: t,
+                        icon: Icons.receipt_long_outlined,
+                        label: l10n.settings_subscription_terms,
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const DocumentScreen(
+                                type: DocumentType.subscriptionTerms),
+                          ),
+                        ),
+                      ),
+                      _HairlineDivider(t: t),
+                      _Row(
+                        t: t,
+                        icon: Icons.payment_outlined,
+                        label: l10n.settings_subscription_privacy,
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const DocumentScreen(
+                                type: DocumentType.subscriptionPrivacy),
+                          ),
+                        ),
                       ),
                       _HairlineDivider(t: t),
                       _Row(
@@ -405,33 +425,6 @@ class _SettingsV2ScreenState extends ConsumerState<SettingsV2Screen> {
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  void _showLangSheet(
-    BuildContext context,
-    AppLocalizations l10n,
-    bool isRu,
-    K2Theme t,
-  ) {
-    showModalBottomSheet(
-      context: context,
-      isDismissible: true,
-      enableDrag: true,
-      backgroundColor: t.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (_) => _LangSheet(
-        t: t,
-        currentIsRu: isRu,
-        l10n: l10n,
-        onSelect: (newLocale) {
-          ref.read(localeProvider.notifier).setLocale(newLocale);
-          Navigator.pop(context);
-          _syncLanguageToBackend(newLocale.languageCode);
-        },
       ),
     );
   }
@@ -760,62 +753,84 @@ class _RowState extends State<_Row> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Language bottom sheet — KF2 style
+// Inline language toggle row — RU | EN segment control
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _LangSheet extends StatelessWidget {
-  const _LangSheet({
+class _LanguageToggleRow extends StatelessWidget {
+  const _LanguageToggleRow({
     required this.t,
-    required this.currentIsRu,
     required this.l10n,
+    required this.isRu,
     required this.onSelect,
   });
 
   final K2Theme t;
-  final bool currentIsRu;
   final AppLocalizations l10n;
+  final bool isRu;
   final void Function(Locale) onSelect;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
-      child: Column(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        children: [
+          Icon(Icons.language_outlined, size: 20, color: t.fgDim),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              l10n.settings_language,
+              style: TextStyle(
+                fontFamily: K2Fonts.sans,
+                fontSize: 16,
+                fontWeight: FontWeight.w400,
+                color: t.fg,
+              ),
+            ),
+          ),
+          _LangSegment(t: t, isRu: isRu, onSelect: onSelect),
+        ],
+      ),
+    );
+  }
+}
+
+class _LangSegment extends StatelessWidget {
+  const _LangSegment({
+    required this.t,
+    required this.isRu,
+    required this.onSelect,
+  });
+
+  final K2Theme t;
+  final bool isRu;
+  final void Function(Locale) onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 36,
+      decoration: BoxDecoration(
+        color: t.bg,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: t.border, width: 0.5),
+      ),
+      child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Handle
-          Container(
-            width: 36,
-            height: 4,
-            decoration: BoxDecoration(
-              color: t.border,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            l10n.settings_language,
-            style: TextStyle(
-              fontFamily: K2Fonts.sans,
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-              color: t.fg,
-            ),
-          ),
-          const SizedBox(height: 16),
-          _LangOption(
+          _SegBtn(
             t: t,
-            flag: '🇷🇺',
-            label: l10n.settings_langRu,
-            selected: currentIsRu,
+            label: 'RU',
+            selected: isRu,
+            isFirst: true,
             onTap: () => onSelect(const Locale('ru')),
           ),
-          const SizedBox(height: 8),
-          _LangOption(
+          Container(width: 0.5, height: 36, color: t.border),
+          _SegBtn(
             t: t,
-            flag: '🇬🇧',
-            label: l10n.settings_langEn,
-            selected: !currentIsRu,
+            label: 'EN',
+            selected: !isRu,
+            isFirst: false,
             onTap: () => onSelect(const Locale('en')),
           ),
         ],
@@ -824,63 +839,67 @@ class _LangSheet extends StatelessWidget {
   }
 }
 
-class _LangOption extends StatelessWidget {
-  const _LangOption({
+class _SegBtn extends StatefulWidget {
+  const _SegBtn({
     required this.t,
-    required this.flag,
     required this.label,
     required this.selected,
+    required this.isFirst,
     required this.onTap,
   });
 
   final K2Theme t;
-  final String flag;
   final String label;
   final bool selected;
+  final bool isFirst;
   final VoidCallback onTap;
 
   @override
+  State<_SegBtn> createState() => _SegBtnState();
+}
+
+class _SegBtnState extends State<_SegBtn> {
+  bool _pressed = false;
+
+  @override
   Widget build(BuildContext context) {
+    final radius = BorderRadius.horizontal(
+      left: widget.isFirst ? const Radius.circular(9) : Radius.zero,
+      right: widget.isFirst ? Radius.zero : const Radius.circular(9),
+    );
+
     return GestureDetector(
-      onTap: onTap,
+      onTapDown: (_) => setState(() => _pressed = true),
+      onTapUp: (_) {
+        setState(() => _pressed = false);
+        widget.onTap();
+      },
+      onTapCancel: () => setState(() => _pressed = false),
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        padding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        duration: const Duration(milliseconds: 120),
+        width: 52,
+        height: 36,
         decoration: BoxDecoration(
-          color: selected
-              ? K2Colors.accent.withValues(alpha: 0.08)
-              : t.card,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: selected ? K2Colors.accent : t.border,
-            width: selected ? 1.5 : 0.5,
-          ),
+          color: widget.selected
+              ? K2Colors.accent
+              : _pressed
+                  ? widget.t.hairline
+                  : Colors.transparent,
+          borderRadius: radius,
         ),
-        child: Row(
-          children: [
-            Text(flag, style: const TextStyle(fontSize: 20)),
-            const SizedBox(width: 12),
-            Text(
-              label,
-              style: TextStyle(
-                fontFamily: K2Fonts.sans,
-                fontSize: 16,
-                fontWeight:
-                    selected ? FontWeight.w600 : FontWeight.w400,
-                color: selected ? K2Colors.accent : t.fg,
-              ),
-            ),
-            const Spacer(),
-            if (selected)
-              const Icon(
-                Icons.check_rounded,
-                color: K2Colors.accent,
-                size: 18,
-              ),
-          ],
+        alignment: Alignment.center,
+        child: Text(
+          widget.label,
+          style: TextStyle(
+            fontFamily: K2Fonts.mono,
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.5,
+            color: widget.selected ? Colors.white : widget.t.fgDim,
+          ),
         ),
       ),
     );
   }
 }
+

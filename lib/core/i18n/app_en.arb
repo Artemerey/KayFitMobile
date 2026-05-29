@@ -395,6 +395,8 @@
   "settings_ai_consent": "AI Data Processing",
   "settings_privacy_policy": "Privacy Policy",
   "settings_terms": "Terms of Service",
+  "settings_subscription_terms": "Subscription Terms",
+  "settings_subscription_privacy": "Subscription Data Policy",
   "settings_sub_promo": "Subscribe to unlock AI recognition, voice and photo.",
   "settings_sale_ends": "Sale ends in:",
   "settings_sub_active_badge": "✓ Active",

@@ -201,6 +201,34 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
             );
           },
         ),
+        _ItemDivider(),
+        _NavItem(
+          icon: Icons.receipt_long_rounded,
+          iconColor: AppColors.warm,
+          iconBg: AppColors.warmSoft,
+          label: l10n.settings_subscription_terms,
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) =>
+                  const DocumentScreen(type: DocumentType.subscriptionTerms),
+            ),
+          ),
+        ),
+        _ItemDivider(),
+        _NavItem(
+          icon: Icons.payment_rounded,
+          iconColor: AppColors.support,
+          iconBg: AppColors.supportSoft,
+          label: l10n.settings_subscription_privacy,
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) =>
+                  const DocumentScreen(type: DocumentType.subscriptionPrivacy),
+            ),
+          ),
+        ),
       ]),
       const SizedBox(height: 8),
       _LogoutCard(
