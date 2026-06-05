@@ -46,6 +46,7 @@ import '../../../features/journal/screens/journal_screen.dart'
 import '../../../shared/models/ingredient_v2.dart';
 import '../providers/pending_meal_provider.dart';
 import '../providers/chat_history_provider.dart';
+import '../providers/transcription_pending_provider.dart';
 import '../../../shared/models/stats.dart';
 import '../../../shared/theme/kayfit2_theme.dart';
 import '../../../shared/utils/nutrient_parser.dart';
@@ -78,8 +79,7 @@ class _ThinkingState {
   _ThinkingState withStep(String step) =>
       _ThinkingState(steps: [...steps, step], done: done);
 
-  _ThinkingState markDone() =>
-      _ThinkingState(steps: steps, done: true);
+  _ThinkingState markDone() => _ThinkingState(steps: steps, done: true);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -150,7 +150,6 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
           ];
   }
 
-
   @override
   void initState() {
     super.initState();
@@ -174,6 +173,15 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
       if (recog.isDone && recog.result != null) {
         _onPhotoRecognitionDone(recog.result!);
       }
+      // If a voice transcription completed while the user was away, restore it.
+      final pending = ref.read(transcriptionPendingProvider);
+      if (pending != null && pending.isNotEmpty) {
+        _textController.text = pending;
+        _textController.selection = TextSelection.fromPosition(
+          TextPosition(offset: pending.length),
+        );
+        ref.read(transcriptionPendingProvider.notifier).state = null;
+      }
     });
   }
 
@@ -182,8 +190,29 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     WidgetsBinding.instance.removeObserver(this);
     _scrollController.dispose();
     _textController.dispose();
+    // Stop any in-progress recording before disposing — otherwise the native
+    // audio session keeps the mic open in the background.
+    if (_voiceState != _VoiceState.idle) {
+      _recorder.stop().ignore();
+    }
     _recorder.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Stop recording when the app goes to background or becomes inactive.
+    // Keeps the mic from running silently while the user is away.
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
+      if (_voiceState == _VoiceState.recording) {
+        _recorder.stop().then((_) {
+          if (mounted) setState(() => _voiceState = _VoiceState.idle);
+        }).ignore();
+      } else if (_voiceState == _VoiceState.transcribing) {
+        if (mounted) setState(() => _voiceState = _VoiceState.idle);
+      }
+    }
   }
 
   /// Keep the latest message visible when the keyboard opens.
@@ -229,8 +258,7 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
       // Deduplicate: drop local copies of messages already on the server
       // (a local message that was also POSTed to /api/chat/send would
       // otherwise show twice after the background refresh).
-      final serverKeys =
-          server.map((m) => '${m.role}:${m.content}').toSet();
+      final serverKeys = server.map((m) => '${m.role}:${m.content}').toSet();
       final dedupedLocal = local
           .where((m) => !serverKeys.contains('${m.role}:${m.content}'))
           .toList();
@@ -272,11 +300,13 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getStringList(_kLocalChatKey) ?? <String>[];
-      raw.add(jsonEncode({
-        'role': msg.role,
-        'content': msg.content,
-        'createdAt': msg.createdAt.toIso8601String(),
-      }));
+      raw.add(
+        jsonEncode({
+          'role': msg.role,
+          'content': msg.content,
+          'createdAt': msg.createdAt.toIso8601String(),
+        }),
+      );
       // Trim to last N to bound storage.
       if (raw.length > _kLocalChatLimit) {
         raw.removeRange(0, raw.length - _kLocalChatLimit);
@@ -304,13 +334,16 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
       final isRu = Localizations.localeOf(context).languageCode == 'ru';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(isRu
-              ? 'ИИ-чат недоступен: согласие не предоставлено'
-              : 'AI chat unavailable: consent was declined'),
+          content: Text(
+            isRu
+                ? 'ИИ-чат недоступен: согласие не предоставлено'
+                : 'AI chat unavailable: consent was declined',
+          ),
           backgroundColor: K2Colors.error,
           behavior: SnackBarBehavior.floating,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
         ),
       );
       return;
@@ -382,9 +415,7 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
 
     // Drip-feed step labels to simulate streaming progress.
     for (var i = 1; i < _kThinkingSteps.length; i++) {
-      await Future<void>.delayed(
-        Duration(milliseconds: 600 + i * 200),
-      );
+      await Future<void>.delayed(Duration(milliseconds: 600 + i * 200));
       if (!mounted) return;
       setState(() {
         _thinking = _thinking?.withStep(_kThinkingSteps[i]);
@@ -416,7 +447,8 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
       setState(() => _thinking = null);
       try {
         AnalyticsService.chatResponseReceived(
-            ref.read(chatHistoryProvider).length);
+          ref.read(chatHistoryProvider).length,
+        );
       } catch (_) {}
       _scrollToBottom();
     } on Exception {
@@ -433,7 +465,8 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
             backgroundColor: K2Colors.error,
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10)),
+              borderRadius: BorderRadius.circular(10),
+            ),
           ),
         );
       }
@@ -497,11 +530,11 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
         final names = missingWeight.join(', ');
         final reply = isRu
             ? 'Уточни, пожалуйста:\n'
-                '• какой именно $names (вид/сорт)?\n'
-                '• сколько грамм или штук?'
+                  '• какой именно $names (вид/сорт)?\n'
+                  '• сколько грамм или штук?'
             : 'Quick check before I log this:\n'
-                '• which $names exactly (type/size)?\n'
-                '• how many grams or pieces?';
+                  '• which $names exactly (type/size)?\n'
+                  '• how many grams or pieces?';
         final clarifyMsg = ChatMessage(
           role: 'assistant',
           content: reply,
@@ -554,10 +587,18 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
   /// the backend `/api/coach/advice` response when the UI language is Russian.
   static String _localizeBackendAdvice(String text) {
     return text
-        .replaceAll(RegExp(r'\blose weight\b', caseSensitive: false), 'похудеть')
-        .replaceAll(RegExp(r'\bgain weight\b', caseSensitive: false), 'набрать вес')
         .replaceAll(
-            RegExp(r'\bmaintain weight\b', caseSensitive: false), 'поддерживать вес')
+          RegExp(r'\blose weight\b', caseSensitive: false),
+          'похудеть',
+        )
+        .replaceAll(
+          RegExp(r'\bgain weight\b', caseSensitive: false),
+          'набрать вес',
+        )
+        .replaceAll(
+          RegExp(r'\bmaintain weight\b', caseSensitive: false),
+          'поддерживать вес',
+        )
         .replaceAllMapped(
           // "(target 69.40983581542969kg)" → "(цель: 69.4 кг)"
           RegExp(r'\(target\s+([\d.]+)\s*kg\)', caseSensitive: false),
@@ -590,8 +631,8 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
   }) {
     final confirmLine = addedKcal != null
         ? (isRu
-            ? '✓ Добавлено: $dishLabel — ${addedKcal.round()} ккал'
-            : '✓ Added: $dishLabel — ${addedKcal.round()} kcal')
+              ? '✓ Добавлено: $dishLabel — ${addedKcal.round()} ккал'
+              : '✓ Added: $dishLabel — ${addedKcal.round()} kcal')
         : (isRu ? '✓ Добавлено: $dishLabel' : '✓ Added: $dishLabel');
 
     final cal = stats.caloriesEaten;
@@ -608,34 +649,34 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     if (calPct > 1.10) {
       advice = isRu
           ? 'Сегодня перебор: ${cal.round()} из ${calGoal.round()} ккал.'
-              ' По исследованиям, важна средняя калорийность за неделю — в следующие дни старайся есть чуть легче.'
+                ' По исследованиям, важна средняя калорийность за неделю — в следующие дни старайся есть чуть легче.'
           : 'You\'re over today: ${cal.round()} / ${calGoal.round()} kcal.'
-              ' Research shows weekly average matters more — try to eat a little lighter over the next few days.';
+                ' Research shows weekly average matters more — try to eat a little lighter over the next few days.';
     } else if (proPct < 0.5 && proGoal > 0) {
       advice = isRu
           ? 'Белка пока маловато — ${pro.round()} из ${proGoal.round()} г.'
-              ' Следующий приём пищи сделай белковым.'
+                ' Следующий приём пищи сделай белковым.'
           : 'Protein is low — ${pro.round()} / ${proGoal.round()} g.'
-              ' Make your next meal protein-rich.';
+                ' Make your next meal protein-rich.';
     } else if (calPct > 0.85 && proPct >= 0.9) {
       advice = isRu
           ? 'Отличный баланс! ${cal.round()} / ${calGoal.round()} ккал, белок в норме (${pro.round()} г).'
-              ' Есть небольшой запас — можно позволить что-нибудь вкусненькое без чувства вины.'
+                ' Есть небольшой запас — можно позволить что-нибудь вкусненькое без чувства вины.'
           : 'Great balance! ${cal.round()} / ${calGoal.round()} kcal, protein on track (${pro.round()} g).'
-              ' You have a little room — feel free to treat yourself.';
+                ' You have a little room — feel free to treat yourself.';
     } else if (calPct > 0.85) {
       advice = isRu
           ? 'Калории почти на норме: ${cal.round()} / ${calGoal.round()} ккал.'
-              ' Белка не хватает: ${pro.round()} из ${proGoal.round()} г — добавь белковый перекус.'
+                ' Белка не хватает: ${pro.round()} из ${proGoal.round()} г — добавь белковый перекус.'
           : 'Calories near goal: ${cal.round()} / ${calGoal.round()} kcal.'
-              ' Protein is short: ${pro.round()} / ${proGoal.round()} g — grab a protein snack.';
+                ' Protein is short: ${pro.round()} / ${proGoal.round()} g — grab a protein snack.';
     } else {
       final left = (calGoal - cal).round();
       advice = isRu
           ? 'Сегодня ${cal.round()} из ${calGoal.round()} ккал — ещё $left ккал до нормы.'
-              ' Белок: ${pro.round()} / ${proGoal.round()} г.'
+                ' Белок: ${pro.round()} / ${proGoal.round()} г.'
           : 'Today ${cal.round()} / ${calGoal.round()} kcal — $left kcal to goal.'
-              ' Protein: ${pro.round()} / ${proGoal.round()} g.';
+                ' Protein: ${pro.round()} / ${proGoal.round()} g.';
     }
 
     return '$confirmLine\n\n$advice';
@@ -677,11 +718,14 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
         };
       }).toList();
 
-      await apiDio.post('/api/meals/add_selected', data: {
-        'items': items,
-        'dish_name': pending.map((i) => i.name).join(', '),
-        'meal_type': pendingState.mealType,
-      });
+      await apiDio.post(
+        '/api/meals/add_selected',
+        data: {
+          'items': items,
+          'dish_name': pending.map((i) => i.name).join(', '),
+          'meal_type': pendingState.mealType,
+        },
+      );
 
       // Refresh everything that displays meal data.
       ref.invalidate(todayStatsProvider);
@@ -689,18 +733,23 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
       ref.invalidate(userGoalsProvider);
       ref.invalidate(dailyKcalHistoryProvider);
       final today = DateTime.now();
-      final todayIso = '${today.year.toString().padLeft(4, '0')}-'
+      final todayIso =
+          '${today.year.toString().padLeft(4, '0')}-'
           '${today.month.toString().padLeft(2, '0')}-'
           '${today.day.toString().padLeft(2, '0')}';
       ref.invalidate(journalDayMealsProvider(todayIso));
 
       final totalKcal = pending.fold<double>(
-        0, (s, i) => s + i.nutrientsTotal.calories);
+        0,
+        (s, i) => s + i.nutrientsTotal.calories,
+      );
       final dishLabel = pending.map((i) => i.name).join(', ');
       // Mirror the language of the most recent user message.
       final msgs = ref.read(chatHistoryProvider);
-      final lastUserMsg =
-          msgs.lastWhere((m) => m.role == 'user', orElse: () => msgs.first);
+      final lastUserMsg = msgs.lastWhere(
+        (m) => m.role == 'user',
+        orElse: () => msgs.first,
+      );
       final isRu = _detectMessageLang(lastUserMsg.content) == 'ru';
 
       // Fetch fresh stats (already invalidated above) for coaching message.
@@ -709,10 +758,14 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
         freshStats = await ref.read(todayStatsProvider.future);
       } catch (_) {
         freshStats = const MacroStats(
-          caloriesEaten: 0, caloriesGoal: 0,
-          proteinEaten: 0, proteinGoal: 0,
-          fatEaten: 0, fatGoal: 0,
-          carbsEaten: 0, carbsGoal: 0,
+          caloriesEaten: 0,
+          caloriesGoal: 0,
+          proteinEaten: 0,
+          proteinGoal: 0,
+          fatEaten: 0,
+          fatGoal: 0,
+          carbsEaten: 0,
+          carbsGoal: 0,
         );
       }
 
@@ -778,8 +831,9 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
           content: const Text('Could not add to journal. Try again.'),
           backgroundColor: K2Colors.error,
           behavior: SnackBarBehavior.floating,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
         ),
       );
     } finally {
@@ -817,9 +871,9 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     final unit = isRu ? 'г' : 'g';
     final composed = isRu
         ? '${original.name}, ${original.weightGrams.toStringAsFixed(0)}$unit. '
-            'Уточнение: $correction'
+              'Уточнение: $correction'
         : '${original.name}, ${original.weightGrams.toStringAsFixed(0)}$unit. '
-            'Correction: $correction';
+              'Correction: $correction';
 
     ref.read(pendingMealProvider.notifier).setAdding(true);
     try {
@@ -834,12 +888,16 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
       final raw = (resp.data['items'] as List?)?.cast<Map<String, dynamic>>();
       if (raw == null || raw.isEmpty) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(isRu
-              ? 'Не удалось найти подходящий вариант'
-              : 'Could not find a matching item'),
-          behavior: SnackBarBehavior.floating,
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              isRu
+                  ? 'Не удалось найти подходящий вариант'
+                  : 'Could not find a matching item',
+            ),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
         return;
       }
       // Carry the user's current weight forward unless the backend explicitly
@@ -850,26 +908,34 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
       final updated = ingredientV2FromSuggestion(first, useW);
       ref.read(pendingMealProvider.notifier).replaceItem(index, updated);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(isRu
-            ? 'Обновлено: ${updated.name} '
-                '${updated.weightGrams.toStringAsFixed(0)}$unit · '
-                '${updated.nutrientsTotal.calories.round()} ккал'
-            : 'Updated: ${updated.name} '
-                '${updated.weightGrams.toStringAsFixed(0)}$unit · '
-                '${updated.nutrientsTotal.calories.round()} kcal'),
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 2),
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            isRu
+                ? 'Обновлено: ${updated.name} '
+                      '${updated.weightGrams.toStringAsFixed(0)}$unit · '
+                      '${updated.nutrientsTotal.calories.round()} ккал'
+                : 'Updated: ${updated.name} '
+                      '${updated.weightGrams.toStringAsFixed(0)}$unit · '
+                      '${updated.nutrientsTotal.calories.round()} kcal',
+          ),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+        ),
+      );
     } on Exception {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(isRu
-            ? 'Ошибка обновления — попробуй ещё раз'
-            : 'Update failed — try again'),
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: K2Colors.error,
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            isRu
+                ? 'Ошибка обновления — попробуй ещё раз'
+                : 'Update failed — try again',
+          ),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: K2Colors.error,
+        ),
+      );
     } finally {
       if (mounted) ref.read(pendingMealProvider.notifier).setAdding(false);
     }
@@ -887,8 +953,10 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
 
   void _cancelPendingMeal() {
     final msgs = ref.read(chatHistoryProvider);
-    final lastUserMsg =
-        msgs.lastWhere((m) => m.role == 'user', orElse: () => msgs.first);
+    final lastUserMsg = msgs.lastWhere(
+      (m) => m.role == 'user',
+      orElse: () => msgs.first,
+    );
     final isRu = _detectMessageLang(lastUserMsg.content) == 'ru';
     final cancelMsg = ChatMessage(
       role: 'assistant',
@@ -954,14 +1022,16 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     if (!mounted || _photoResultConsumed) return;
     _photoResultConsumed = true;
 
-    ref.read(chatHistoryProvider.notifier)
+    ref
+        .read(chatHistoryProvider.notifier)
         .removeWhere((m) => m.role == _kPhotoAnalyzingRole);
     _pushPhotoResult(result.dishName, result.items);
   }
 
   void _onPhotoRecognitionFailed(PhotoRecognitionState state) {
     if (!mounted) return;
-    ref.read(chatHistoryProvider.notifier)
+    ref
+        .read(chatHistoryProvider.notifier)
         .removeWhere((m) => m.role == _kPhotoAnalyzingRole);
     ref.read(photoRecognitionProvider.notifier).clear();
     _photoResultConsumed = false;
@@ -977,13 +1047,13 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     }
     final msg = state.isNotFood
         ? (isRu
-            ? 'Это не похоже на еду. Попробуйте ещё раз.'
-            : "That doesn't look like food. Please try again.")
+              ? 'Это не похоже на еду. Попробуйте ещё раз.'
+              : "That doesn't look like food. Please try again.")
         : (isRu
-            ? 'Что-то пошло не так${details.isEmpty ? "" : ": $details"}. '
-                'Попробуйте ещё раз.'
-            : 'Something went wrong'
-                '${details.isEmpty ? "" : ": $details"}. Please try again.');
+              ? 'Что-то пошло не так${details.isEmpty ? "" : ": $details"}. '
+                    'Попробуйте ещё раз.'
+              : 'Something went wrong'
+                    '${details.isEmpty ? "" : ": $details"}. Please try again.');
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -1002,32 +1072,32 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
 
     Navigator.of(context)
         .push<bool>(
-      MaterialPageRoute<bool>(
-        fullscreenDialog: true,
-        builder: (_) => Scaffold(
-          backgroundColor: Colors.transparent,
-          body: DraggableScrollableSheet(
-            expand: false,
-            initialChildSize: 1.0,
-            builder: (_, sc) => RecognitionResultSheetKF2(
-              dishName: dishName,
-              ingredients: items,
-              mealDate: null,
-              originalText: null,
-              onSaved: (name) {
-                ref.read(photoRecognitionProvider.notifier).clear();
-                unawaited(_onPhotoSaved(name));
-              },
+          MaterialPageRoute<bool>(
+            fullscreenDialog: true,
+            builder: (_) => Scaffold(
+              backgroundColor: Colors.transparent,
+              body: DraggableScrollableSheet(
+                expand: false,
+                initialChildSize: 1.0,
+                builder: (_, sc) => RecognitionResultSheetKF2(
+                  dishName: dishName,
+                  ingredients: items,
+                  mealDate: null,
+                  originalText: null,
+                  onSaved: (name) {
+                    ref.read(photoRecognitionProvider.notifier).clear();
+                    unawaited(_onPhotoSaved(name));
+                  },
+                ),
+              ),
             ),
           ),
-        ),
-      ),
-    )
+        )
         .then((_) {
-      // User dismissed the sheet without saving.
-      ref.read(photoRecognitionProvider.notifier).clear();
-      _photoResultConsumed = false;
-    });
+          // User dismissed the sheet without saving.
+          ref.read(photoRecognitionProvider.notifier).clear();
+          _photoResultConsumed = false;
+        });
   }
 
   Future<void> _onPhotoSaved(String dishName) async {
@@ -1084,14 +1154,17 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     if (!status.isGranted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(status.isPermanentlyDenied
-              ? 'Mic blocked. Open Settings → Kayfit → Microphone.'
-              : 'Microphone permission denied'),
+          content: Text(
+            status.isPermanentlyDenied
+                ? 'Mic blocked. Open Settings → Kayfit → Microphone.'
+                : 'Microphone permission denied',
+          ),
           backgroundColor: K2Colors.error,
           behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 4),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
           action: status.isPermanentlyDenied
               ? SnackBarAction(
                   label: 'Settings',
@@ -1142,7 +1215,8 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
             behavior: SnackBarBehavior.floating,
             duration: const Duration(seconds: 5),
             shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10)),
+              borderRadius: BorderRadius.circular(10),
+            ),
           ),
         );
       }
@@ -1153,12 +1227,14 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     debugPrint('[mic] stopping recorder');
     final savedPath = await _recorder.stop();
     debugPrint('[mic] stopped, file=$savedPath');
-    if (!mounted) return;
-    setState(() => _voiceState = _VoiceState.transcribing);
-    HapticFeedback.lightImpact();
+    // Capture language before the async HTTP call — context may be gone later.
+    final lang = mounted ? Localizations.localeOf(context).languageCode : 'ru';
+    if (mounted) {
+      setState(() => _voiceState = _VoiceState.transcribing);
+      HapticFeedback.lightImpact();
+    }
 
     try {
-      final lang = Localizations.localeOf(context).languageCode;
       final form = FormData.fromMap({
         'audio': await MultipartFile.fromFile(
           _recordPath!,
@@ -1166,31 +1242,40 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
         ),
       });
       debugPrint('[mic] POST /api/transcribe?language=$lang');
-      final resp =
-          await apiDio.post('/api/transcribe?language=$lang', data: form);
+      final resp = await apiDio.post(
+        '/api/transcribe?language=$lang',
+        data: form,
+      );
       final raw = resp.data;
       final text = raw is Map
           ? (raw['text'] as String? ?? '')
           : (raw?.toString() ?? '');
-      debugPrint('[mic] transcribe got text="${text.length > 50 ? '${text.substring(0, 50)}...' : text}"');
+      debugPrint(
+        '[mic] transcribe got text="${text.length > 50 ? '${text.substring(0, 50)}...' : text}"',
+      );
 
-      if (!mounted) return;
       if (text.isNotEmpty) {
-        // Drop the text into the input field so the user can review and edit
-        // before sending. Auto-send is intentional NOT — user wants to verify
-        // the transcription first.
-        _textController.text = text;
-        _textController.selection = TextSelection.fromPosition(
-          TextPosition(offset: text.length),
-        );
-      } else {
+        if (mounted) {
+          // Screen still visible — put directly in the text field.
+          _textController.text = text;
+          _textController.selection = TextSelection.fromPosition(
+            TextPosition(offset: text.length),
+          );
+        } else {
+          // User navigated away — park the result so it appears when they return.
+          ref.read(transcriptionPendingProvider.notifier).state = text;
+        }
+      } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('Could not transcribe audio. Please try again.'),
+            content: const Text(
+              'Could not transcribe audio. Please try again.',
+            ),
             backgroundColor: K2Colors.error,
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10)),
+              borderRadius: BorderRadius.circular(10),
+            ),
           ),
         );
       }
@@ -1204,7 +1289,8 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
             behavior: SnackBarBehavior.floating,
             duration: const Duration(seconds: 5),
             shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10)),
+              borderRadius: BorderRadius.circular(10),
+            ),
           ),
         );
       }
@@ -1216,9 +1302,7 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
   /// Opens the legacy barcode scanner via Navigator (no GoRouter route exists).
   Future<void> _handleBarcode() async {
     await Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
-        builder: (_) => const BarcodeScannerScreenV2(),
-      ),
+      MaterialPageRoute<void>(builder: (_) => const BarcodeScannerScreenV2()),
     );
   }
 
@@ -1231,18 +1315,15 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     final pendingMeal = ref.watch(pendingMealProvider);
 
     // Auto-show result sheet when background photo recognition completes.
-    ref.listen<PhotoRecognitionState>(
-      photoRecognitionProvider,
-      (prev, next) {
-        final wasAnalyzing = prev?.isAnalyzing ?? false;
-        if (next.isDone && next.result != null && wasAnalyzing) {
-          _onPhotoRecognitionDone(next.result!);
-        }
-        if ((next.isError || next.isNotFood) && wasAnalyzing) {
-          _onPhotoRecognitionFailed(next);
-        }
-      },
-    );
+    ref.listen<PhotoRecognitionState>(photoRecognitionProvider, (prev, next) {
+      final wasAnalyzing = prev?.isAnalyzing ?? false;
+      if (next.isDone && next.result != null && wasAnalyzing) {
+        _onPhotoRecognitionDone(next.result!);
+      }
+      if ((next.isError || next.isNotFood) && wasAnalyzing) {
+        _onPhotoRecognitionFailed(next);
+      }
+    });
 
     return Scaffold(
       backgroundColor: t.bg,
@@ -1290,13 +1371,13 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
                       ),
                     )
                   : messages.isEmpty && _thinking == null
-                      ? _EmptyState(theme: t)
-                      : _MessageList(
-                          scrollController: _scrollController,
-                          messages: messages,
-                          thinking: _thinking,
-                          theme: t,
-                        ),
+                  ? _EmptyState(theme: t)
+                  : _MessageList(
+                      scrollController: _scrollController,
+                      messages: messages,
+                      thinking: _thinking,
+                      theme: t,
+                    ),
             ),
 
             // ── Pending meal confirm card ──────────────────────────────────
@@ -1304,8 +1385,9 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
               _PendingMealCard(
                 items: pendingMeal.items!,
                 mealType: pendingMeal.mealType,
-                onMealTypeChanged:
-                    ref.read(pendingMealProvider.notifier).setMealType,
+                onMealTypeChanged: ref
+                    .read(pendingMealProvider.notifier)
+                    .setMealType,
                 isAdding: pendingMeal.isAdding,
                 onAdd: _confirmAddPendingMeal,
                 onCancel: _cancelPendingMeal,
@@ -1355,9 +1437,7 @@ class _K2TopBar extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 4),
       decoration: BoxDecoration(
         color: t.bg,
-        border: Border(
-          bottom: BorderSide(color: t.hairline, width: 0.5),
-        ),
+        border: Border(bottom: BorderSide(color: t.hairline, width: 0.5)),
       ),
       child: Row(
         children: [
@@ -1401,9 +1481,7 @@ class _StatusStrip extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       decoration: BoxDecoration(
         color: t.bg,
-        border: Border(
-          bottom: BorderSide(color: t.hairline, width: 0.5),
-        ),
+        border: Border(bottom: BorderSide(color: t.hairline, width: 0.5)),
       ),
       child: Row(
         children: [
@@ -1464,8 +1542,11 @@ class _EmptyState extends StatelessWidget {
                 border: Border.all(color: t.border, width: 0.5),
                 color: t.surface,
               ),
-              child: Icon(Icons.chat_bubble_outline_rounded,
-                  size: 24, color: t.fgMute),
+              child: Icon(
+                Icons.chat_bubble_outline_rounded,
+                size: 24,
+                color: t.fgMute,
+              ),
             ),
             const SizedBox(height: 16),
             Text(
@@ -1478,7 +1559,9 @@ class _EmptyState extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              isRu ? 'спросите или опишите что съели' : 'ask or describe what you ate',
+              isRu
+                  ? 'спросите или опишите что съели'
+                  : 'ask or describe what you ate',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontFamily: K2Fonts.sans,
@@ -1523,10 +1606,7 @@ class _MessageList extends StatelessWidget {
         if (index < messages.length) {
           final msg = messages[index];
           if (msg.role == _kPhotoAnalyzingRole) {
-            return _PhotoAnalyzingBubble(
-              photoPath: msg.content,
-              theme: theme,
-            );
+            return _PhotoAnalyzingBubble(photoPath: msg.content, theme: theme);
           }
           return _MessageBubble(
             message: msg,
@@ -1609,8 +1689,9 @@ class _MessageBubbleState extends State<_MessageBubble>
             bottom: 7,
           ),
           child: Row(
-            mainAxisAlignment:
-                isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+            mainAxisAlignment: isUser
+                ? MainAxisAlignment.end
+                : MainAxisAlignment.start,
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Flexible(
@@ -1621,7 +1702,9 @@ class _MessageBubbleState extends State<_MessageBubble>
                   children: [
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 10),
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
                       decoration: BoxDecoration(
                         color: isUser ? K2Colors.accent : t.surface,
                         border: Border.all(color: t.border, width: 0.5),
@@ -1643,8 +1726,7 @@ class _MessageBubbleState extends State<_MessageBubble>
                       ),
                     ),
                     Padding(
-                      padding:
-                          const EdgeInsets.only(top: 3, left: 4, right: 4),
+                      padding: const EdgeInsets.only(top: 3, left: 4, right: 4),
                       child: Text(
                         _formatTime(widget.message.createdAt),
                         style: TextStyle(
@@ -1738,8 +1820,7 @@ class _ThinkingBubbleState extends State<_ThinkingBubble>
                       if (i == steps.length - 1 && !isDone)
                         _SpinnerDot(controller: _spinCtrl, color: t.fgDim)
                       else
-                        Icon(Icons.check_rounded,
-                            size: 11, color: t.fgDim),
+                        Icon(Icons.check_rounded, size: 11, color: t.fgDim),
                       const SizedBox(width: 8),
                       Text(
                         steps[i],
@@ -1880,8 +1961,7 @@ class _AttachToolbar extends StatelessWidget {
                   border: Border.all(color: t.border, width: 0.5),
                   color: t.surface,
                 ),
-                child:
-                    Icon(Icons.barcode_reader, size: 15, color: t.fg),
+                child: Icon(Icons.barcode_reader, size: 15, color: t.fg),
               ),
             ),
           ),
@@ -1975,8 +2055,8 @@ class _MicButtonState extends State<_MicButton>
                 color: isRecording
                     ? K2Colors.error
                     : isTranscribing
-                        ? t.fgDim
-                        : t.border,
+                    ? t.fgDim
+                    : t.border,
                 width: isRecording ? 1.5 : 0.5,
               ),
               color: isRecording
@@ -1992,9 +2072,7 @@ class _MicButtonState extends State<_MicButton>
                     ),
                   )
                 : Icon(
-                    isRecording
-                        ? Icons.stop_rounded
-                        : Icons.mic_none_rounded,
+                    isRecording ? Icons.stop_rounded : Icons.mic_none_rounded,
                     size: 15,
                     color: isRecording ? K2Colors.error : t.fg,
                   ),
@@ -2091,7 +2169,9 @@ class _InputPillState extends State<_InputPill>
                   color: t.fg,
                 ),
                 decoration: InputDecoration(
-                  hintText: isRu ? 'спросите или опишите что съели' : 'ask or describe what you ate',
+                  hintText: isRu
+                      ? 'спросите или опишите что съели'
+                      : 'ask or describe what you ate',
                   hintStyle: TextStyle(
                     fontFamily: K2Fonts.sans,
                     fontSize: 14,
@@ -2191,10 +2271,14 @@ class _PendingMealCard extends StatelessWidget {
     final l10n = AppLocalizations.of(context)!;
     final isRu = Localizations.localeOf(context).languageCode == 'ru';
 
-    final totalKcal =
-        items.fold<double>(0, (s, i) => s + i.nutrientsTotal.calories);
-    final totalP =
-        items.fold<double>(0, (s, i) => s + i.nutrientsTotal.protein);
+    final totalKcal = items.fold<double>(
+      0,
+      (s, i) => s + i.nutrientsTotal.calories,
+    );
+    final totalP = items.fold<double>(
+      0,
+      (s, i) => s + i.nutrientsTotal.protein,
+    );
     final totalF = items.fold<double>(0, (s, i) => s + i.nutrientsTotal.fat);
     final totalC = items.fold<double>(0, (s, i) => s + i.nutrientsTotal.carbs);
 
@@ -2277,11 +2361,8 @@ class _PendingMealCard extends StatelessWidget {
               shrinkWrap: true,
               padding: EdgeInsets.zero,
               itemCount: items.length,
-              separatorBuilder: (_, __) => Divider(
-                height: 1,
-                thickness: 1,
-                color: theme.hairline,
-              ),
+              separatorBuilder: (_, __) =>
+                  Divider(height: 1, thickness: 1, color: theme.hairline),
               itemBuilder: (_, idx) => _PendingMealItemRow(
                 item: items[idx],
                 theme: theme,
@@ -2294,8 +2375,8 @@ class _PendingMealCard extends StatelessWidget {
           const SizedBox(height: 6),
           Text(
             isRu
-              ? 'Б ${totalP.round()} · Ж ${totalF.round()} · У ${totalC.round()}'
-              : 'P ${totalP.round()} · F ${totalF.round()} · C ${totalC.round()}',
+                ? 'Б ${totalP.round()} · Ж ${totalF.round()} · У ${totalC.round()}'
+                : 'P ${totalP.round()} · F ${totalF.round()} · C ${totalC.round()}',
             style: TextStyle(
               fontSize: 11,
               color: theme.fgMute,
@@ -2315,13 +2396,16 @@ class _PendingMealCard extends StatelessWidget {
                 return GestureDetector(
                   onTap: isAdding ? null : () => onMealTypeChanged(mt),
                   child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
                     decoration: BoxDecoration(
                       color: selected ? theme.fg : Colors.transparent,
                       borderRadius: BorderRadius.circular(13),
-                      border:
-                          Border.all(color: selected ? theme.fg : theme.border),
+                      border: Border.all(
+                        color: selected ? theme.fg : theme.border,
+                      ),
                     ),
                     child: Center(
                       child: Text(
@@ -2472,9 +2556,9 @@ class _ChatDisclaimerBanner extends StatelessWidget {
                     ),
                     recognizer: TapGestureRecognizer()
                       ..onTap = () => launchUrl(
-                            Uri.parse(_whoUrl),
-                            mode: LaunchMode.externalApplication,
-                          ),
+                        Uri.parse(_whoUrl),
+                        mode: LaunchMode.externalApplication,
+                      ),
                   ),
                   const TextSpan(text: ', '),
                   TextSpan(
@@ -2486,9 +2570,9 @@ class _ChatDisclaimerBanner extends StatelessWidget {
                     ),
                     recognizer: TapGestureRecognizer()
                       ..onTap = () => launchUrl(
-                            Uri.parse(_usdaUrl),
-                            mode: LaunchMode.externalApplication,
-                          ),
+                        Uri.parse(_usdaUrl),
+                        mode: LaunchMode.externalApplication,
+                      ),
                   ),
                   const TextSpan(text: '.'),
                 ],
@@ -2694,8 +2778,9 @@ class _WeightField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final borderColor =
-        readOnly ? theme.border : K2Colors.accent.withValues(alpha: 0.7);
+    final borderColor = readOnly
+        ? theme.border
+        : K2Colors.accent.withValues(alpha: 0.7);
     return SizedBox(
       width: 80,
       height: 26,
@@ -2714,8 +2799,10 @@ class _WeightField extends StatelessWidget {
         ),
         decoration: InputDecoration(
           isDense: true,
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 6,
+            vertical: 4,
+          ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(13),
             borderSide: BorderSide(color: borderColor),
@@ -2866,11 +2953,7 @@ class _CorrectIngredientSheetState extends State<_CorrectIngredientSheet> {
                 ),
                 child: Row(
                   children: [
-                    Icon(
-                      Icons.restaurant_rounded,
-                      size: 14,
-                      color: t.fgMute,
-                    ),
+                    Icon(Icons.restaurant_rounded, size: 14, color: t.fgMute),
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
@@ -3004,10 +3087,7 @@ class _CorrectIngredientSheetState extends State<_CorrectIngredientSheet> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _PhotoAnalyzingBubble extends ConsumerStatefulWidget {
-  const _PhotoAnalyzingBubble({
-    required this.photoPath,
-    required this.theme,
-  });
+  const _PhotoAnalyzingBubble({required this.photoPath, required this.theme});
 
   final String photoPath;
   final K2Theme theme;
@@ -3041,8 +3121,9 @@ class _PhotoAnalyzingBubbleState extends ConsumerState<_PhotoAnalyzingBubble>
     final t = widget.theme;
     // Only watch the fields we actually render to minimise rebuilds.
     final (stageIndex, isDone, langCode) = ref.watch(
-      photoRecognitionProvider
-          .select((s) => (s.stageIndex, s.isDone, s.langCode)),
+      photoRecognitionProvider.select(
+        (s) => (s.stageIndex, s.isDone, s.langCode),
+      ),
     );
     final stages = photoRecognitionStages(langCode);
 
@@ -3100,9 +3181,7 @@ class _PhotoAnalyzingBubbleState extends ConsumerState<_PhotoAnalyzingBubble>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    for (var i = 0;
-                        i <= stageIndex && i < stages.length;
-                        i++)
+                    for (var i = 0; i <= stageIndex && i < stages.length; i++)
                       Padding(
                         padding: EdgeInsets.only(top: i == 0 ? 0 : 5),
                         child: Row(

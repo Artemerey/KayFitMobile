@@ -130,6 +130,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get journal_empty => 'History is empty';
 
   @override
+  String get journal_no_meals_today => 'No meals today';
+
+  @override
+  String get journal_tap_plus_to_log => 'Tap + to log your first meal';
+
+  @override
   String get journal_ai_banner_title => 'AI Nutritionist';
 
   @override

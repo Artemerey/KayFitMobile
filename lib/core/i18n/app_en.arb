@@ -55,6 +55,8 @@
 
   "journal_title": "Journal",
   "journal_empty": "History is empty",
+  "journal_no_meals_today": "No meals today",
+  "journal_tap_plus_to_log": "Tap + to log your first meal",
   "journal_ai_banner_title": "AI Nutritionist",
   "journal_ai_banner_sub": "Will help choose meals and calculate daily macros",
   "journal_ai_banner_btn": "Ask",

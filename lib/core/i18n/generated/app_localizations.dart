@@ -332,6 +332,18 @@ abstract class AppLocalizations {
   /// **'История пуста'**
   String get journal_empty;
 
+  /// No description provided for @journal_no_meals_today.
+  ///
+  /// In ru, this message translates to:
+  /// **'Блюд за сегодня нет'**
+  String get journal_no_meals_today;
+
+  /// No description provided for @journal_tap_plus_to_log.
+  ///
+  /// In ru, this message translates to:
+  /// **'Нажми + чтобы добавить первое блюдо'**
+  String get journal_tap_plus_to_log;
+
   /// No description provided for @journal_ai_banner_title.
   ///
   /// In ru, this message translates to:

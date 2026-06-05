@@ -130,6 +130,12 @@ class AppLocalizationsRu extends AppLocalizations {
   String get journal_empty => 'История пуста';
 
   @override
+  String get journal_no_meals_today => 'Блюд за сегодня нет';
+
+  @override
+  String get journal_tap_plus_to_log => 'Нажми + чтобы добавить первое блюдо';
+
+  @override
   String get journal_ai_banner_title => 'ИИ-нутрициолог';
 
   @override

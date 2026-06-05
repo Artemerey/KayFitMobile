@@ -55,6 +55,8 @@
 
   "journal_title": "Журнал",
   "journal_empty": "История пуста",
+  "journal_no_meals_today": "Блюд за сегодня нет",
+  "journal_tap_plus_to_log": "Нажми + чтобы добавить первое блюдо",
   "journal_ai_banner_title": "ИИ-нутрициолог",
   "journal_ai_banner_sub": "Поможет с выбором блюд и расчётом КБЖУ на день",
   "journal_ai_banner_btn": "Спросить",

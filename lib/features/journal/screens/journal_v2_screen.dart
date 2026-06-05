@@ -7,6 +7,7 @@
 // Gated via --dart-define=KF2_JOURNAL=true in router.dart.
 // The legacy JournalScreen remains untouched.
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -884,7 +885,7 @@ class _EmptyMeals extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    'No meals today',
+                    AppLocalizations.of(context)!.journal_no_meals_today,
                     style: TextStyle(
                       fontSize: 15,
                       color: theme.fgDim,
@@ -893,7 +894,7 @@ class _EmptyMeals extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Tap + to log your first meal',
+                    AppLocalizations.of(context)!.journal_tap_plus_to_log,
                     style: TextStyle(
                       fontSize: 13,
                       color: theme.fgMute,
@@ -933,3 +934,7 @@ class _JournalDisclaimerBar extends StatelessWidget {
     );
   }
 }
+
+/// Exposes [_EmptyMeals] for widget tests only.
+@visibleForTesting
+Widget emptyMealsWidgetForTest(K2Theme theme) => _EmptyMeals(theme: theme);

@@ -11,7 +11,11 @@ void main() {
 
   group('LocaleNotifier', () {
     test('init_from_sp_ru — reads "ru" from SharedPreferences', () async {
-      SharedPreferences.setMockInitialValues({'app_locale': 'ru'});
+      // app_locale_user_set must be true for the locale to override device default.
+      SharedPreferences.setMockInitialValues({
+        'app_locale': 'ru',
+        'app_locale_user_set': true,
+      });
 
       final notifier = LocaleNotifier();
       // _load() is async — wait for microtasks to settle.

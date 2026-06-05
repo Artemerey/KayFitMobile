@@ -10,6 +10,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kayfit/core/i18n/generated/app_localizations.dart';
 import 'package:kayfit/shared/models/k2_meal_row_data.dart';
 import 'package:kayfit/shared/theme/kayfit2_theme.dart';
 import 'package:kayfit/shared/widgets/kayfit2_meal_photo.dart';
@@ -17,10 +18,14 @@ import 'package:kayfit/shared/widgets/kayfit2_meal_row.dart';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/// Wraps a widget in a minimal MaterialApp so Text/InkWell resolve their
-/// inherited widget requirements.
-Widget _wrap(Widget child) =>
-    MaterialApp(home: Scaffold(body: child));
+/// Wraps a widget with localization delegates so AppLocalizations.of(context)
+/// resolves inside Kayfit2MealRow (which uses l10n for macro labels).
+Widget _wrap(Widget child) => MaterialApp(
+      locale: const Locale('en'),
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      home: Scaffold(body: child),
+    );
 
 const _light = K2Theme.light;
 
