@@ -194,9 +194,7 @@ class _StatsCardState extends State<StatsCard>
                   ),
                   const SizedBox(width: 4),
                   Text(
-                    _expanded
-                        ? (isRu ? 'Скрыть детали' : 'Hide details')
-                        : (isRu ? 'Подробнее' : 'More details'),
+                    _expanded ? l10n.stats_hide_details : l10n.stats_show_details,
                     style: const TextStyle(
                       fontSize: 11,
                       color: AppColors.textMuted,
@@ -216,7 +214,6 @@ class _StatsCardState extends State<StatsCard>
                 : CrossFadeState.showFirst,
             firstChild: const SizedBox(height: 8),
             secondChild: _MicroNutrientsGrid(
-              isRu: isRu,
               fiber: _sum((m) => m.fiber),
               sodium: _sum((m) => m.sodium),
               potassium: _sum((m) => m.potassium),
@@ -237,9 +234,7 @@ class _StatsCardState extends State<StatsCard>
                 const SizedBox(width: 5),
                 Expanded(
                   child: Text(
-                    isRu
-                        ? 'На основе формулы Mifflin-St Jeor. Не является медицинской рекомендацией.'
-                        : 'Based on Mifflin-St Jeor formula. Not medical advice.',
+                    l10n.stats_mifflin_disclaimer,
                     style: const TextStyle(
                       fontSize: 10,
                       color: AppColors.textMuted,
@@ -261,7 +256,6 @@ class _StatsCardState extends State<StatsCard>
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _MicroNutrientsGrid extends StatelessWidget {
-  final bool isRu;
   final double fiber;
   final double sodium;
   final double potassium;
@@ -272,7 +266,6 @@ class _MicroNutrientsGrid extends StatelessWidget {
   final double vitaminD;
 
   const _MicroNutrientsGrid({
-    required this.isRu,
     required this.fiber,
     required this.sodium,
     required this.potassium,
@@ -285,54 +278,58 @@ class _MicroNutrientsGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final g = l10n.macro_g;
+    final mg = l10n.nds_unit_mg;
+    final mcg = l10n.nds_unit_mcg;
     final items = [
       _MicroItem(
         icon: Icons.grass_rounded,
         color: NutrientColors.fiber,
-        label: isRu ? 'Клетчатка' : 'Fiber',
-        value: '${fiber.toStringAsFixed(1)}${isRu ? 'г' : 'g'}',
+        label: l10n.nds_nutrient_fiber,
+        value: '${fiber.toStringAsFixed(1)}$g',
       ),
       _MicroItem(
         icon: Icons.water_drop_outlined,
         color: const Color(0xFF0284C7),
-        label: isRu ? 'Натрий' : 'Sodium',
-        value: '${sodium.toStringAsFixed(0)}${isRu ? 'мг' : 'mg'}',
+        label: l10n.nds_nutrient_sodium,
+        value: '${sodium.toStringAsFixed(0)}$mg',
       ),
       _MicroItem(
         icon: Icons.bolt_rounded,
         color: const Color(0xFF7C3AED),
-        label: isRu ? 'Калий' : 'Potassium',
-        value: '${potassium.toStringAsFixed(0)}${isRu ? 'мг' : 'mg'}',
+        label: l10n.nds_nutrient_potassium,
+        value: '${potassium.toStringAsFixed(0)}$mg',
       ),
       _MicroItem(
         icon: Icons.favorite_border_rounded,
         color: AppColors.accentOver,
-        label: isRu ? 'Холестерин' : 'Cholesterol',
-        value: '${cholesterol.toStringAsFixed(0)}${isRu ? 'мг' : 'mg'}',
+        label: l10n.nds_nutrient_cholesterol,
+        value: '${cholesterol.toStringAsFixed(0)}$mg',
       ),
       _MicroItem(
         icon: Icons.bloodtype_outlined,
         color: const Color(0xFFB45309),
-        label: isRu ? 'Железо' : 'Iron',
-        value: '${iron.toStringAsFixed(1)}${isRu ? 'мг' : 'mg'}',
+        label: l10n.nds_nutrient_iron,
+        value: '${iron.toStringAsFixed(1)}$mg',
       ),
       _MicroItem(
         icon: Icons.shield_outlined,
         color: const Color(0xFF0369A1),
-        label: isRu ? 'Кальций' : 'Calcium',
-        value: '${calcium.toStringAsFixed(0)}${isRu ? 'мг' : 'mg'}',
+        label: l10n.nds_nutrient_calcium,
+        value: '${calcium.toStringAsFixed(0)}$mg',
       ),
       _MicroItem(
         icon: Icons.wb_sunny_outlined,
         color: NutrientColors.kcal,
-        label: isRu ? 'Вит. C' : 'Vit. C',
-        value: '${vitaminC.toStringAsFixed(1)}${isRu ? 'мг' : 'mg'}',
+        label: l10n.nds_nutrient_vit_c_short,
+        value: '${vitaminC.toStringAsFixed(1)}$mg',
       ),
       _MicroItem(
         icon: Icons.brightness_5_rounded,
         color: const Color(0xFFF59E0B),
-        label: isRu ? 'Вит. D' : 'Vit. D',
-        value: '${vitaminD.toStringAsFixed(1)}${isRu ? 'мкг' : 'mcg'}',
+        label: l10n.nds_nutrient_vit_d_short,
+        value: '${vitaminD.toStringAsFixed(1)}$mcg',
       ),
     ];
 

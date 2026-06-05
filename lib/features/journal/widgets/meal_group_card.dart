@@ -108,16 +108,16 @@ class MealGroupCard extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
             child: Row(
               children: [
-                _Chip('Net ${totalNetCarbs.toStringAsFixed(0)}g',
+                _Chip('${l10n.macro_net_carbs_abbr} ${totalNetCarbs.toStringAsFixed(0)}g',
                     NutrientColors.netCarbs, NutrientColors.netCarbsSoft),
                 const SizedBox(width: 6),
-                _Chip('P ${totalProtein.toStringAsFixed(0)}g',
+                _Chip('${l10n.macro_protein_abbr} ${totalProtein.toStringAsFixed(0)}g',
                     NutrientColors.protein, NutrientColors.proteinSoft),
                 const SizedBox(width: 6),
-                _Chip('F ${totalFat.toStringAsFixed(0)}g',
+                _Chip('${l10n.macro_fat_abbr} ${totalFat.toStringAsFixed(0)}g',
                     NutrientColors.fatGood, NutrientColors.fatGoodSoft),
                 const SizedBox(width: 6),
-                _Chip('${totalCal.toStringAsFixed(0)} kcal',
+                _Chip('${totalCal.toStringAsFixed(0)} ${l10n.macro_kcal}',
                     NutrientColors.kcal, NutrientColors.kcalSoft),
               ],
             ),
@@ -163,7 +163,7 @@ class MealGroupCard extends StatelessWidget {
                               ),
                               const SizedBox(height: 1),
                               Text(
-                                'Net ${net.toStringAsFixed(0)}g · P ${m.protein.toStringAsFixed(0)}g · F ${m.fat.toStringAsFixed(0)}g',
+                                '${l10n.macro_net_carbs_abbr} ${net.toStringAsFixed(0)}g · ${l10n.macro_protein_abbr} ${m.protein.toStringAsFixed(0)}g · ${l10n.macro_fat_abbr} ${m.fat.toStringAsFixed(0)}g',
                                 style: TextStyle(
                                     fontSize: 11,
                                     color: NutrientColors.secondary),
@@ -411,7 +411,7 @@ class _MealDetailSheet extends StatelessWidget {
           if (_hasExtendedData(meal)) ...[
             const SizedBox(height: 14),
             Text(
-              'EXTENDED',
+              l10n.meal_group_extended,
               style: TextStyle(
                 fontSize: 10,
                 fontWeight: FontWeight.w700,
@@ -581,17 +581,18 @@ class _GiBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final Color color;
     final String label;
     if (gi < 55) {
       color = AppColors.accent;
-      label = 'Low GI';
+      label = l10n.gi_low_badge;
     } else if (gi < 70) {
       color = AppColors.warm;
-      label = 'Med GI';
+      label = l10n.gi_medium_badge;
     } else {
       color = AppColors.accentOver;
-      label = 'High GI';
+      label = l10n.gi_high_badge;
     }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -783,11 +784,11 @@ class _GroupDetailSheet extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(m.dishName ?? m.name, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
-                            Text('Net ${net.toStringAsFixed(0)}g · P ${m.protein.toStringAsFixed(0)}g · F ${m.fat.toStringAsFixed(0)}g', style: TextStyle(fontSize: 11, color: NutrientColors.secondary)),
+                            Text('${l10n.macro_net_carbs_abbr} ${net.toStringAsFixed(0)}g · ${l10n.macro_protein_abbr} ${m.protein.toStringAsFixed(0)}g · ${l10n.macro_fat_abbr} ${m.fat.toStringAsFixed(0)}g', style: TextStyle(fontSize: 11, color: NutrientColors.secondary)),
                           ],
                         ),
                       ),
-                      Text('${m.calories.toStringAsFixed(0)} kcal', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: NutrientColors.kcal)),
+                      Text('${m.calories.toStringAsFixed(0)} ${l10n.macro_kcal}', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: NutrientColors.kcal)),
                     ],
                   ),
                 );

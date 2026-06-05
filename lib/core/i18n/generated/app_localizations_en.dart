@@ -1498,6 +1498,52 @@ class AppLocalizationsEn extends AppLocalizations {
   String get gi_high_badge => 'High GI';
 
   @override
+  String get journal_day_total => 'DAY TOTAL';
+
+  @override
+  String get journal_more_nutrients => 'More nutrients';
+
+  @override
+  String get journal_hide_nutrients => 'Hide';
+
+  @override
+  String get meal_group_extended => 'EXTENDED';
+
+  @override
+  String get dashboard_kcal_left => 'kcal left';
+
+  @override
+  String get dashboard_kcal_over => 'kcal over';
+
+  @override
+  String get stats_fiber => 'Fiber';
+
+  @override
+  String get stats_sodium => 'Sodium';
+
+  @override
+  String get stats_hide_details => 'Hide details';
+
+  @override
+  String get stats_show_details => 'More details';
+
+  @override
+  String get stats_mifflin_disclaimer =>
+      'Based on Mifflin-St Jeor formula. Not medical advice.';
+
+  @override
+  String get edit_meal_macros_label => 'Macros';
+
+  @override
+  String get edit_meal_weight_short => 'Weight';
+
+  @override
+  String get nds_nutrient_vit_c_short => 'Vit. C';
+
+  @override
+  String get nds_nutrient_vit_d_short => 'Vit. D';
+
+  @override
   String get journal_meal_deleted => 'Meal deleted';
 
   @override

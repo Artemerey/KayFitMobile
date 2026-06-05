@@ -839,7 +839,7 @@ class _GroupHeader extends StatelessWidget {
           ),
           const Spacer(),
           Text(
-            '$totalKcal kcal',
+            '$totalKcal ${l10n.macro_kcal}',
             style: TextStyle(
               fontSize: 12,
               fontFamily: K2Fonts.mono,

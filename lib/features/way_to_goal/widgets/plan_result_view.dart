@@ -143,7 +143,7 @@ class PlanResultView extends StatelessWidget {
 
         // Calories card
         _EditableStatCard(
-          label: isRu ? 'Калории' : 'Calories',
+          label: l10n.macro_calories,
           value: calc.targetCalories.toStringAsFixed(0),
           unit: '',
           badgeColor: null,
@@ -153,31 +153,31 @@ class PlanResultView extends StatelessWidget {
 
         // Protein card
         _EditableStatCard(
-          label: isRu ? 'Белки' : 'Protein',
+          label: l10n.macro_protein,
           value: calc.protein.toStringAsFixed(0),
-          unit: isRu ? 'г' : 'g',
+          unit: l10n.macro_g,
           badgeColor: const Color(0xFF3B82F6),
-          badgeInitial: isRu ? 'Б' : 'P',
+          badgeInitial: l10n.macro_protein_abbr,
         ),
         const SizedBox(height: 8),
 
         // Fat card
         _EditableStatCard(
-          label: isRu ? 'Жиры' : 'Fat',
+          label: l10n.macro_fat,
           value: calc.fat.toStringAsFixed(0),
-          unit: isRu ? 'г' : 'g',
+          unit: l10n.macro_g,
           badgeColor: const Color(0xFFF59E0B),
-          badgeInitial: isRu ? 'Ж' : 'F',
+          badgeInitial: l10n.macro_fat_abbr,
         ),
         const SizedBox(height: 8),
 
         // Carbs card
         _EditableStatCard(
-          label: isRu ? 'Углеводы' : 'Carbs',
+          label: l10n.macro_carbs,
           value: calc.carbs.toStringAsFixed(0),
-          unit: isRu ? 'г' : 'g',
+          unit: l10n.macro_g,
           badgeColor: const Color(0xFFEF4444),
-          badgeInitial: isRu ? 'У' : 'C',
+          badgeInitial: l10n.macro_carbs_abbr,
         ),
         const SizedBox(height: 20),
 

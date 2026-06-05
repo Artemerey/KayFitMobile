@@ -98,7 +98,7 @@ class _DaySummaryCardState extends State<DaySummaryCard>
           Row(
             children: [
               Text(
-                'DAY TOTAL',
+                l10n.journal_day_total,
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
@@ -118,8 +118,8 @@ class _DaySummaryCardState extends State<DaySummaryCard>
                 ),
                 child: Text(
                   isOver
-                      ? '+${(-remaining).round()} ${isRu ? "ккал" : "kcal"}'
-                      : '${remaining.round()} ${isRu ? "ккал до цели" : "kcal left"}',
+                      ? '+${(-remaining).round()} ${l10n.macro_kcal}'
+                      : '${remaining.round()} ${l10n.dashboard_kcal_left}',
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
@@ -157,7 +157,7 @@ class _DaySummaryCardState extends State<DaySummaryCard>
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                '${widget.calories.toStringAsFixed(0)} kcal',
+                '${widget.calories.toStringAsFixed(0)} ${l10n.macro_kcal}',
                 style: const TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w800,
@@ -275,7 +275,7 @@ class _DaySummaryCardState extends State<DaySummaryCard>
                   ),
                   const SizedBox(width: 4),
                   Text(
-                    _expanded ? 'Hide' : 'More nutrients',
+                    _expanded ? l10n.journal_hide_nutrients : l10n.journal_more_nutrients,
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w500,

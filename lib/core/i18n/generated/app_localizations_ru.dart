@@ -1499,6 +1499,52 @@ class AppLocalizationsRu extends AppLocalizations {
   String get gi_high_badge => 'Выс. ГИ';
 
   @override
+  String get journal_day_total => 'ИТОГО';
+
+  @override
+  String get journal_more_nutrients => 'Ещё нутриенты';
+
+  @override
+  String get journal_hide_nutrients => 'Скрыть';
+
+  @override
+  String get meal_group_extended => 'СОСТАВ';
+
+  @override
+  String get dashboard_kcal_left => 'ккал до цели';
+
+  @override
+  String get dashboard_kcal_over => 'ккал сверх нормы';
+
+  @override
+  String get stats_fiber => 'Клетчатка';
+
+  @override
+  String get stats_sodium => 'Натрий';
+
+  @override
+  String get stats_hide_details => 'Скрыть детали';
+
+  @override
+  String get stats_show_details => 'Подробнее';
+
+  @override
+  String get stats_mifflin_disclaimer =>
+      'На основе формулы Mifflin-St Jeor. Не является медицинской рекомендацией.';
+
+  @override
+  String get edit_meal_macros_label => 'КБЖУ';
+
+  @override
+  String get edit_meal_weight_short => 'Вес';
+
+  @override
+  String get nds_nutrient_vit_c_short => 'Вит. C';
+
+  @override
+  String get nds_nutrient_vit_d_short => 'Вит. D';
+
+  @override
   String get journal_meal_deleted => 'Приём пищи удалён';
 
   @override

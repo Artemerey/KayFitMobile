@@ -50,6 +50,7 @@ import '../../../shared/models/stats.dart';
 import '../../../shared/theme/kayfit2_theme.dart';
 import '../../../shared/utils/nutrient_parser.dart';
 import '../../../shared/widgets/kayfit2_tab_bar.dart';
+import '../../../core/i18n/generated/app_localizations.dart';
 import '../models/chat_message.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2187,6 +2188,7 @@ class _PendingMealCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final isRu = Localizations.localeOf(context).languageCode == 'ru';
 
     final totalKcal =
@@ -2229,7 +2231,7 @@ class _PendingMealCard extends StatelessWidget {
               ),
               const Spacer(),
               Text(
-                '${totalKcal.round()} ${isRu ? "ккал" : "kcal"}',
+                '${totalKcal.round()} ${l10n.macro_kcal}',
                 style: TextStyle(
                   fontSize: 12,
                   color: theme.fg,
@@ -2582,6 +2584,7 @@ class _PendingMealItemRowState extends State<_PendingMealItemRow> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final t = widget.theme;
     final i = widget.item;
     final n = i.nutrientsTotal;
@@ -2656,7 +2659,7 @@ class _PendingMealItemRowState extends State<_PendingMealItemRow> {
               ),
               const SizedBox(width: 8),
               Text(
-                '${n.calories.round()} ${isRu ? "ккал" : "kcal"}',
+                '${n.calories.round()} ${l10n.macro_kcal}',
                 style: TextStyle(
                   fontSize: 12,
                   color: t.fg,
@@ -2822,6 +2825,7 @@ class _CorrectIngredientSheetState extends State<_CorrectIngredientSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     const t = K2Theme.light;
     final isRu = Localizations.localeOf(context).languageCode == 'ru';
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
@@ -2871,7 +2875,7 @@ class _CorrectIngredientSheetState extends State<_CorrectIngredientSheet> {
                     Expanded(
                       child: Text(
                         '${o.name} · ${o.weightGrams.toStringAsFixed(0)}$unit · '
-                        '${o.nutrientsTotal.calories.round()} ${isRu ? "ккал" : "kcal"}',
+                        '${o.nutrientsTotal.calories.round()} ${l10n.macro_kcal}',
                         style: TextStyle(
                           fontSize: 12,
                           color: t.fgDim,

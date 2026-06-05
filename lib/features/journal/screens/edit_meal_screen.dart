@@ -508,7 +508,7 @@ class _K2IngredientCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final unit = isRu ? 'г' : 'g';
+    final unit = l10n.macro_g;
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 18, 16, 18),
       decoration: BoxDecoration(
@@ -564,7 +564,7 @@ class _K2IngredientCard extends StatelessWidget {
           Row(
             children: [
               Text(
-                isRu ? 'Вес' : 'Weight',
+                l10n.edit_meal_weight_short,
                 style: TextStyle(
                   fontSize: 11,
                   color: theme.fgMute,
@@ -587,7 +587,7 @@ class _K2IngredientCard extends StatelessWidget {
 
           // ── Filled KБЖУ row — 4 tappable chips ───────────────────
           Text(
-            isRu ? 'КБЖУ' : 'KBJU',
+            l10n.edit_meal_macros_label,
             style: TextStyle(
               fontSize: 11,
               color: theme.fgMute,
@@ -600,7 +600,7 @@ class _K2IngredientCard extends StatelessWidget {
             children: [
               Expanded(
                 child: _MacroCell(
-                  label: isRu ? 'ккал' : 'kcal',
+                  label: l10n.macro_kcal,
                   controller: caloriesCtrl,
                   highlighted: true,
                   theme: theme,
@@ -609,7 +609,7 @@ class _K2IngredientCard extends StatelessWidget {
               const SizedBox(width: 6),
               Expanded(
                 child: _MacroCell(
-                  label: isRu ? 'Б' : 'P',
+                  label: l10n.macro_protein_abbr,
                   controller: proteinCtrl,
                   theme: theme,
                 ),
@@ -617,7 +617,7 @@ class _K2IngredientCard extends StatelessWidget {
               const SizedBox(width: 6),
               Expanded(
                 child: _MacroCell(
-                  label: isRu ? 'Ж' : 'F',
+                  label: l10n.macro_fat_abbr,
                   controller: fatCtrl,
                   theme: theme,
                 ),
@@ -625,7 +625,7 @@ class _K2IngredientCard extends StatelessWidget {
               const SizedBox(width: 6),
               Expanded(
                 child: _MacroCell(
-                  label: isRu ? 'У' : 'C',
+                  label: l10n.macro_carbs_abbr,
                   controller: carbsCtrl,
                   theme: theme,
                 ),

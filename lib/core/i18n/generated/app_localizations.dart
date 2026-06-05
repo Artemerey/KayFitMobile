@@ -2948,6 +2948,96 @@ abstract class AppLocalizations {
   /// **'Выс. ГИ'**
   String get gi_high_badge;
 
+  /// No description provided for @journal_day_total.
+  ///
+  /// In ru, this message translates to:
+  /// **'ИТОГО'**
+  String get journal_day_total;
+
+  /// No description provided for @journal_more_nutrients.
+  ///
+  /// In ru, this message translates to:
+  /// **'Ещё нутриенты'**
+  String get journal_more_nutrients;
+
+  /// No description provided for @journal_hide_nutrients.
+  ///
+  /// In ru, this message translates to:
+  /// **'Скрыть'**
+  String get journal_hide_nutrients;
+
+  /// No description provided for @meal_group_extended.
+  ///
+  /// In ru, this message translates to:
+  /// **'СОСТАВ'**
+  String get meal_group_extended;
+
+  /// No description provided for @dashboard_kcal_left.
+  ///
+  /// In ru, this message translates to:
+  /// **'ккал до цели'**
+  String get dashboard_kcal_left;
+
+  /// No description provided for @dashboard_kcal_over.
+  ///
+  /// In ru, this message translates to:
+  /// **'ккал сверх нормы'**
+  String get dashboard_kcal_over;
+
+  /// No description provided for @stats_fiber.
+  ///
+  /// In ru, this message translates to:
+  /// **'Клетчатка'**
+  String get stats_fiber;
+
+  /// No description provided for @stats_sodium.
+  ///
+  /// In ru, this message translates to:
+  /// **'Натрий'**
+  String get stats_sodium;
+
+  /// No description provided for @stats_hide_details.
+  ///
+  /// In ru, this message translates to:
+  /// **'Скрыть детали'**
+  String get stats_hide_details;
+
+  /// No description provided for @stats_show_details.
+  ///
+  /// In ru, this message translates to:
+  /// **'Подробнее'**
+  String get stats_show_details;
+
+  /// No description provided for @stats_mifflin_disclaimer.
+  ///
+  /// In ru, this message translates to:
+  /// **'На основе формулы Mifflin-St Jeor. Не является медицинской рекомендацией.'**
+  String get stats_mifflin_disclaimer;
+
+  /// No description provided for @edit_meal_macros_label.
+  ///
+  /// In ru, this message translates to:
+  /// **'КБЖУ'**
+  String get edit_meal_macros_label;
+
+  /// No description provided for @edit_meal_weight_short.
+  ///
+  /// In ru, this message translates to:
+  /// **'Вес'**
+  String get edit_meal_weight_short;
+
+  /// No description provided for @nds_nutrient_vit_c_short.
+  ///
+  /// In ru, this message translates to:
+  /// **'Вит. C'**
+  String get nds_nutrient_vit_c_short;
+
+  /// No description provided for @nds_nutrient_vit_d_short.
+  ///
+  /// In ru, this message translates to:
+  /// **'Вит. D'**
+  String get nds_nutrient_vit_d_short;
+
   /// No description provided for @journal_meal_deleted.
   ///
   /// In ru, this message translates to:
