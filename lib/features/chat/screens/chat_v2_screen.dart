@@ -131,13 +131,23 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
   _VoiceState _voiceState = _VoiceState.idle;
   String? _recordPath;
 
-  // Thinking step labels — mirrors the JSX prototype sequence.
-  static const _kThinkingSteps = [
-    'parsing your message',
-    'matching USDA database',
-    'cross-checking nutrition data',
-    'compiling nutrition data',
-  ];
+  // Thinking step labels — locale-aware, mirrors the JSX prototype sequence.
+  List<String> get _kThinkingSteps {
+    final isRu = Localizations.localeOf(context).languageCode == 'ru';
+    return isRu
+        ? [
+            'анализирую сообщение',
+            'ищу в базе данных',
+            'проверяю нутриенты',
+            'формирую ответ',
+          ]
+        : [
+            'parsing your message',
+            'matching USDA database',
+            'cross-checking nutrition data',
+            'compiling nutrition data',
+          ];
+  }
 
 
   @override
