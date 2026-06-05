@@ -10,6 +10,7 @@
 
 import 'package:flutter/material.dart';
 
+import '../../core/i18n/generated/app_localizations.dart';
 import '../models/k2_meal_row_data.dart';
 import '../theme/kayfit2_theme.dart';
 import 'kayfit2_meal_photo.dart';
@@ -425,6 +426,7 @@ class _MacroLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final dimStyle = TextStyle(
       fontFamily: K2Fonts.mono,
       fontSize: 11,
@@ -439,11 +441,11 @@ class _MacroLine extends StatelessWidget {
       TextSpan(
         style: dimStyle,
         children: [
-          TextSpan(text: 'P ${meal.protein}'),
+          TextSpan(text: '${l10n.macro_protein_abbr} ${meal.protein}'),
           TextSpan(text: '  ·  ', style: sepStyle),
-          TextSpan(text: 'F ${meal.fat}'),
+          TextSpan(text: '${l10n.macro_fat_abbr} ${meal.fat}'),
           TextSpan(text: '  ·  ', style: sepStyle),
-          TextSpan(text: 'C ${meal.carbs}'),
+          TextSpan(text: '${l10n.macro_carbs_abbr} ${meal.carbs}'),
         ],
       ),
     );
@@ -458,6 +460,7 @@ class _KcalColumn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.end,
       mainAxisSize: MainAxisSize.min,
@@ -474,7 +477,7 @@ class _KcalColumn extends StatelessWidget {
           ),
         ),
         Text(
-          'KCAL',
+          l10n.macro_kcal.toUpperCase(),
           style: TextStyle(
             fontSize: 9,
             color: theme.fgMute,
