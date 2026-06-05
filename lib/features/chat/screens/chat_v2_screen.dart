@@ -1448,6 +1448,7 @@ class _EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = theme;
+    final isRu = Localizations.localeOf(context).languageCode == 'ru';
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 32),
@@ -1467,7 +1468,7 @@ class _EmptyState extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             Text(
-              'nothing logged yet',
+              isRu ? 'ещё ничего не записано' : 'nothing logged yet',
               style: TextStyle(
                 fontFamily: K2Fonts.mono,
                 fontSize: 13,
@@ -1476,7 +1477,7 @@ class _EmptyState extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              'ask or describe what you ate',
+              isRu ? 'спросите или опишите что съели' : 'ask or describe what you ate',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontFamily: K2Fonts.sans,
@@ -2060,6 +2061,7 @@ class _InputPillState extends State<_InputPill>
   @override
   Widget build(BuildContext context) {
     final t = widget.theme;
+    final isRu = Localizations.localeOf(context).languageCode == 'ru';
     final bottomPad = MediaQuery.of(context).padding.bottom;
 
     return Container(
@@ -2088,7 +2090,7 @@ class _InputPillState extends State<_InputPill>
                   color: t.fg,
                 ),
                 decoration: InputDecoration(
-                  hintText: 'ask or describe what you ate',
+                  hintText: isRu ? 'спросите или опишите что съели' : 'ask or describe what you ate',
                   hintStyle: TextStyle(
                     fontFamily: K2Fonts.sans,
                     fontSize: 14,

@@ -169,34 +169,16 @@ class _CenterColumn extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        // Type badge row (+ time when photo row)
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.baseline,
-          textBaseline: TextBaseline.alphabetic,
-          children: [
-            Text(
-              meal.type.toUpperCase(),
-              style: TextStyle(
-                fontSize: 10,
-                color: theme.fgMute,
-                letterSpacing: 1,
-                height: 1.2,
-              ),
+        if (meal.hasPhoto)
+          Text(
+            meal.time,
+            style: TextStyle(
+              fontFamily: K2Fonts.mono,
+              fontSize: 10,
+              color: theme.fgMute,
+              height: 1.2,
             ),
-            if (meal.hasPhoto) ...[
-              const SizedBox(width: 6),
-              Text(
-                '· ${meal.time}',
-                style: TextStyle(
-                  fontFamily: K2Fonts.mono,
-                  fontSize: 10,
-                  color: theme.fgMute,
-                  height: 1.2,
-                ),
-              ),
-            ],
-          ],
-        ),
+          ),
         const SizedBox(height: 2),
         // Meal name
         Text(
