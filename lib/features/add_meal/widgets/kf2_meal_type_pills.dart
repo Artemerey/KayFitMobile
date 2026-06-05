@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../core/i18n/generated/app_localizations.dart';
 import '../../../shared/theme/kayfit2_theme.dart';
 
 /// Horizontal row of pill tabs for selecting the meal type.
@@ -19,22 +20,22 @@ class KF2MealTypePills extends StatelessWidget {
   final ValueChanged<String> onChanged;
   final K2Theme theme;
 
-  static const _options = [
-    ('breakfast', 'Breakfast'),
-    ('lunch', 'Lunch'),
-    ('dinner', 'Dinner'),
-    ('snack', 'Snack'),
-    ('other', 'Other'),
-  ];
-
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final options = [
+      ('breakfast', l10n.mealType_breakfast),
+      ('lunch', l10n.mealType_lunch),
+      ('dinner', l10n.mealType_dinner),
+      ('snack', l10n.mealType_snack),
+      ('other', l10n.mealType_other),
+    ];
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
       child: Row(
         children: [
-          for (final (value, label) in _options) ...[
+          for (final (value, label) in options) ...[
             _Pill(
               label: label,
               isActive: selected == value,

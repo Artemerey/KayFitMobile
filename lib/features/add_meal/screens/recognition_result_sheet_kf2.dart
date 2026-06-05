@@ -1,4 +1,4 @@
-import 'package:dio/dio.dart' show Options;
+import 'package:dio/dio.dart' show DioException, Options;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -255,6 +255,12 @@ class _RecognitionResultSheetKF2State
         HapticFeedback.mediumImpact();
       }
       return null;
+    } on DioException catch (e) {
+      final status = e.response?.statusCode;
+      if (status == 401) return 'Session expired. Please restart the app and log in again.';
+      if (status == 422) return 'Invalid request. Please try a different correction.';
+      if (status != null) return 'Server error ($status). Try again in a moment.';
+      return 'Network error. Check your connection and try again.';
     } on Exception catch (e) {
       return e.toString();
     }
@@ -429,7 +435,7 @@ class _RecognitionResultSheetKF2State
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
                       child: Text(
-                        'ITEMS · TAP ✏ TO EDIT',
+                        AppLocalizations.of(context)!.recognition_items_label,
                         style: TextStyle(
                           fontFamily: K2Fonts.sans,
                           fontSize: 10,
@@ -505,7 +511,13 @@ class _RecognitionResultSheetKF2State
                 width: double.infinity,
                 height: 52,
                 child: GestureDetector(
-                  onTap: (_state.saving || isEmpty) ? null : _save,
+                  onTap: (_state.saving || isEmpty) ? null : () {
+                    // Dismiss keyboard and flush any pending weight edits
+                    // before saving — the weight text field debounce may not
+                    // have fired yet if the user typed and immediately tapped Save.
+                    FocusScope.of(context).unfocus();
+                    _save();
+                  },
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 150),
                     decoration: BoxDecoration(
@@ -525,7 +537,7 @@ class _RecognitionResultSheetKF2State
                               ),
                             )
                           : Text(
-                              'save to journal',
+                              AppLocalizations.of(context)!.recognition_save_to_journal,
                               style: TextStyle(
                                 fontFamily: K2Fonts.sans,
                                 fontSize: 14,

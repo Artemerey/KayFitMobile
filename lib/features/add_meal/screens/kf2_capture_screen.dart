@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:kayfit/shared/theme/kayfit2_theme.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 /// KF2-RECOG: Capture screen.
 ///
@@ -53,6 +54,27 @@ class _Kf2CaptureScreenState extends State<Kf2CaptureScreen>
   Future<void> _pick(ImageSource source) async {
     if (_picking) return;
     HapticFeedback.mediumImpact();
+
+    // Request camera permission before opening the picker. On first launch iOS
+    // shows the permission dialog concurrently with UIImagePickerController,
+    // which causes pickImage to return null. Requesting upfront ensures the
+    // dialog is resolved before the picker opens.
+    if (source == ImageSource.camera) {
+      final status = await Permission.camera.request();
+      if (!mounted) return;
+      if (!status.isGranted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Camera access is required to take photos.'),
+            behavior: SnackBarBehavior.floating,
+            backgroundColor: K2Colors.error,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+        );
+        return;
+      }
+    }
+
     setState(() => _picking = true);
 
     try {

@@ -183,11 +183,15 @@ Qwen → retry ×2 (exponential backoff) → degraded response
 
 ## Порядок исполнения
 
-- [ ] Фаза 1: Заменить `recognize_photo` на Qwen3-VL-Flash + Variant B промпт
-- [ ] Фаза 1: Обновить `endpoint_recognize_photo_v2.py` и `recognize_photo_v2.py`
-- [ ] Фаза 1: Добавить провайдерный слой `app/llm/`
-- [ ] Фаза 2: Перевести `parse_meal`, `search_products`, `detect_brand` на qwen-turbo
-- [ ] Фаза 2: Добавить справочник порций в parse_meal промпт
-- [ ] USDA fix: Qwen-нормализатор перед USDA lookup
-- [ ] Фаза 3: FatSecret интеграция (после USDA fix)
-- [ ] Фаза 3: КБЖУ pipeline: USDA → FatSecret → Qwen fallback
+> **Статус проверен: 2026-06-04**
+> Реализация выбрана: **adapter pattern** в `clients.py` — `get_anthropic_client()` возвращает `QwenAnthropicAdapter`.
+> Все call sites (`ai_service_v2.py`) работают без изменений. Anthropic SDK не вызывается.
+
+- [x] Фаза 1: Заменить `recognize_photo` на Qwen3-VL-Flash — **DONE** (via adapter, все vision-запросы → qwen3-vl-flash)
+- [x] Фаза 1: Добавить провайдерный слой `app/llm/` — **DONE** (частично: qwen_adapter.py + errors.py + image_utils.py; без base.py/router.py/prompts/)
+- [x] Фаза 2: Перевести `parse_meal`, `search_products`, `detect_brand` на qwen-turbo — **DONE** (via adapter)
+- [ ] Фаза 1: `qwen3-vl-plus` fallback при невалидном JSON / 0 ингредиентов — **НЕ РЕАЛИЗОВАНО** (адаптер делает retry только на 5xx)
+- [ ] Фаза 2: Добавить справочник порций в parse_meal промпт — **НЕ ПРОВЕРЕНО**
+- [ ] USDA fix: Qwen-нормализатор перед USDA lookup — **НЕ РЕАЛИЗОВАНО**
+- [ ] Фаза 3: FatSecret интеграция — **ОТМЕНЕНА** (FatSecret removed May 2026)
+- [ ] Фаза 3: КБЖУ pipeline: USDA → FatSecret → Qwen fallback — **ЧАСТИЧНО**: сейчас DB cache → Qwen batch (без USDA нормализатора)

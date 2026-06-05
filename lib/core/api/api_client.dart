@@ -68,6 +68,14 @@ class _AuthInterceptor extends Interceptor {
   /// All concurrent 401s wait on this and retry with the new token.
   Completer<String?>? _refreshCompleter;
 
+  // In-memory fallback for the access token. Updated immediately after a
+  // successful refresh so subsequent requests use the new token even when the
+  // keychain write fails silently (PlatformException swallowed in saveTokens).
+  // The backend uses refresh token rotation — a revoked refresh token causes
+  // the server to revoke ALL user tokens, so we must avoid re-sending a
+  // refresh token that was already consumed.
+  String? _inMemoryAccessToken;
+
   static bool _isAuthPath(String path) =>
       path.contains('/api/v1/auth/login') ||
       path.contains('/api/v1/auth/register') ||
@@ -80,7 +88,11 @@ class _AuthInterceptor extends Interceptor {
     RequestInterceptorHandler handler,
   ) async {
     if (!_isAuthPath(options.path)) {
-      final token = await _storage.loadAccessToken();
+      // Prefer the in-memory token (set right after a successful refresh) over
+      // the keychain read. If the keychain write failed silently after a prior
+      // refresh, _inMemoryAccessToken has the fresh token while the keychain
+      // still holds the expired one.
+      final token = _inMemoryAccessToken ?? await _storage.loadAccessToken();
       if (token != null) {
         options.headers['Authorization'] = 'Bearer $token';
       }
@@ -151,6 +163,12 @@ class _AuthInterceptor extends Interceptor {
       final data = resp.data as Map<String, dynamic>;
       newAccess = data['access_token'] as String;
       final newPair = TokenPair.fromApiResponse(data);
+      // Cache in memory immediately — saveTokens may fail silently with a
+      // PlatformException (keychain temporarily unavailable). Without this,
+      // subsequent requests read the old expired token from keychain, re-send
+      // the already-consumed refresh token, and the backend (rotation policy)
+      // revokes all sessions for the user.
+      _inMemoryAccessToken = newAccess;
       await _storage.saveTokens(newPair);
 
       if (!_refreshCompleter!.isCompleted) {

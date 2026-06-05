@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../../core/i18n/generated/app_localizations.dart';
 import '../../../shared/models/ingredient_v2.dart';
 import '../../../shared/models/nutrients_v2.dart';
 import '../../../shared/theme/kayfit2_theme.dart';
@@ -42,16 +43,13 @@ class KF2HeroTotal extends StatelessWidget {
       (s, i) => s + i.nutrientsPer100g.glycemicIndex!,
     );
     final avg = (sum / giItems.length).round();
-    final category = avg < 55
-        ? 'Low'
-        : avg < 70
-            ? 'Med'
-            : 'High';
+    final category = avg < 55 ? 'low' : avg < 70 ? 'med' : 'high';
     return (gi: avg, category: category);
   }
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final gi = _avgGi();
 
     return Padding(
@@ -75,7 +73,7 @@ class KF2HeroTotal extends StatelessWidget {
               ),
               if (gi != null) ...[
                 const SizedBox(width: 10),
-                _GiBadge(gi: gi.gi, category: gi.category),
+                _GiBadge(gi: gi.gi, category: gi.category, l10n: l10n),
               ],
             ],
           ),
@@ -88,29 +86,29 @@ class KF2HeroTotal extends StatelessWidget {
             children: [
               _MacroCircle(
                 value: totals.calories.toStringAsFixed(0),
-                unit: 'kcal',
-                label: 'kcal',
+                unit: l10n.macro_kcal,
+                label: l10n.macro_kcal,
                 color: _kcalColor,
                 theme: theme,
               ),
               _MacroCircle(
                 value: totals.protein.toStringAsFixed(0),
-                unit: 'g',
-                label: 'Protein',
+                unit: l10n.macro_g,
+                label: l10n.macro_protein,
                 color: _proteinColor,
                 theme: theme,
               ),
               _MacroCircle(
                 value: totals.fat.toStringAsFixed(0),
-                unit: 'g',
-                label: 'Fat',
+                unit: l10n.macro_g,
+                label: l10n.macro_fat,
                 color: _fatColor,
                 theme: theme,
               ),
               _MacroCircle(
                 value: totals.carbs.toStringAsFixed(0),
-                unit: 'g',
-                label: 'Carbs',
+                unit: l10n.macro_g,
+                label: l10n.macro_carbs,
                 color: _carbsColor,
                 theme: theme,
               ),
@@ -125,10 +123,15 @@ class KF2HeroTotal extends StatelessWidget {
 // ── Glycemic index badge ──────────────────────────────────────────────────────
 
 class _GiBadge extends StatelessWidget {
-  const _GiBadge({required this.gi, required this.category});
+  const _GiBadge({
+    required this.gi,
+    required this.category,
+    required this.l10n,
+  });
 
   final int gi;
   final String category;
+  final AppLocalizations l10n;
 
   Color get _bg {
     if (gi < 55) return const Color(0xFF22C55E);
@@ -146,7 +149,11 @@ class _GiBadge extends StatelessWidget {
         border: Border.all(color: _bg.withValues(alpha: 0.35), width: 1),
       ),
       child: Text(
-        'GI $gi · $category',
+        '${l10n.recogV2_gi_label} $gi · ${switch (category) {
+          'low' => l10n.recogV2_gi_low,
+          'med' => l10n.recogV2_gi_medium,
+          _ => l10n.recogV2_gi_high,
+        }}',
         style: TextStyle(
           fontFamily: K2Fonts.mono,
           fontSize: 10,

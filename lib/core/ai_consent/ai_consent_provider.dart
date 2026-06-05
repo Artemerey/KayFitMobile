@@ -19,6 +19,13 @@ const _kLocalConsentKey = kAiConsentLocalKey;
 /// + AuthInterceptor refresh (~3s) + retry (~3s) on slow mobile networks.
 const _kConsentTimeout = Duration(seconds: 20);
 
+/// True once the initial consent state has been resolved — either from
+/// SharedPreferences (fast path, pre-seeded in main.dart) or from the server
+/// (slow path, on reinstall where SharedPreferences was cleared but the
+/// Keychain auth token survived).  The router waits for this to be true
+/// before redirecting to /ai-consent so returning users never see a flash.
+final aiConsentReadyProvider = StateProvider<bool>((ref) => false);
+
 /// null = not yet fetched / never answered
 /// true = accepted
 /// false = declined
@@ -31,10 +38,21 @@ class AiConsentNotifier extends Notifier<bool?> {
   @override
   bool? build() {
     if (_initial == null) {
-      // No pre-seeded value — load async (first-launch or fresh install).
-      Future.microtask(_loadLocal);
+      // No pre-seeded value (reinstall or fresh install) — resolve async.
+      // _initialize tries local first, then server, then marks ready.
+      Future.microtask(_initialize);
     }
     return _initial;
+  }
+
+  Future<void> _initialize() async {
+    await _loadLocal();
+    if (state == null) {
+      // Nothing locally (e.g. reinstall) — check server.  Silently swallows
+      // network errors via load()'s own fallback to _loadLocal.
+      await load();
+    }
+    ref.read(aiConsentReadyProvider.notifier).state = true;
   }
 
   Future<void> _loadLocal() async {
@@ -60,28 +78,32 @@ class AiConsentNotifier extends Notifier<bool?> {
     }
   }
 
-  /// Persists consent, syncs with server.
-  /// Throws [TimeoutException] if the server does not respond within 5 s.
-  /// Throws [DioException] on network errors.
+  /// Persists consent locally and syncs with server best-effort.
+  /// Throws [DioException] with status 401 only (session expired → logout).
+  /// Timeouts and other network errors are logged but do not block the caller —
+  /// the local save already recorded the user's choice.
   Future<void> setConsent(bool value) async {
     debugPrint('[ai_consent] setConsent($value) START');
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kLocalConsentKey, value);
+    state = value; // update state from local save immediately
     try {
       final resp = await apiDio
           .post('/api/user/ai_consent', data: {'consent': value})
           .timeout(_kConsentTimeout);
       debugPrint('[ai_consent] OK status=${resp.statusCode}');
-      state = value;
     } on TimeoutException {
-      debugPrint('[ai_consent] TIMEOUT after $_kConsentTimeout');
-      rethrow;
+      // Local save succeeded — don't block the user on a slow network.
+      debugPrint('[ai_consent] server sync timeout — proceeding with local value');
     } on DioException catch (e) {
       debugPrint('[ai_consent] DIOERR type=${e.type} '
           'status=${e.response?.statusCode} '
           'body=${e.response?.data} '
           'msg=${e.message}');
-      rethrow;
+      if (e.response?.statusCode == 401) {
+        rethrow; // session expired — screen handles logout
+      }
+      // Other network errors: local save succeeded, proceed silently.
     }
   }
 }

@@ -10,7 +10,7 @@ import '../../../core/api/api_client.dart';
 import '../../../shared/models/ingredient_v2.dart';
 import '../../../shared/models/nutrients_v2.dart';
 import '../../../shared/theme/app_theme.dart';
-import 'recognition_result_sheet_v2.dart';
+import 'recognition_result_sheet_kf2.dart';
 
 // ── State machine ─────────────────────────────────────────────────────────────
 
@@ -143,7 +143,7 @@ class _BarcodeScannerScreenV2State extends State<BarcodeScannerScreenV2>
           initialChildSize: 0.92,
           minChildSize: 0.5,
           maxChildSize: 0.95,
-          builder: (_, scrollController) => RecognitionResultSheetV2(
+          builder: (_, scrollController) => RecognitionResultSheetKF2(
             dishName: productName,
             ingredients: [ingV2],
           ),

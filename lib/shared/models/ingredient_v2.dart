@@ -13,6 +13,7 @@ class IngredientV2 {
   final String source;
   final String? sourceUrl;
   final bool selected;
+  final bool needsManualEntry;
 
   const IngredientV2({
     required this.name,
@@ -22,6 +23,7 @@ class IngredientV2 {
     this.source = 'claude',
     this.sourceUrl,
     this.selected = true,
+    this.needsManualEntry = false,
   });
 
   /// Parse from a v2 API item that contains both `nutrients_per_100g` and
@@ -59,6 +61,7 @@ class IngredientV2 {
       nutrientsTotal: total,
       source: item['source'] as String? ?? 'claude',
       sourceUrl: item['source_url'] as String?,
+      needsManualEntry: item['needs_manual_entry'] as bool? ?? false,
     );
   }
 
@@ -93,8 +96,15 @@ class IngredientV2 {
       nutrientsTotal: total,
       source: item['source'] as String? ?? 'claude',
       sourceUrl: item['source_url'] as String?,
+      needsManualEntry: item['needs_manual_entry'] as bool? ?? false,
     );
   }
+
+  /// True when there are no known nutrients AND the user hasn't filled them in.
+  /// Combines the backend signal (`needsManualEntry`) with the current data
+  /// state (`nutrientsTotal.calories == 0`) so UI consumers have one predicate.
+  bool get needsManualNutrition =>
+      needsManualEntry && nutrientsTotal.calories == 0;
 
   IngredientV2 copyWith({
     String? name,
@@ -104,6 +114,7 @@ class IngredientV2 {
     String? source,
     String? sourceUrl,
     bool? selected,
+    bool? needsManualEntry,
   }) {
     return IngredientV2(
       name: name ?? this.name,
@@ -113,6 +124,7 @@ class IngredientV2 {
       source: source ?? this.source,
       sourceUrl: sourceUrl ?? this.sourceUrl,
       selected: selected ?? this.selected,
+      needsManualEntry: needsManualEntry ?? this.needsManualEntry,
     );
   }
 

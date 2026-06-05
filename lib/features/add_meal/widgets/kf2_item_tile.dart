@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -41,9 +39,9 @@ class KF2ItemTile extends StatefulWidget {
 class _KF2ItemTileState extends State<KF2ItemTile> {
   late final TextEditingController _weightCtrl;
   late final FocusNode _weightFocus;
-  Timer? _debounce;
 
-  bool _editingMacros = false;
+  late bool _editingMacros;
+  bool _weightFocused = false;
 
   late final TextEditingController _proteinCtrl;
   late final TextEditingController _fatCtrl;
@@ -55,6 +53,7 @@ class _KF2ItemTileState extends State<KF2ItemTile> {
   @override
   void initState() {
     super.initState();
+    _editingMacros = widget.item.needsManualNutrition;
     final w = widget.item.weightGrams;
     _weightCtrl = TextEditingController(text: w.toStringAsFixed(0));
     _weightFocus = FocusNode()..addListener(_onWeightFocusChange);
@@ -92,6 +91,13 @@ class _KF2ItemTileState extends State<KF2ItemTile> {
       _syncMacroField(_fatCtrl, n.fat);
       _syncMacroField(_carbsCtrl, n.carbs);
     }
+    // Edge-triggered: open macro editor when item transitions into the
+    // "needs manual nutrition" state (e.g. after an undo that clears calories).
+    final wasNeeded = old.item.needsManualNutrition;
+    final isNeeded = widget.item.needsManualNutrition;
+    if (!wasNeeded && isNeeded) {
+      setState(() => _editingMacros = true);
+    }
   }
 
   void _syncMacroField(TextEditingController ctrl, double value) {
@@ -106,7 +112,6 @@ class _KF2ItemTileState extends State<KF2ItemTile> {
 
   @override
   void dispose() {
-    _debounce?.cancel();
     _weightFocus
       ..removeListener(_onWeightFocusChange)
       ..dispose();
@@ -121,21 +126,25 @@ class _KF2ItemTileState extends State<KF2ItemTile> {
   }
 
   void _onWeightFocusChange() {
-    if (_weightFocus.hasFocus) return;
-    final w = double.tryParse(_weightCtrl.text.trim());
-    if (w != null && w > 0 && w != widget.item.weightGrams) {
-      widget.onWeightChanged(w);
+    final focused = _weightFocus.hasFocus;
+    if (_weightFocused != focused) setState(() => _weightFocused = focused);
+    if (!focused) {
+      // Apply any pending value on focus loss (e.g. tap elsewhere).
+      final w = double.tryParse(_weightCtrl.text.trim());
+      if (w != null && w > 0 && w != widget.item.weightGrams) {
+        widget.onWeightChanged(w);
+      }
     }
   }
 
   void _onWeightChanged(String v) {
-    _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 300), () {
-      final w = double.tryParse(v.trim());
-      if (w != null && w > 0 && w != widget.item.weightGrams) {
-        widget.onWeightChanged(w);
-      }
-    });
+    // Apply immediately so _state in the parent sheet is always up to date.
+    // This ensures that pressing Save right after typing uses the correct weight
+    // rather than waiting for a debounce timer.
+    final w = double.tryParse(v.trim());
+    if (w != null && w > 0 && w != widget.item.weightGrams) {
+      widget.onWeightChanged(w);
+    }
   }
 
   void _onMacroChanged() {
@@ -184,6 +193,7 @@ class _KF2ItemTileState extends State<KF2ItemTile> {
     final item = widget.item;
     final n = item.nutrientsTotal;
     final t = widget.theme;
+    final l10n = AppLocalizations.of(context)!;
 
     return AnimatedSize(
       duration: const Duration(milliseconds: 220),
@@ -255,7 +265,7 @@ class _KF2ItemTileState extends State<KF2ItemTile> {
             const SizedBox(height: 4),
             _SourceBadge(source: item.source, theme: t),
             const SizedBox(height: 6),
-            // ── Row 2: weight pill · P·F·C ───────────────────────────────
+            // ── Row 2: weight pill · apply button · P·F·C ────────────────
             Row(
               children: [
                 _WeightPill(
@@ -264,34 +274,75 @@ class _KF2ItemTileState extends State<KF2ItemTile> {
                   isInvalid: _weightInvalid,
                   onChanged: _onWeightChanged,
                   onSubmitted: (v) {
-                    final w = double.tryParse(v);
-                    if (w != null && w > 0) widget.onWeightChanged(w);
+                    _onWeightChanged(v);
                     FocusScope.of(context).unfocus();
                   },
                   theme: t,
                 ),
-                const SizedBox(width: 6),
+                const SizedBox(width: 4),
                 Text(
-                  ' g',
+                  l10n.macro_g,
                   style: TextStyle(
                     fontFamily: K2Fonts.mono,
                     fontSize: 12,
                     color: t.fgMute,
                   ),
                 ),
-                const SizedBox(width: 10),
-                Text(
-                  'P ${n.protein.toStringAsFixed(0)} · '
-                  'F ${n.fat.toStringAsFixed(0)} · '
-                  'C ${n.carbs.toStringAsFixed(0)}',
-                  style: TextStyle(
-                    fontFamily: K2Fonts.mono,
-                    fontSize: 11,
-                    color: t.fgMute,
+                if (_weightFocused) ...[
+                  const SizedBox(width: 6),
+                  GestureDetector(
+                    onTap: () => FocusScope.of(context).unfocus(),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: K2Colors.accent,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.check,
+                        size: 14,
+                        color: Colors.white,
+                      ),
+                    ),
                   ),
-                ),
+                ] else
+                  const SizedBox(width: 10),
+                if (!_weightFocused)
+                  Text(
+                    '${l10n.macro_protein_abbr} ${n.protein.toStringAsFixed(0)} · '
+                    '${l10n.macro_fat_abbr} ${n.fat.toStringAsFixed(0)} · '
+                    '${l10n.macro_carbs_abbr} ${n.carbs.toStringAsFixed(0)}',
+                    style: TextStyle(
+                      fontFamily: K2Fonts.mono,
+                      fontSize: 11,
+                      color: t.fgMute,
+                    ),
+                  ),
               ],
             ),
+            // ── Manual entry warning ─────────────────────────────────────
+            if (item.needsManualNutrition) ...[
+              const SizedBox(height: 6),
+              GestureDetector(
+                onTap: () => setState(() => _editingMacros = true),
+                child: Row(
+                  children: [
+                    Icon(Icons.warning_amber_rounded,
+                        size: 13, color: Colors.orange.shade700),
+                    const SizedBox(width: 4),
+                    Text(
+                      l10n.item_enter_nutrition_manually,
+                      style: TextStyle(
+                        fontFamily: K2Fonts.sans,
+                        fontSize: 11,
+                        color: Colors.orange.shade700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             // ── Macro inline edit ────────────────────────────────────────
             if (_editingMacros) ...[
               const SizedBox(height: 10),
