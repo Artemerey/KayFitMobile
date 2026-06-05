@@ -10,6 +10,7 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
+import '../../core/i18n/generated/app_localizations.dart';
 import '../theme/kayfit2_theme.dart';
 
 @immutable
@@ -180,33 +181,34 @@ class KayfitRingsLegend extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final rows = <_LegendRow>[
       _LegendRow(
-        label: 'kcal',
+        label: l10n.macro_kcal,
         value: values.kcal.toInt().toString(),
         goal: values.kcalGoal.toInt().toString(),
         unit: '',
         color: K2RingColors.kcal.to,
       ),
       _LegendRow(
-        label: 'protein',
+        label: l10n.macro_protein,
         value: values.protein.toInt().toString(),
         goal: values.proteinGoal.toInt().toString(),
-        unit: 'g',
+        unit: l10n.macro_g,
         color: K2RingColors.protein.to,
       ),
       _LegendRow(
-        label: 'carbs',
+        label: l10n.macro_carbs,
         value: values.carbs.toInt().toString(),
         goal: values.carbsGoal.toInt().toString(),
-        unit: 'g',
+        unit: l10n.macro_g,
         color: K2RingColors.carbs.to,
       ),
       _LegendRow(
-        label: 'fat',
+        label: l10n.macro_fat,
         value: values.fat.toInt().toString(),
         goal: values.fatGoal.toInt().toString(),
-        unit: 'g',
+        unit: l10n.macro_g,
         color: K2RingColors.fat.to,
       ),
     ];
@@ -233,7 +235,7 @@ class KayfitRingsLegend extends StatelessWidget {
         ),
         const SizedBox(width: 8),
         SizedBox(
-          width: 50,
+          width: 65,
           child: Text(
             r.label,
             style: TextStyle(
@@ -242,6 +244,8 @@ class KayfitRingsLegend extends StatelessWidget {
               letterSpacing: 0.8,
               fontFamily: K2Fonts.sans,
             ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             textWidthBasis: TextWidthBasis.parent,
           ),
         ),

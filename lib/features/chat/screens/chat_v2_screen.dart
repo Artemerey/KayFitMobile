@@ -45,6 +45,7 @@ import '../../../features/journal/screens/journal_screen.dart'
     show journalDayMealsProvider;
 import '../../../shared/models/ingredient_v2.dart';
 import '../providers/pending_meal_provider.dart';
+import '../providers/chat_history_provider.dart';
 import '../../../shared/models/stats.dart';
 import '../../../shared/theme/kayfit2_theme.dart';
 import '../../../shared/utils/nutrient_parser.dart';
@@ -101,7 +102,6 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
   /// so the latest message stays visible above the keyboard.
   double _lastBottomInset = 0;
 
-  final List<ChatMessage> _messages = [];
   _ThinkingState? _thinking;
 
   // Pending "Add to journal" card state lives in `pendingMealProvider` so it
@@ -139,58 +139,6 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     'compiling nutrition data',
   ];
 
-  /// Heuristic intent detector. If the message looks like a meal-logging
-  /// request (past-tense verbs, explicit "add/log", or a grams/volume token)
-  /// the chat is routed to the meal parser instead of the consultant.
-  ///
-  /// `\b` boundaries do NOT work for Cyrillic in Dart RegExp even with
-  /// `unicode: true` — so Cyrillic verbs are wrapped in `(^|<sep>)` /
-  /// `(<sep>|$)` patterns. Latin alternatives keep `\b`.
-  ///
-  /// False negatives fall through to the consultant — user retypes with
-  /// an explicit "ate ...". False positives fall back to the consultant
-  /// when the parser returns no items.
-  static final _kFoodIntent = RegExp(
-    // Cyrillic verbs (boundary via whitespace/punct/start/end)
-    r'(^|[\s.,!?:;\-])('
-    // ел/съел family
-    r'съел|съела|съели|поел|поела|поели|доел|доела|доели|'
-    // colloquial / разговорное "ate"
-    r'скушал|скушала|скушали|кушал|кушала|кушали|'
-    r'слопал|слопала|слопали|умял|умяла|умяли|'
-    r'сожрал|сожрала|сожрали|схомячил|схомячила|'
-    r'хватанул|хватанула|заточил|заточила|'
-    r'проглотил|проглотила|зажевал|зажевала|'
-    r'употребил|употребила|потребил|потребила|'
-    // приёмы пищи
-    r'перекусил|перекусила|перекусили|закусил|закусила|'
-    r'позавтракал|позавтракала|пообедал|пообедала|поужинал|поужинала|'
-    // напитки
-    r'выпил|выпила|выпили|допил|допила|потягивал|'
-    // bag-it verbs
-    r'закинул|закинула|перехватил|перехватила|'
-    // explicit add/log
-    r'добавь|добавить|добавил|добавила|'
-    r'записать|записал|записала|'
-    r'залогать|залогай|залогируй|залогировал|'
-    r'отметь|отметить|отметил|отметила'
-    r')([\s.,!?:;\-]|$)'
-    // Latin verbs (\b works fine for ASCII)
-    r'|\b('
-    r'ate|eaten|drank|drunk|'
-    r'eat|eating|chowed|gobbled|devoured|snacked|polished|downed|'
-    r'i\s+had|i\s+ate|i\s+drank|i\s+ve\s+had|ive\s+had|'
-    r'just\s+had|just\s+ate|just\s+drank|just\s+finished|'
-    r'finished\s+(a|the|my)|had\s+(a|some|the|my)|'
-    r'breakfast\s+was|lunch\s+was|dinner\s+was|snack\s+was|'
-    r'log|logged|add|added|track|tracked|record|recorded|note'
-    r')\b'
-    // Grams / ml / pieces token (any locale, both orders)
-    r'|\d+\s*(г|гр|грамм|грамма|граммов|g|gr|gram|grams|ml|мл|шт|штук|штуки|pcs|piece|pieces)(\b|\s|$|[.,!?])'
-    r'|(г|гр|грамм|граммов|g|grams)\s*\d+',
-    caseSensitive: false,
-    unicode: true,
-  );
 
   @override
   void initState() {
@@ -199,7 +147,14 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     try {
       AnalyticsService.chatOpened();
     } catch (_) {}
-    _loadHistory();
+    // If the provider already has messages (survived a tab switch), show them
+    // immediately and refresh in the background. If empty, show loading state.
+    final cached = ref.read(chatHistoryProvider);
+    if (cached.isEmpty) {
+      _loadHistory();
+    } else {
+      unawaited(_loadHistory());
+    }
     // If the user navigated away during recognition and comes back, the
     // provider might already be in done state — show the result sheet.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -260,27 +215,25 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
           .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
           .toList();
       final local = await _loadLocalMessages();
-      // Drop locals older than the oldest server message we got — keeps the
-      // store from ballooning if /clear is hit on the backend; user-visible
-      // history is still continuous.
-      final merged = [...server, ...local]
+      // Deduplicate: drop local copies of messages already on the server
+      // (a local message that was also POSTed to /api/chat/send would
+      // otherwise show twice after the background refresh).
+      final serverKeys =
+          server.map((m) => '${m.role}:${m.content}').toSet();
+      final dedupedLocal = local
+          .where((m) => !serverKeys.contains('${m.role}:${m.content}'))
+          .toList();
+      final merged = [...server, ...dedupedLocal]
         ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
-      setState(() {
-        _messages
-          ..clear()
-          ..addAll(merged);
-      });
+      if (!mounted) return;
+      ref.read(chatHistoryProvider.notifier).setMessages(merged);
       _scrollToBottom();
     } on Exception {
       // Even if the server fetch fails, surface local-only messages so the
       // user keeps their meal-add receipts.
       final local = await _loadLocalMessages();
       if (mounted && local.isNotEmpty) {
-        setState(() {
-          _messages
-            ..clear()
-            ..addAll(local);
-        });
+        ref.read(chatHistoryProvider.notifier).setMessages(local);
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -362,15 +315,19 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
       createdAt: DateTime.now(),
     );
 
+    // Persist user message into the global provider immediately — this
+    // survives navigation even if the send is still in flight.
+    ref.read(chatHistoryProvider.notifier).add(userMsg);
+    // Also persist locally so it appears in the local-merge path on reload.
+    unawaited(_persistLocalMessage(userMsg));
     setState(() {
-      _messages.add(userMsg);
       _isSending = true;
       _thinking = _ThinkingState(steps: [_kThinkingSteps[0]], done: false);
     });
     _scrollToBottom();
 
     try {
-      AnalyticsService.chatMessageSent(_messages.length);
+      AnalyticsService.chatMessageSent(ref.read(chatHistoryProvider).length);
     } catch (_) {}
 
     // ── Router ───────────────────────────────────────────────────────────
@@ -382,7 +339,13 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     final pendingOrig = _pendingClarifyOriginal;
     _awaitingMealClarification = false; // one-shot
     _pendingClarifyOriginal = null;
-    if (forceMealFlow || _kFoodIntent.hasMatch(text)) {
+    // Try the food parser for ANY message that doesn't contain '?' —
+    // covers verbs ("съел омлет"), plain nouns ("омлет"), voice-dictated
+    // lists ("сосиска, бургер, роллы") and everything in between.
+    // If the backend returns no items the call completes quickly and we
+    // fall through to the consultant as usual.
+    final mightBeFood = !text.contains('?');
+    if (forceMealFlow || mightBeFood) {
       // Detect language from the user's message itself, not from app locale —
       // the user can write Russian inside an English app and vice versa.
       final msgLang = _detectMessageLang(text);
@@ -438,19 +401,19 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
         resp.data['message'] as Map<String, dynamic>,
       );
       if (!mounted) return;
-      setState(() {
-        _thinking = null;
-        _messages.add(reply);
-      });
+      ref.read(chatHistoryProvider.notifier).add(reply);
+      setState(() => _thinking = null);
       try {
-        AnalyticsService.chatResponseReceived(_messages.length);
+        AnalyticsService.chatResponseReceived(
+            ref.read(chatHistoryProvider).length);
       } catch (_) {}
       _scrollToBottom();
     } on Exception {
       if (!mounted) return;
+      ref.read(chatHistoryProvider.notifier).removeLast();
       setState(() {
         _thinking = null;
-        _messages.removeLast(); // remove the optimistic user message
+        // optimistic user message already removed via notifier above
       });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -533,9 +496,9 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
           content: reply,
           createdAt: DateTime.now(),
         );
+        ref.read(chatHistoryProvider.notifier).add(clarifyMsg);
         setState(() {
           _thinking = null;
-          _messages.add(clarifyMsg);
           _awaitingMealClarification = true;
           // Remember the user's full original text so the next-turn parse
           // gets BOTH the already-resolved items (e.g. "soup 400g") and
@@ -575,6 +538,34 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
   static final _kCyrillic = RegExp(r'[а-яё]', caseSensitive: false);
   String _detectMessageLang(String text) =>
       _kCyrillic.hasMatch(text) ? 'ru' : 'en';
+
+  /// Translates English goal-type labels and formats raw floats coming from
+  /// the backend `/api/coach/advice` response when the UI language is Russian.
+  static String _localizeBackendAdvice(String text) {
+    return text
+        .replaceAll(RegExp(r'\blose weight\b', caseSensitive: false), 'похудеть')
+        .replaceAll(RegExp(r'\bgain weight\b', caseSensitive: false), 'набрать вес')
+        .replaceAll(
+            RegExp(r'\bmaintain weight\b', caseSensitive: false), 'поддерживать вес')
+        .replaceAllMapped(
+          // "(target 69.40983581542969kg)" → "(цель: 69.4 кг)"
+          RegExp(r'\(target\s+([\d.]+)\s*kg\)', caseSensitive: false),
+          (m) {
+            final raw = double.tryParse(m.group(1) ?? '');
+            final nice = raw != null ? raw.toStringAsFixed(1) : m.group(1);
+            return '(цель: $nice кг)';
+          },
+        )
+        .replaceAllMapped(
+          // standalone "target 69.4kg" without parens
+          RegExp(r'\btarget\s+([\d.]+)\s*kg\b', caseSensitive: false),
+          (m) {
+            final raw = double.tryParse(m.group(1) ?? '');
+            final nice = raw != null ? raw.toStringAsFixed(1) : m.group(1);
+            return 'цель: $nice кг';
+          },
+        );
+  }
 
   /// Builds the post-add coaching message using fresh daily stats.
   ///
@@ -696,8 +687,9 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
         0, (s, i) => s + i.nutrientsTotal.calories);
       final dishLabel = pending.map((i) => i.name).join(', ');
       // Mirror the language of the most recent user message.
-      final lastUserMsg = _messages
-          .lastWhere((m) => m.role == 'user', orElse: () => _messages.first);
+      final msgs = ref.read(chatHistoryProvider);
+      final lastUserMsg =
+          msgs.lastWhere((m) => m.role == 'user', orElse: () => msgs.first);
       final isRu = _detectMessageLang(lastUserMsg.content) == 'ru';
 
       // Fetch fresh stats (already invalidated above) for coaching message.
@@ -731,6 +723,9 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
         if (backendAdvice != null && backendAdvice.isEmpty) {
           backendAdvice = null;
         }
+        if (isRu && backendAdvice != null) {
+          backendAdvice = _localizeBackendAdvice(backendAdvice);
+        }
       } on Exception {
         // network/Claude timeout — fall back to client template below
         backendAdvice = null;
@@ -755,7 +750,7 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
         createdAt: DateTime.now(),
       );
       ref.read(pendingMealProvider.notifier).clear();
-      setState(() => _messages.add(addedMsg));
+      ref.read(chatHistoryProvider.notifier).add(addedMsg);
       unawaited(_persistLocalMessage(addedMsg));
       try {
         AnalyticsService.mealSaved(
@@ -880,8 +875,9 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
   }
 
   void _cancelPendingMeal() {
-    final lastUserMsg = _messages
-        .lastWhere((m) => m.role == 'user', orElse: () => _messages.first);
+    final msgs = ref.read(chatHistoryProvider);
+    final lastUserMsg =
+        msgs.lastWhere((m) => m.role == 'user', orElse: () => msgs.first);
     final isRu = _detectMessageLang(lastUserMsg.content) == 'ru';
     final cancelMsg = ChatMessage(
       role: 'assistant',
@@ -889,7 +885,7 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
       createdAt: DateTime.now(),
     );
     ref.read(pendingMealProvider.notifier).clear();
-    setState(() => _messages.add(cancelMsg));
+    ref.read(chatHistoryProvider.notifier).add(cancelMsg);
     unawaited(_persistLocalMessage(cancelMsg));
     _scrollToBottom();
   }
@@ -919,7 +915,11 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
 
     final lang = Localizations.localeOf(context).languageCode;
 
-    // Drop any previous result guard so the new scan can show its result.
+    // Ensure clean state before starting a new recognition. Even though
+    // clear() is called when the result sheet is dismissed, call it again
+    // here as a defensive measure — prevents stale results if the sheet was
+    // dismissed without triggering the .then() callback.
+    ref.read(photoRecognitionProvider.notifier).clear();
     _photoResultConsumed = false;
 
     // Immediately show the photo in chat with a loading indicator.
@@ -928,7 +928,7 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
       content: photo.path,
       createdAt: DateTime.now(),
     );
-    setState(() => _messages.add(photoMsg));
+    ref.read(chatHistoryProvider.notifier).add(photoMsg);
     _scrollToBottom();
 
     // Fire recognition in the background — outcome handled by ref.listen.
@@ -943,17 +943,15 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     if (!mounted || _photoResultConsumed) return;
     _photoResultConsumed = true;
 
-    setState(
-      () => _messages.removeWhere((m) => m.role == _kPhotoAnalyzingRole),
-    );
+    ref.read(chatHistoryProvider.notifier)
+        .removeWhere((m) => m.role == _kPhotoAnalyzingRole);
     _pushPhotoResult(result.dishName, result.items);
   }
 
   void _onPhotoRecognitionFailed(PhotoRecognitionState state) {
     if (!mounted) return;
-    setState(
-      () => _messages.removeWhere((m) => m.role == _kPhotoAnalyzingRole),
-    );
+    ref.read(chatHistoryProvider.notifier)
+        .removeWhere((m) => m.role == _kPhotoAnalyzingRole);
     ref.read(photoRecognitionProvider.notifier).clear();
     _photoResultConsumed = false;
 
@@ -1050,7 +1048,7 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
       content: coachText,
       createdAt: DateTime.now(),
     );
-    setState(() => _messages.add(coachMsg));
+    ref.read(chatHistoryProvider.notifier).add(coachMsg);
     unawaited(_persistLocalMessage(coachMsg));
     _scrollToBottom();
   }
@@ -1218,6 +1216,7 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
   @override
   Widget build(BuildContext context) {
     const t = K2Theme.light;
+    final messages = ref.watch(chatHistoryProvider);
     final pendingMeal = ref.watch(pendingMealProvider);
 
     // Auto-show result sheet when background photo recognition completes.
@@ -1279,11 +1278,11 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
                         strokeWidth: 2,
                       ),
                     )
-                  : _messages.isEmpty && _thinking == null
+                  : messages.isEmpty && _thinking == null
                       ? _EmptyState(theme: t)
                       : _MessageList(
                           scrollController: _scrollController,
-                          messages: _messages,
+                          messages: messages,
                           thinking: _thinking,
                           theme: t,
                         ),
@@ -2280,7 +2279,9 @@ class _PendingMealCard extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            'P ${totalP.round()} · F ${totalF.round()} · C ${totalC.round()}',
+            isRu
+              ? 'Б ${totalP.round()} · Ж ${totalF.round()} · У ${totalC.round()}'
+              : 'P ${totalP.round()} · F ${totalF.round()} · C ${totalC.round()}',
             style: TextStyle(
               fontSize: 11,
               color: theme.fgMute,

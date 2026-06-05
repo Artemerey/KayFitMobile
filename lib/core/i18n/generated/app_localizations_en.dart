@@ -72,10 +72,25 @@ class AppLocalizationsEn extends AppLocalizations {
   String get macro_carbs => 'Carbs';
 
   @override
+  String get macro_protein_abbr => 'P';
+
+  @override
+  String get macro_fat_abbr => 'F';
+
+  @override
+  String get macro_carbs_abbr => 'C';
+
+  @override
   String get macro_kcal => 'kcal';
 
   @override
   String get macro_g => 'g';
+
+  @override
+  String get recognition_save_to_journal => 'Save to journal';
+
+  @override
+  String get recognition_items_label => 'ITEMS · TAP ✏ TO EDIT';
 
   @override
   String get macro_eaten => 'eaten';
@@ -1445,4 +1460,88 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get paywall_restore_error_snack => 'Restore failed. Please try again.';
+
+  @override
+  String get item_enter_nutrition_manually => 'Enter nutrition manually';
+
+  @override
+  String get mealType_breakfast => 'Breakfast';
+
+  @override
+  String get mealType_lunch => 'Lunch';
+
+  @override
+  String get mealType_dinner => 'Dinner';
+
+  @override
+  String get mealType_snack => 'Snack';
+
+  @override
+  String get mealType_other => 'Other';
+
+  @override
+  String get macro_net_carbs_abbr => 'Net C';
+
+  @override
+  String get macro_sat_fat_short => 'Sat fat';
+
+  @override
+  String get macro_good_fat_short => 'Good fat';
+
+  @override
+  String get gi_low_badge => 'Low GI';
+
+  @override
+  String get gi_medium_badge => 'Med GI';
+
+  @override
+  String get gi_high_badge => 'High GI';
+
+  @override
+  String get journal_meal_deleted => 'Meal deleted';
+
+  @override
+  String get journal_could_not_delete => 'Could not delete';
+
+  @override
+  String get journal_could_not_update_weight => 'Could not update weight';
+
+  @override
+  String get journal_meal_actions => 'Meal actions';
+
+  @override
+  String get journal_copy_date => 'Copy to date';
+
+  @override
+  String get journal_copy_btn => 'Copy';
+
+  @override
+  String journal_copied_to(String date) {
+    return 'Copied to $date';
+  }
+
+  @override
+  String get journal_open_btn => 'Open';
+
+  @override
+  String get journal_could_not_copy => 'Could not copy';
+
+  @override
+  String get journal_copy_to_another_date => 'Copy to another date';
+
+  @override
+  String get journal_disclaimer =>
+      'Calorie estimates are approximate. Not a substitute for medical advice.';
+
+  @override
+  String get nav_add => 'Add';
+
+  @override
+  String get cal_on_track => 'on track';
+
+  @override
+  String get cal_over_goal => 'over goal';
+
+  @override
+  String get cal_empty => 'empty';
 }

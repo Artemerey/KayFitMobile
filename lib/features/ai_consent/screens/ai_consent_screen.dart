@@ -69,8 +69,8 @@ class _AiConsentScreenState extends ConsumerState<AiConsentScreen>
     final row1c = isRu ? 'Фотографии еды' : 'Food photos';
     final row1d = isRu ? 'Сообщения в AI-чате' : 'AI chat messages';
     final row2 = isRu
-        ? 'Данные отправляются в Anthropic, Inc. (США) и обрабатываются на их серверах'
-        : 'Data is sent to Anthropic, Inc. (USA) and processed on their servers';
+        ? 'Данные обрабатываются моделью Qwen от Alibaba Cloud (КНР)'
+        : 'Data is processed by Qwen, a model by Alibaba Cloud (China)';
     final row3 =
         isRu ? 'Не используются для обучения модели' : 'Never used for model training';
     final checkboxLabel =

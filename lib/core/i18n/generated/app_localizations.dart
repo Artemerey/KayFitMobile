@@ -224,6 +224,24 @@ abstract class AppLocalizations {
   /// **'Углеводы'**
   String get macro_carbs;
 
+  /// No description provided for @macro_protein_abbr.
+  ///
+  /// In ru, this message translates to:
+  /// **'Б'**
+  String get macro_protein_abbr;
+
+  /// No description provided for @macro_fat_abbr.
+  ///
+  /// In ru, this message translates to:
+  /// **'Ж'**
+  String get macro_fat_abbr;
+
+  /// No description provided for @macro_carbs_abbr.
+  ///
+  /// In ru, this message translates to:
+  /// **'У'**
+  String get macro_carbs_abbr;
+
   /// No description provided for @macro_kcal.
   ///
   /// In ru, this message translates to:
@@ -235,6 +253,18 @@ abstract class AppLocalizations {
   /// In ru, this message translates to:
   /// **'г'**
   String get macro_g;
+
+  /// No description provided for @recognition_save_to_journal.
+  ///
+  /// In ru, this message translates to:
+  /// **'Сохранить в журнал'**
+  String get recognition_save_to_journal;
+
+  /// No description provided for @recognition_items_label.
+  ///
+  /// In ru, this message translates to:
+  /// **'ИНГРЕДИЕНТЫ · НАЖМИТЕ ✏ ДЛЯ ПРАВКИ'**
+  String get recognition_items_label;
 
   /// No description provided for @macro_eaten.
   ///
@@ -2845,6 +2875,168 @@ abstract class AppLocalizations {
   /// In ru, this message translates to:
   /// **'Ошибка восстановления. Попробуйте ещё раз.'**
   String get paywall_restore_error_snack;
+
+  /// No description provided for @item_enter_nutrition_manually.
+  ///
+  /// In ru, this message translates to:
+  /// **'Введите КБЖУ вручную'**
+  String get item_enter_nutrition_manually;
+
+  /// No description provided for @mealType_breakfast.
+  ///
+  /// In ru, this message translates to:
+  /// **'Завтрак'**
+  String get mealType_breakfast;
+
+  /// No description provided for @mealType_lunch.
+  ///
+  /// In ru, this message translates to:
+  /// **'Обед'**
+  String get mealType_lunch;
+
+  /// No description provided for @mealType_dinner.
+  ///
+  /// In ru, this message translates to:
+  /// **'Ужин'**
+  String get mealType_dinner;
+
+  /// No description provided for @mealType_snack.
+  ///
+  /// In ru, this message translates to:
+  /// **'Перекус'**
+  String get mealType_snack;
+
+  /// No description provided for @mealType_other.
+  ///
+  /// In ru, this message translates to:
+  /// **'Другое'**
+  String get mealType_other;
+
+  /// No description provided for @macro_net_carbs_abbr.
+  ///
+  /// In ru, this message translates to:
+  /// **'Чист.У'**
+  String get macro_net_carbs_abbr;
+
+  /// No description provided for @macro_sat_fat_short.
+  ///
+  /// In ru, this message translates to:
+  /// **'Нас.ж'**
+  String get macro_sat_fat_short;
+
+  /// No description provided for @macro_good_fat_short.
+  ///
+  /// In ru, this message translates to:
+  /// **'Ненас.ж'**
+  String get macro_good_fat_short;
+
+  /// No description provided for @gi_low_badge.
+  ///
+  /// In ru, this message translates to:
+  /// **'Низк. ГИ'**
+  String get gi_low_badge;
+
+  /// No description provided for @gi_medium_badge.
+  ///
+  /// In ru, this message translates to:
+  /// **'Сред. ГИ'**
+  String get gi_medium_badge;
+
+  /// No description provided for @gi_high_badge.
+  ///
+  /// In ru, this message translates to:
+  /// **'Выс. ГИ'**
+  String get gi_high_badge;
+
+  /// No description provided for @journal_meal_deleted.
+  ///
+  /// In ru, this message translates to:
+  /// **'Приём пищи удалён'**
+  String get journal_meal_deleted;
+
+  /// No description provided for @journal_could_not_delete.
+  ///
+  /// In ru, this message translates to:
+  /// **'Не удалось удалить'**
+  String get journal_could_not_delete;
+
+  /// No description provided for @journal_could_not_update_weight.
+  ///
+  /// In ru, this message translates to:
+  /// **'Не удалось обновить вес'**
+  String get journal_could_not_update_weight;
+
+  /// No description provided for @journal_meal_actions.
+  ///
+  /// In ru, this message translates to:
+  /// **'Действия с приёмом пищи'**
+  String get journal_meal_actions;
+
+  /// No description provided for @journal_copy_date.
+  ///
+  /// In ru, this message translates to:
+  /// **'Дата копии'**
+  String get journal_copy_date;
+
+  /// No description provided for @journal_copy_btn.
+  ///
+  /// In ru, this message translates to:
+  /// **'Копировать'**
+  String get journal_copy_btn;
+
+  /// No description provided for @journal_copied_to.
+  ///
+  /// In ru, this message translates to:
+  /// **'Скопировано на {date}'**
+  String journal_copied_to(String date);
+
+  /// No description provided for @journal_open_btn.
+  ///
+  /// In ru, this message translates to:
+  /// **'Перейти'**
+  String get journal_open_btn;
+
+  /// No description provided for @journal_could_not_copy.
+  ///
+  /// In ru, this message translates to:
+  /// **'Не удалось скопировать'**
+  String get journal_could_not_copy;
+
+  /// No description provided for @journal_copy_to_another_date.
+  ///
+  /// In ru, this message translates to:
+  /// **'Копировать на другую дату'**
+  String get journal_copy_to_another_date;
+
+  /// No description provided for @journal_disclaimer.
+  ///
+  /// In ru, this message translates to:
+  /// **'Расчёты КБЖУ — ориентировочные. Не заменяют консультацию врача.'**
+  String get journal_disclaimer;
+
+  /// No description provided for @nav_add.
+  ///
+  /// In ru, this message translates to:
+  /// **'Добавить'**
+  String get nav_add;
+
+  /// No description provided for @cal_on_track.
+  ///
+  /// In ru, this message translates to:
+  /// **'в норме'**
+  String get cal_on_track;
+
+  /// No description provided for @cal_over_goal.
+  ///
+  /// In ru, this message translates to:
+  /// **'превышение'**
+  String get cal_over_goal;
+
+  /// No description provided for @cal_empty.
+  ///
+  /// In ru, this message translates to:
+  /// **'нет данных'**
+  String get cal_empty;
 }
 
 class _AppLocalizationsDelegate

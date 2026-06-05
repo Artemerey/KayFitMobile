@@ -11,8 +11,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart' as intl;
 
 import '../../../core/api/api_client.dart';
+import '../../../core/i18n/generated/app_localizations.dart';
 import '../../../features/dashboard/providers/dashboard_provider.dart';
 import '../../../features/journal/screens/journal_screen.dart'
     show journalDayMealsProvider;
@@ -25,45 +27,6 @@ import '../../../shared/widgets/kayfit2_tab_bar.dart';
 import '../../../shared/widgets/kayfit_rings.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Seed fallback meals (used when provider fails or is loading)
-// ─────────────────────────────────────────────────────────────────────────────
-
-const _kFallbackMeals = <K2MealRowData>[
-  K2MealRowData(
-    id: 'fb-m1',
-    time: '08:24',
-    type: 'breakfast',
-    name: 'oatmeal with berries',
-    kcal: 320,
-    protein: 12,
-    fat: 6,
-    carbs: 54,
-    source: K2MealSource.photo,
-    photoSeed: 1,
-  ),
-  K2MealRowData(
-    id: 'fb-m2',
-    time: '13:10',
-    type: 'lunch',
-    name: 'chicken bowl, rice, broccoli',
-    kcal: 540,
-    protein: 42,
-    fat: 14,
-    carbs: 58,
-    source: K2MealSource.voice,
-  ),
-  K2MealRowData(
-    id: 'fb-m3',
-    time: '16:30',
-    type: 'snack',
-    name: 'greek yogurt, almonds',
-    kcal: 210,
-    protein: 18,
-    fat: 11,
-    carbs: 9,
-    source: K2MealSource.text,
-  ),
-];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -210,10 +173,10 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
       ref.invalidate(dailyKcalHistoryProvider);
       ref.invalidate(journalDayMealsProvider(_dateKey));
       if (mounted) {
-        final isRu = Localizations.localeOf(context).languageCode == 'ru';
+        final l10n = AppLocalizations.of(context)!;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(isRu ? 'Приём пищи удалён' : 'Meal deleted'),
+            content: Text(l10n.journal_meal_deleted),
             behavior: SnackBarBehavior.floating,
             duration: const Duration(seconds: 2),
             shape: RoundedRectangleBorder(
@@ -225,10 +188,10 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
       return true;
     } on Exception {
       if (mounted) {
-        final isRu = Localizations.localeOf(context).languageCode == 'ru';
+        final l10n = AppLocalizations.of(context)!;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(isRu ? 'Не удалось удалить' : 'Could not delete'),
+            content: Text(l10n.journal_could_not_delete),
             backgroundColor: Colors.red,
             behavior: SnackBarBehavior.floating,
             duration: const Duration(seconds: 2),
@@ -312,11 +275,9 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
       ref.invalidate(dailyKcalHistoryProvider);
     } on Exception {
       if (mounted) {
-        final isRu = Localizations.localeOf(context).languageCode == 'ru';
+        final l10n = AppLocalizations.of(context)!;
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(
-            isRu ? 'Не удалось обновить вес' : 'Could not update weight',
-          ),
+          content: Text(l10n.journal_could_not_update_weight),
           behavior: SnackBarBehavior.floating,
           backgroundColor: Colors.red,
         ));
@@ -333,11 +294,11 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
     final intId = int.tryParse(idStr);
     if (intId == null || _isCopying) return;
     HapticFeedback.selectionClick();
-    final isRu = Localizations.localeOf(context).languageCode == 'ru';
+    final l10n = AppLocalizations.of(context)!;
     final confirmed = await showModalBottomSheet<bool>(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (sheetCtx) => _CopyMealActionSheet(isRu: isRu),
+      builder: (sheetCtx) => _CopyMealActionSheet(l10n: l10n),
     );
     if (confirmed != true || !mounted) return;
 
@@ -347,53 +308,42 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
       initialDate: today,
       firstDate: today.subtract(const Duration(days: 365)),
       lastDate: today.add(const Duration(days: 365)),
-      helpText: isRu ? 'Дата копии' : 'Copy to date',
-      cancelText: isRu ? 'Отмена' : 'Cancel',
-      confirmText: isRu ? 'Копировать' : 'Copy',
+      helpText: l10n.journal_copy_date,
+      cancelText: l10n.common_cancel,
+      confirmText: l10n.journal_copy_btn,
     );
     if (picked == null || !mounted) return;
 
     final targetIso =
         '${picked.year.toString().padLeft(4, '0')}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
-    await _copyMealToDate(intId, targetIso, isRu: isRu);
+    await _copyMealToDate(intId, targetIso);
   }
 
-  Future<void> _copyMealToDate(
-    int mealId,
-    String targetIso, {
-    required bool isRu,
-  }) async {
+  Future<void> _copyMealToDate(int mealId, String targetIso) async {
     setState(() => _isCopying = true);
     try {
       await apiDio.post(
         '/api/meals/$mealId/copy',
         data: {'target_date': targetIso},
       );
-      // Refresh the destination day so a switch via the snackbar CTA shows
-      // the copied meal. The source day doesn't change.
       ref.invalidate(journalDayMealsProvider(targetIso));
       ref.invalidate(dailyKcalHistoryProvider);
-      // If the copy landed on the currently-visible day, the watch above
-      // will rebuild it automatically; nothing extra needed.
       if (!mounted) return;
-      final humanDate = _humanReadableDate(targetIso, isRu: isRu);
+      final l10n = AppLocalizations.of(context)!;
+      final humanDate = _humanReadableDate(targetIso, l10n: l10n);
       HapticFeedback.lightImpact();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            isRu ? 'Скопировано на $humanDate' : 'Copied to $humanDate',
-          ),
+          content: Text(l10n.journal_copied_to(humanDate)),
           behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 4),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
           ),
           action: SnackBarAction(
-            label: isRu ? 'Перейти' : 'Open',
+            label: l10n.journal_open_btn,
             onPressed: () {
               if (!mounted) return;
-              // `_dateKey` is a getter over `_calSelected`, so updating
-              // the latter is enough to re-watch the new date.
               setState(() => _calSelected = targetIso);
             },
           ),
@@ -401,11 +351,10 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
       );
     } on Exception {
       if (!mounted) return;
+      final l10n = AppLocalizations.of(context)!;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            isRu ? 'Не удалось скопировать' : 'Could not copy',
-          ),
+          content: Text(l10n.journal_could_not_copy),
           backgroundColor: Colors.red,
           behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 2),
@@ -416,24 +365,20 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
     }
   }
 
-  String _humanReadableDate(String iso, {required bool isRu}) {
+  String _humanReadableDate(String iso, {required AppLocalizations l10n}) {
     final parts = iso.split('-');
     if (parts.length != 3) return iso;
     final y = int.tryParse(parts[0]);
     final m = int.tryParse(parts[1]);
     final d = int.tryParse(parts[2]);
     if (y == null || m == null || d == null) return iso;
-    const monthsRu = [
-      'янв', 'фев', 'мар', 'апр', 'мая', 'июн',
-      'июл', 'авг', 'сен', 'окт', 'ноя', 'дек',
-    ];
-    const monthsEn = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-    ];
-    final months = isRu ? monthsRu : monthsEn;
     if (m < 1 || m > 12) return iso;
-    return isRu ? '$d ${months[m - 1]}' : '${months[m - 1]} $d';
+    try {
+      final locale = l10n.localeName;
+      return intl.DateFormat('d MMM', locale).format(DateTime(y, m, d));
+    } on Object {
+      return iso;
+    }
   }
 
   /// Sum macros over the meal list for the currently-selected day.
@@ -568,10 +513,14 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
                       Center(child: CircularProgressIndicator(strokeWidth: 2)),
                     ],
                   ),
-                  error: (err, st) => _MealList(
-                    rows: _kFallbackMeals,
-                    theme: t,
-                    onRowTap: (id) {},
+                  error: (err, st) => ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    children: [
+                      SizedBox(
+                        height: MediaQuery.of(context).size.height * 0.5,
+                        child: _EmptyMeals(theme: t),
+                      ),
+                    ],
                   ),
                   data: (meals) {
                     if (meals.isEmpty) {
@@ -757,9 +706,9 @@ class _MealList extends StatelessWidget {
 /// before the date picker so accidental long-presses don't immediately
 /// open the calendar.
 class _CopyMealActionSheet extends StatelessWidget {
-  const _CopyMealActionSheet({required this.isRu});
+  const _CopyMealActionSheet({required this.l10n});
 
-  final bool isRu;
+  final AppLocalizations l10n;
 
   @override
   Widget build(BuildContext context) {
@@ -777,7 +726,7 @@ class _CopyMealActionSheet extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
               child: Text(
-                isRu ? 'Действия с приёмом пищи' : 'Meal actions',
+                l10n.journal_meal_actions,
                 style: TextStyle(
                   fontSize: 13,
                   color: t.fgMute,
@@ -788,14 +737,12 @@ class _CopyMealActionSheet extends StatelessWidget {
             Container(height: 1, color: t.hairline),
             ListTile(
               leading: const Icon(Icons.calendar_month_rounded),
-              title: Text(
-                isRu ? 'Копировать на другую дату' : 'Copy to another date',
-              ),
+              title: Text(l10n.journal_copy_to_another_date),
               onTap: () => Navigator.of(context).pop(true),
             ),
             Container(height: 1, color: t.hairline),
             ListTile(
-              title: Text(isRu ? 'Отмена' : 'Cancel'),
+              title: Text(l10n.common_cancel),
               onTap: () => Navigator.of(context).pop(false),
             ),
           ],
@@ -830,13 +777,14 @@ class _DeleteSwipeBackground extends StatelessWidget {
 // Group header
 // ─────────────────────────────────────────────────────────────────────────────
 
-const _kGroupTitles = <String, (String, String)>{
-  'breakfast': ('🌅', 'Breakfast'),
-  'lunch': ('☀️', 'Lunch'),
-  'snack': ('🍎', 'Snack'),
-  'dinner': ('🌙', 'Dinner'),
-  'other': ('🍽', 'Other'),
-};
+({String emoji, String label}) _groupTitle(String type, AppLocalizations l10n) =>
+    switch (type) {
+      'breakfast' => (emoji: '🌅', label: l10n.mealType_breakfast),
+      'lunch' => (emoji: '☀️', label: l10n.mealType_lunch),
+      'snack' => (emoji: '🍎', label: l10n.mealType_snack),
+      'dinner' => (emoji: '🌙', label: l10n.mealType_dinner),
+      _ => (emoji: '🍽', label: type),
+    };
 
 class _GroupHeader extends StatelessWidget {
   const _GroupHeader({
@@ -851,9 +799,10 @@ class _GroupHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cfg = _kGroupTitles[type] ?? ('🍽', type);
-    final emoji = cfg.$1;
-    final title = cfg.$2;
+    final l10n = AppLocalizations.of(context)!;
+    final cfg = _groupTitle(type, l10n);
+    final emoji = cfg.emoji;
+    final title = cfg.label;
     final totalKcal = meals.fold<int>(0, (s, m) => s + m.kcal);
 
     return Container(
@@ -969,14 +918,11 @@ class _JournalDisclaimerBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isRu = Localizations.localeOf(context).languageCode == 'ru';
-    final text = isRu
-        ? 'Расчёты КБЖУ — ориентировочные. Не заменяют консультацию врача.'
-        : 'Calorie estimates are approximate. Not a substitute for medical advice.';
+    final l10n = AppLocalizations.of(context)!;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       child: Text(
-        text,
+        l10n.journal_disclaimer,
         style: TextStyle(
           fontSize: 11,
           color: theme.fgMute,

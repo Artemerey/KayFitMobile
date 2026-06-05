@@ -66,6 +66,7 @@ class _RouterNotifier extends ChangeNotifier {
     _ref.listen(onboardingDoneProvider, (_, __) => notifyListeners());
     _ref.listen(showWayToGoalProvider, (_, __) => notifyListeners());
     _ref.listen(aiConsentProvider, (_, __) => notifyListeners());
+    _ref.listen(aiConsentReadyProvider, (_, __) => notifyListeners());
   }
 
   final Ref _ref;
@@ -75,6 +76,7 @@ class _RouterNotifier extends ChangeNotifier {
     final onboardingDone = _ref.read(onboardingDoneProvider);
     final showWayToGoal = _ref.read(showWayToGoalProvider);
     final aiConsent = _ref.read(aiConsentProvider);
+    final consentReady = _ref.read(aiConsentReadyProvider);
 
     if (authNotifier.isLoading) return null;
 
@@ -136,7 +138,11 @@ class _RouterNotifier extends ChangeNotifier {
     // Declined users (false) pass through — AI features are disabled individually
     // in each screen (chat, dashboard, recognition). Forcing sign-out on decline
     // violates App Store Guideline 5.1.1 (consent must be freely given).
-    if (isLoggedIn && aiConsent == null && !showWayToGoal &&
+    // consentReady guard: on reinstall SharedPreferences is cleared but the
+    // Keychain auth token survives, so aiConsent starts null and the notifier
+    // must first verify with the server.  We hold off the redirect until the
+    // async check completes to avoid showing the screen to returning users.
+    if (consentReady && isLoggedIn && aiConsent == null && !showWayToGoal &&
         loc != '/ai-consent' && loc != '/way-to-goal' &&
         loc != '/kayfit2/preview') {
       return '/ai-consent';

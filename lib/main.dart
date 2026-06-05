@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/date_symbol_data_local.dart';
 import 'package:purchases_flutter/purchases_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -17,6 +18,10 @@ import 'shared/models/user_profile.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Future.wait([
+    initializeDateFormatting('ru'),
+    initializeDateFormatting('en'),
+  ]);
 
   // ── 1. Firebase first (Analytics + FCM both depend on it) ─────────────────
   await Firebase.initializeApp();
@@ -65,6 +70,10 @@ void main() async {
         // for users who already answered. Null = first launch (no key yet).
         if (localConsent != null)
           aiConsentProvider.overrideWith(() => AiConsentNotifier(localConsent)),
+        // Mark consent as ready when we have a local value — the router guard
+        // can then apply immediately without waiting for the async initializer.
+        if (localConsent != null)
+          aiConsentReadyProvider.overrideWith((ref) => true),
       ],
       child: _AppInit(cachedUser: cachedUser),
     ),

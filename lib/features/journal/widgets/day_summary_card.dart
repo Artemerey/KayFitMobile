@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../../../core/i18n/generated/app_localizations.dart';
 import '../../../shared/theme/app_theme.dart';
 
 /// Compact DAY TOTAL card.
@@ -72,6 +74,7 @@ class _DaySummaryCardState extends State<DaySummaryCard>
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final calPct = widget.caloriesGoal > 0
         ? (widget.calories / widget.caloriesGoal).clamp(0.0, 1.0)
         : 0.0;
@@ -180,7 +183,7 @@ class _DaySummaryCardState extends State<DaySummaryCard>
             child: Row(
               children: [
                 _MacroChip(
-                  label: 'Net C',
+                  label: l10n.macro_net_carbs_abbr,
                   value: widget.netCarbs,
                   goal: widget.netCarbsGoal,
                   color: NutrientColors.netCarbs,
@@ -188,7 +191,7 @@ class _DaySummaryCardState extends State<DaySummaryCard>
                 ),
                 const SizedBox(width: 6),
                 _MacroChip(
-                  label: 'Protein',
+                  label: l10n.macro_protein,
                   value: widget.protein,
                   goal: widget.proteinGoal,
                   color: NutrientColors.protein,
@@ -196,7 +199,7 @@ class _DaySummaryCardState extends State<DaySummaryCard>
                 ),
                 const SizedBox(width: 6),
                 _MacroChip(
-                  label: 'Fat',
+                  label: l10n.macro_fat,
                   value: widget.goodFat + widget.satFat,
                   goal: widget.goodFatGoal + widget.satFatGoal,
                   color: NutrientColors.fatGood,
@@ -219,28 +222,28 @@ class _DaySummaryCardState extends State<DaySummaryCard>
                 runSpacing: 6,
                 children: [
                   _SecondaryChip(
-                    label: 'Fiber',
+                    label: l10n.nds_nutrient_fiber,
                     value: widget.fiber,
                     goal: widget.fiberGoal,
                     color: NutrientColors.fiber,
                     bg: NutrientColors.fiberSoft,
                   ),
                   _SecondaryChip(
-                    label: 'Sugar',
+                    label: l10n.nutrient_sugar,
                     value: widget.sugar,
                     goal: widget.sugarGoal,
                     color: NutrientColors.sugar,
                     bg: NutrientColors.sugarSoft,
                   ),
                   _SecondaryChip(
-                    label: 'Sat fat',
+                    label: l10n.macro_sat_fat_short,
                     value: widget.satFat,
                     goal: widget.satFatGoal,
                     color: NutrientColors.fatBad,
                     bg: NutrientColors.fatBadSoft,
                   ),
                   _SecondaryChip(
-                    label: 'Good fat',
+                    label: l10n.macro_good_fat_short,
                     value: widget.goodFat,
                     goal: widget.goodFatGoal,
                     color: NutrientColors.fatGood,

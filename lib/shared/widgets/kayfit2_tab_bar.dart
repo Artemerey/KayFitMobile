@@ -17,6 +17,7 @@ import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 
+import '../../core/i18n/generated/app_localizations.dart';
 import '../theme/kayfit2_theme.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -88,6 +89,7 @@ class Kayfit2TabBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final isDark = theme.isDark;
     final borderColor = isDark ? _kBorderDark : _kBorderLight;
     final bgColor = isDark ? _kBgDark : _kBgLight;
@@ -123,7 +125,7 @@ class Kayfit2TabBar extends StatelessWidget {
                   Expanded(
                     child: _TabItem(
                       tabKey: 'journal',
-                      label: 'Journal',
+                      label: l10n.nav_journal,
                       icon: Icons.menu_book_rounded,
                       active: active == 'journal',
                       onTap: onTab,
@@ -136,6 +138,7 @@ class Kayfit2TabBar extends StatelessWidget {
                     child: _AddButton(
                       onTap: onAdd,
                       accentColor: K2Colors.accent,
+                      label: l10n.nav_add,
                     ),
                   ),
 
@@ -143,7 +146,7 @@ class Kayfit2TabBar extends StatelessWidget {
                   Expanded(
                     child: _TabItem(
                       tabKey: 'chat',
-                      label: 'Chat',
+                      label: l10n.nav_chat,
                       icon: Icons.chat_bubble_outline_rounded,
                       active: active == 'chat',
                       onTap: onTab,
@@ -231,10 +234,12 @@ class _AddButton extends StatelessWidget {
   const _AddButton({
     required this.onTap,
     required this.accentColor,
+    required this.label,
   });
 
   final VoidCallback onTap;
   final Color accentColor;
+  final String label;
 
   @override
   Widget build(BuildContext context) {
@@ -265,7 +270,7 @@ class _AddButton extends StatelessWidget {
             const SizedBox(height: 4),
             // "Add" label
             Text(
-              'Add',
+              label,
               style: TextStyle(
                 fontSize: Kayfit2TabBar._kLabelSize,
                 fontWeight: FontWeight.w600,

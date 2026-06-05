@@ -6,11 +6,15 @@ import '../../../shared/theme/app_theme.dart';
 import '../../../shared/widgets/dismissible_sheet_wrapper.dart';
 import '../../../shared/widgets/extended_nutrients_grid.dart';
 
-const _mealTypeConfig = {
-  'breakfast': ('🌅', 'Breakfast'),
-  'lunch': ('☀️', 'Lunch'),
-  'dinner': ('🌙', 'Dinner'),
-  'snack': ('🍎', 'Snack'),
+({String emoji, String label}) _mealTypeLabel(
+  String type,
+  AppLocalizations l10n,
+) => switch (type) {
+  'breakfast' => (emoji: '🌅', label: l10n.mealType_breakfast),
+  'lunch' => (emoji: '☀️', label: l10n.mealType_lunch),
+  'dinner' => (emoji: '🌙', label: l10n.mealType_dinner),
+  'snack' => (emoji: '🍎', label: l10n.mealType_snack),
+  _ => (emoji: '🍽', label: type),
 };
 
 String _dishEmojiFor(String name) {
@@ -52,9 +56,9 @@ class MealGroupCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final config = _mealTypeConfig[mealType] ?? ('🍽', mealType);
-    final emoji = config.$1;
-    final title = config.$2;
+    final config = _mealTypeLabel(mealType, l10n);
+    final emoji = config.emoji;
+    final title = config.label;
 
     // Compute totals
     final totalCal = meals.fold<double>(0, (s, m) => s + m.calories);
@@ -314,6 +318,7 @@ class _MealDetailSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final name = meal.dishName ?? meal.name;
     final net = meal.netCarbs ?? meal.carbs;
 
@@ -429,7 +434,7 @@ class _MealDetailSheet extends StatelessWidget {
                 Expanded(
                   child: _ActionButton(
                     icon: Icons.edit_rounded,
-                    label: 'Edit',
+                    label: l10n.common_edit,
                     color: AppColors.accent,
                     onTap: () {
                       Navigator.of(context).pop();
@@ -443,7 +448,7 @@ class _MealDetailSheet extends StatelessWidget {
                 Expanded(
                   child: _ActionButton(
                     icon: Icons.delete_outline_rounded,
-                    label: 'Delete',
+                    label: l10n.common_delete,
                     color: AppColors.accentOver,
                     onTap: () {
                       Navigator.of(context).pop();
@@ -467,13 +472,14 @@ class _MacroGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Row(
       children: [
         Expanded(
           child: _MacroCell(
-            label: 'Calories',
+            label: l10n.macro_calories,
             value: '${meal.calories.toStringAsFixed(0)}',
-            unit: 'kcal',
+            unit: l10n.macro_kcal,
             color: NutrientColors.kcal,
             bg: NutrientColors.kcalSoft,
           ),
@@ -481,9 +487,9 @@ class _MacroGrid extends StatelessWidget {
         const SizedBox(width: 8),
         Expanded(
           child: _MacroCell(
-            label: 'Protein',
+            label: l10n.macro_protein,
             value: meal.protein.toStringAsFixed(1),
-            unit: 'g',
+            unit: l10n.macro_g,
             color: NutrientColors.protein,
             bg: NutrientColors.proteinSoft,
           ),
@@ -491,9 +497,9 @@ class _MacroGrid extends StatelessWidget {
         const SizedBox(width: 8),
         Expanded(
           child: _MacroCell(
-            label: 'Fat',
+            label: l10n.macro_fat,
             value: meal.fat.toStringAsFixed(1),
-            unit: 'g',
+            unit: l10n.macro_g,
             color: NutrientColors.fatGood,
             bg: NutrientColors.fatGoodSoft,
           ),
@@ -501,9 +507,9 @@ class _MacroGrid extends StatelessWidget {
         const SizedBox(width: 8),
         Expanded(
           child: _MacroCell(
-            label: 'Carbs',
+            label: l10n.macro_carbs,
             value: meal.carbs.toStringAsFixed(1),
-            unit: 'g',
+            unit: l10n.macro_g,
             color: NutrientColors.netCarbs,
             bg: NutrientColors.netCarbsSoft,
           ),
@@ -661,11 +667,10 @@ class _GroupDetailSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final config = _mealTypeConfig[mealType] ?? ('🍽', mealType);
-    final emoji = config.$1;
-    final title = config.$2;
-
     final l10n = AppLocalizations.of(context)!;
+    final config = _mealTypeLabel(mealType, l10n);
+    final emoji = config.emoji;
+    final title = config.label;
 
     final totalCal = meals.fold<double>(0, (s, m) => s + m.calories);
     final totalP   = meals.fold<double>(0, (s, m) => s + m.protein);
@@ -730,13 +735,13 @@ class _GroupDetailSheet extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Row(
               children: [
-                Expanded(child: _MacroCell(label: 'Calories', value: totalCal.toStringAsFixed(0), unit: 'kcal', color: NutrientColors.kcal, bg: NutrientColors.kcalSoft)),
+                Expanded(child: _MacroCell(label: l10n.macro_calories, value: totalCal.toStringAsFixed(0), unit: l10n.macro_kcal, color: NutrientColors.kcal, bg: NutrientColors.kcalSoft)),
                 const SizedBox(width: 8),
-                Expanded(child: _MacroCell(label: 'Protein', value: totalP.toStringAsFixed(1), unit: 'g', color: NutrientColors.protein, bg: NutrientColors.proteinSoft)),
+                Expanded(child: _MacroCell(label: l10n.macro_protein, value: totalP.toStringAsFixed(1), unit: l10n.macro_g, color: NutrientColors.protein, bg: NutrientColors.proteinSoft)),
                 const SizedBox(width: 8),
-                Expanded(child: _MacroCell(label: 'Fat', value: totalF.toStringAsFixed(1), unit: 'g', color: NutrientColors.fatGood, bg: NutrientColors.fatGoodSoft)),
+                Expanded(child: _MacroCell(label: l10n.macro_fat, value: totalF.toStringAsFixed(1), unit: l10n.macro_g, color: NutrientColors.fatGood, bg: NutrientColors.fatGoodSoft)),
                 const SizedBox(width: 8),
-                Expanded(child: _MacroCell(label: 'Carbs', value: totalC.toStringAsFixed(1), unit: 'g', color: NutrientColors.netCarbs, bg: NutrientColors.netCarbsSoft)),
+                Expanded(child: _MacroCell(label: l10n.macro_carbs, value: totalC.toStringAsFixed(1), unit: l10n.macro_g, color: NutrientColors.netCarbs, bg: NutrientColors.netCarbsSoft)),
               ],
             ),
           ),

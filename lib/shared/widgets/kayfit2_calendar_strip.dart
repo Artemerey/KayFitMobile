@@ -13,7 +13,9 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart' as intl;
 
+import '../../core/i18n/generated/app_localizations.dart';
 import '../theme/kayfit2_theme.dart';
 
 // ── Public API types ──────────────────────────────────────────────────────────
@@ -109,16 +111,15 @@ class _WeekStrip extends StatelessWidget {
   final ValueChanged<String> onSelect;
   final Map<String, K2DayStatus>? statusByIso;
 
-  static const _dayLetters = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-
   @override
   Widget build(BuildContext context) {
+    final locale = Localizations.localeOf(context).toString();
     final today = DateTime.now();
     final days = List.generate(7, (i) {
       final d = today.subtract(Duration(days: 6 - i));
       final iso = _isoDate(d);
       final isToday = i == 6;
-      final letter = _dayLetters[(d.weekday - 1) % 7]; // weekday: 1=Mon..7=Sun
+      final letter = intl.DateFormat('E', locale).format(d);
       return _DayEntry(
         letter: letter,
         day: d.day,
@@ -185,10 +186,9 @@ class _MonthGrid extends StatelessWidget {
   final ValueChanged<String> onSelect;
   final Map<String, K2DayStatus>? statusByIso;
 
-  static const _headers = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-
   @override
   Widget build(BuildContext context) {
+    final locale = Localizations.localeOf(context).toString();
     final today = DateTime.now();
     final firstOfMonth = DateTime(today.year, today.month);
     final daysInMonth =
@@ -209,8 +209,15 @@ class _MonthGrid extends StatelessWidget {
         ),
     ];
 
+    // Locale-aware day column headers (Mon=0..Sun=6) from a known Monday
+    final monday = DateTime(2024, 1, 1);
+    final headers = List.generate(
+      7,
+      (i) => intl.DateFormat('E', locale).format(monday.add(Duration(days: i))),
+    );
+
     final monthLabel =
-        '${_monthName(today.month)} ${today.year}'.toLowerCase();
+        '${intl.DateFormat('MMMM', locale).format(today)} ${today.year}'.toLowerCase();
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
@@ -235,7 +242,7 @@ class _MonthGrid extends StatelessWidget {
           // Day-of-week headers
           Row(
             children: [
-              for (final h in _headers)
+              for (final h in headers)
                 Expanded(
                   child: Center(
                     child: Text(
@@ -316,25 +323,26 @@ class _Legend extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Padding(
       padding: const EdgeInsets.fromLTRB(4, 14, 4, 4),
       child: Row(
         children: [
           _LegendItem(
             color: K2CalendarStatus.goodRing,
-            label: 'on track',
+            label: l10n.cal_on_track,
             theme: theme,
           ),
           const SizedBox(width: 14),
           _LegendItem(
             color: K2CalendarStatus.overRing,
-            label: 'over goal',
+            label: l10n.cal_over_goal,
             theme: theme,
           ),
           const SizedBox(width: 14),
           _LegendItem(
             color: theme.border,
-            label: 'empty',
+            label: l10n.cal_empty,
             theme: theme,
           ),
         ],
@@ -671,19 +679,3 @@ String _isoDate(DateTime d) =>
     '${d.month.toString().padLeft(2, '0')}-'
     '${d.day.toString().padLeft(2, '0')}';
 
-const _monthNames = [
-  'january',
-  'february',
-  'march',
-  'april',
-  'may',
-  'june',
-  'july',
-  'august',
-  'september',
-  'october',
-  'november',
-  'december',
-];
-
-String _monthName(int month) => _monthNames[(month - 1).clamp(0, 11)];

@@ -72,10 +72,25 @@ class AppLocalizationsRu extends AppLocalizations {
   String get macro_carbs => 'Углеводы';
 
   @override
+  String get macro_protein_abbr => 'Б';
+
+  @override
+  String get macro_fat_abbr => 'Ж';
+
+  @override
+  String get macro_carbs_abbr => 'У';
+
+  @override
   String get macro_kcal => 'ккал';
 
   @override
   String get macro_g => 'г';
+
+  @override
+  String get recognition_save_to_journal => 'Сохранить в журнал';
+
+  @override
+  String get recognition_items_label => 'ИНГРЕДИЕНТЫ · НАЖМИТЕ ✏ ДЛЯ ПРАВКИ';
 
   @override
   String get macro_eaten => 'съедено';
@@ -1446,4 +1461,88 @@ class AppLocalizationsRu extends AppLocalizations {
   @override
   String get paywall_restore_error_snack =>
       'Ошибка восстановления. Попробуйте ещё раз.';
+
+  @override
+  String get item_enter_nutrition_manually => 'Введите КБЖУ вручную';
+
+  @override
+  String get mealType_breakfast => 'Завтрак';
+
+  @override
+  String get mealType_lunch => 'Обед';
+
+  @override
+  String get mealType_dinner => 'Ужин';
+
+  @override
+  String get mealType_snack => 'Перекус';
+
+  @override
+  String get mealType_other => 'Другое';
+
+  @override
+  String get macro_net_carbs_abbr => 'Чист.У';
+
+  @override
+  String get macro_sat_fat_short => 'Нас.ж';
+
+  @override
+  String get macro_good_fat_short => 'Ненас.ж';
+
+  @override
+  String get gi_low_badge => 'Низк. ГИ';
+
+  @override
+  String get gi_medium_badge => 'Сред. ГИ';
+
+  @override
+  String get gi_high_badge => 'Выс. ГИ';
+
+  @override
+  String get journal_meal_deleted => 'Приём пищи удалён';
+
+  @override
+  String get journal_could_not_delete => 'Не удалось удалить';
+
+  @override
+  String get journal_could_not_update_weight => 'Не удалось обновить вес';
+
+  @override
+  String get journal_meal_actions => 'Действия с приёмом пищи';
+
+  @override
+  String get journal_copy_date => 'Дата копии';
+
+  @override
+  String get journal_copy_btn => 'Копировать';
+
+  @override
+  String journal_copied_to(String date) {
+    return 'Скопировано на $date';
+  }
+
+  @override
+  String get journal_open_btn => 'Перейти';
+
+  @override
+  String get journal_could_not_copy => 'Не удалось скопировать';
+
+  @override
+  String get journal_copy_to_another_date => 'Копировать на другую дату';
+
+  @override
+  String get journal_disclaimer =>
+      'Расчёты КБЖУ — ориентировочные. Не заменяют консультацию врача.';
+
+  @override
+  String get nav_add => 'Добавить';
+
+  @override
+  String get cal_on_track => 'в норме';
+
+  @override
+  String get cal_over_goal => 'превышение';
+
+  @override
+  String get cal_empty => 'нет данных';
 }

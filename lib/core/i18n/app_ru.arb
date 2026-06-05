@@ -25,8 +25,13 @@
   "macro_protein": "Белки",
   "macro_fat": "Жиры",
   "macro_carbs": "Углеводы",
+  "macro_protein_abbr": "Б",
+  "macro_fat_abbr": "Ж",
+  "macro_carbs_abbr": "У",
   "macro_kcal": "ккал",
   "macro_g": "г",
+  "recognition_save_to_journal": "Сохранить в журнал",
+  "recognition_items_label": "ИНГРЕДИЕНТЫ · НАЖМИТЕ ✏ ДЛЯ ПРАВКИ",
   "macro_eaten": "съедено",
   "macro_remaining": "осталось",
   "macro_goal": "цель",
@@ -577,5 +582,43 @@
   "paywall_error_snack": "Ошибка покупки. Попробуйте ещё раз.",
   "paywall_restored_snack": "Подписка восстановлена",
   "paywall_no_restore_snack": "Активная подписка не найдена",
-  "paywall_restore_error_snack": "Ошибка восстановления. Попробуйте ещё раз."
+  "paywall_restore_error_snack": "Ошибка восстановления. Попробуйте ещё раз.",
+  "item_enter_nutrition_manually": "Введите КБЖУ вручную",
+
+  "mealType_breakfast": "Завтрак",
+  "mealType_lunch": "Обед",
+  "mealType_dinner": "Ужин",
+  "mealType_snack": "Перекус",
+  "mealType_other": "Другое",
+
+  "macro_net_carbs_abbr": "Чист.У",
+  "macro_sat_fat_short": "Нас.ж",
+  "macro_good_fat_short": "Ненас.ж",
+
+  "gi_low_badge": "Низк. ГИ",
+  "gi_medium_badge": "Сред. ГИ",
+  "gi_high_badge": "Выс. ГИ",
+
+  "journal_meal_deleted": "Приём пищи удалён",
+  "journal_could_not_delete": "Не удалось удалить",
+  "journal_could_not_update_weight": "Не удалось обновить вес",
+  "journal_meal_actions": "Действия с приёмом пищи",
+  "journal_copy_date": "Дата копии",
+  "journal_copy_btn": "Копировать",
+  "journal_copied_to": "Скопировано на {date}",
+  "@journal_copied_to": {
+    "placeholders": {
+      "date": {"type": "String"}
+    }
+  },
+  "journal_open_btn": "Перейти",
+  "journal_could_not_copy": "Не удалось скопировать",
+  "journal_copy_to_another_date": "Копировать на другую дату",
+
+  "journal_disclaimer": "Расчёты КБЖУ — ориентировочные. Не заменяют консультацию врача.",
+
+  "nav_add": "Добавить",
+  "cal_on_track": "в норме",
+  "cal_over_goal": "превышение",
+  "cal_empty": "нет данных"
 }

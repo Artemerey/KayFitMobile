@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../../core/i18n/generated/app_localizations.dart';
 import '../theme/app_theme.dart';
 
 /// Displays extended nutrient values as chips in a Wrap layout.
@@ -50,128 +52,132 @@ class ExtendedNutrientsGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final g = l10n.nds_unit_g;
+    final mg = l10n.nds_unit_mg;
+    final mcg = l10n.nds_unit_mcg;
     final chips = <Widget>[
       if (fiber != null && fiber! > 0)
         _NutrientChip(
-          label: 'Fiber',
+          label: l10n.nds_nutrient_fiber,
           value: fiber!.toStringAsFixed(1),
-          unit: 'g',
+          unit: g,
           color: NutrientColors.fiber,
           bg: NutrientColors.fiberSoft,
         ),
       if (netCarbs != null && netCarbs! > 0)
         _NutrientChip(
-          label: 'Net carbs',
+          label: l10n.nutrient_net_carbs,
           value: netCarbs!.toStringAsFixed(1),
-          unit: 'g',
+          unit: g,
           color: NutrientColors.netCarbs,
           bg: NutrientColors.netCarbsSoft,
         ),
       if (sugar != null && sugar! > 0)
         _NutrientChip(
-          label: 'Sugar',
+          label: l10n.nutrient_sugar,
           value: sugar!.toStringAsFixed(1),
-          unit: 'g',
+          unit: g,
           color: NutrientColors.sugar,
           bg: NutrientColors.sugarSoft,
         ),
       if (sugarAlcohols != null && sugarAlcohols! > 0)
         _NutrientChip(
-          label: 'Sugar alc.',
+          label: l10n.nds_nutrient_sugar_alcohols,
           value: sugarAlcohols!.toStringAsFixed(1),
-          unit: 'g',
+          unit: g,
           color: NutrientColors.sugar,
           bg: NutrientColors.sugarSoft,
         ),
       if (saturatedFat != null && saturatedFat! > 0)
         _NutrientChip(
-          label: 'Sat. fat',
+          label: l10n.nutrient_saturated_fat,
           value: saturatedFat!.toStringAsFixed(1),
-          unit: 'g',
+          unit: g,
           color: NutrientColors.fatBad,
           bg: NutrientColors.fatBadSoft,
         ),
       if (unsaturatedFat != null && unsaturatedFat! > 0)
         _NutrientChip(
-          label: 'Unsat. fat',
+          label: l10n.nutrient_unsaturated_fat,
           value: unsaturatedFat!.toStringAsFixed(1),
-          unit: 'g',
+          unit: g,
           color: NutrientColors.fatGood,
           bg: NutrientColors.fatGoodSoft,
         ),
       if (sodiumMg != null && sodiumMg! > 0)
         _NutrientChip(
-          label: 'Sodium',
+          label: l10n.nds_nutrient_sodium,
           value: sodiumMg!.toStringAsFixed(0),
-          unit: 'mg',
+          unit: mg,
           color: AppColors.textMuted,
           bg: NutrientColors.bg,
         ),
       if (cholesterolMg != null && cholesterolMg! > 0)
         _NutrientChip(
-          label: 'Cholesterol',
+          label: l10n.nds_nutrient_cholesterol,
           value: cholesterolMg!.toStringAsFixed(0),
-          unit: 'mg',
+          unit: mg,
           color: AppColors.textMuted,
           bg: NutrientColors.bg,
         ),
       if (potassiumMg != null && potassiumMg! > 0)
         _NutrientChip(
-          label: 'Potassium',
+          label: l10n.nds_nutrient_potassium,
           value: potassiumMg!.toStringAsFixed(0),
-          unit: 'mg',
+          unit: mg,
           color: AppColors.textMuted,
           bg: NutrientColors.bg,
         ),
       if (calciumMg != null && calciumMg! > 0)
         _NutrientChip(
-          label: 'Calcium',
+          label: l10n.nds_nutrient_calcium,
           value: calciumMg!.toStringAsFixed(0),
-          unit: 'mg',
+          unit: mg,
           color: AppColors.textMuted,
           bg: NutrientColors.bg,
         ),
       if (ironMg != null && ironMg! > 0)
         _NutrientChip(
-          label: 'Iron',
+          label: l10n.nds_nutrient_iron,
           value: ironMg!.toStringAsFixed(1),
-          unit: 'mg',
+          unit: mg,
           color: AppColors.textMuted,
           bg: NutrientColors.bg,
         ),
       if (vitaminAMcg != null && vitaminAMcg! > 0)
         _NutrientChip(
-          label: 'Vit A',
+          label: l10n.nds_nutrient_vitamin_a,
           value: vitaminAMcg!.toStringAsFixed(0),
-          unit: 'mcg',
+          unit: mcg,
           color: NutrientColors.fiber,
           bg: NutrientColors.fiberSoft,
         ),
       if (vitaminCMg != null && vitaminCMg! > 0)
         _NutrientChip(
-          label: 'Vit C',
+          label: l10n.nds_nutrient_vitamin_c,
           value: vitaminCMg!.toStringAsFixed(1),
-          unit: 'mg',
+          unit: mg,
           color: NutrientColors.fiber,
           bg: NutrientColors.fiberSoft,
         ),
       if (vitaminDMcg != null && vitaminDMcg! > 0)
         _NutrientChip(
-          label: 'Vit D',
+          label: l10n.nds_nutrient_vitamin_d,
           value: vitaminDMcg!.toStringAsFixed(1),
-          unit: 'mcg',
+          unit: mcg,
           color: NutrientColors.fiber,
           bg: NutrientColors.fiberSoft,
         ),
       if (vitaminB12Mcg != null && vitaminB12Mcg! > 0)
         _NutrientChip(
-          label: 'Vit B12',
+          label: l10n.nutrient_vitamin_b12,
           value: vitaminB12Mcg!.toStringAsFixed(1),
-          unit: 'mcg',
+          unit: mcg,
           color: NutrientColors.fiber,
           bg: NutrientColors.fiberSoft,
         ),
-      if (glycemicIndex != null) _GiBadgeChip(gi: glycemicIndex!),
+      if (glycemicIndex != null) _GiBadgeChip(gi: glycemicIndex!, l10n: l10n),
     ];
 
     if (chips.isEmpty) return const SizedBox.shrink();
@@ -231,7 +237,8 @@ class _NutrientChip extends StatelessWidget {
 
 class _GiBadgeChip extends StatelessWidget {
   final int gi;
-  const _GiBadgeChip({required this.gi});
+  final AppLocalizations l10n;
+  const _GiBadgeChip({required this.gi, required this.l10n});
 
   @override
   Widget build(BuildContext context) {
@@ -239,13 +246,13 @@ class _GiBadgeChip extends StatelessWidget {
     final String label;
     if (gi < 55) {
       color = AppColors.accent;
-      label = 'Low GI';
+      label = l10n.gi_low_badge;
     } else if (gi < 70) {
       color = AppColors.warm;
-      label = 'Med GI';
+      label = l10n.gi_medium_badge;
     } else {
       color = AppColors.accentOver;
-      label = 'High GI';
+      label = l10n.gi_high_badge;
     }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
