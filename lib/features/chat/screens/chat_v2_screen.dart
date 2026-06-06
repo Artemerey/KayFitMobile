@@ -166,6 +166,9 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     }
     // If the user navigated away during recognition and comes back, the
     // provider might already be in done state — show the result sheet.
+    _textController.addListener(() {
+      if (_fromVoice && _voiceState == _VoiceState.idle) _fromVoice = false;
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final recog = ref.read(photoRecognitionProvider);
