@@ -1,9 +1,11 @@
-import 'dart:io';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:purchases_flutter/purchases_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../core/api/api_client.dart';
 import '../../../core/subscription/subscription_provider.dart';
 import '../../../core/subscription/subscription_state.dart';
 import '../../settings/screens/document_screen.dart';
@@ -37,11 +39,21 @@ class _PaywallSheetContentState extends ConsumerState<_PaywallSheetContent> {
   int _selected = 2; // quarterly pre-selected
   bool _loading = false;
   List<Package> _packages = [];
+  List<Package> _discountPackages = [];
+  bool _discountActive = false;
+
+  static const _kTypes = [
+    PackageType.monthly,
+    PackageType.monthly,
+    PackageType.threeMonth,
+    PackageType.annual,
+  ];
 
   @override
   void initState() {
     super.initState();
     _loadPackages();
+    _checkDiscountAndLoadPackages();
   }
 
   Future<void> _loadPackages() async {
@@ -50,17 +62,59 @@ class _PaywallSheetContentState extends ConsumerState<_PaywallSheetContent> {
     setState(() => _packages = offering?.availablePackages ?? []);
   }
 
+  Future<void> _checkDiscountAndLoadPackages() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    final storedMs = prefs.getInt('paywall_discount_start_ms');
+    if (storedMs == null) return;
+    final elapsed = DateTime.now().millisecondsSinceEpoch - storedMs;
+    if (elapsed >= 3600000) return;
+
+    // Try dedicated RC "discount" offering first.
+    final discountOff = await ref.read(discountOfferingProvider.future);
+    if (!mounted) return;
+    if (discountOff != null && discountOff.availablePackages.isNotEmpty) {
+      setState(() {
+        _discountActive = true;
+        _discountPackages = discountOff.availablePackages;
+      });
+      return;
+    }
+
+    // Fallback: activate discount UI only when regular packages have Apple
+    // intro pricing — that way prices actually change and the UI is honest.
+    final offering = await ref.read(currentOfferingProvider.future);
+    if (!mounted) return;
+    final hasIntro = offering?.availablePackages
+            .any((p) => p.storeProduct.introductoryPrice != null) ??
+        false;
+    if (hasIntro) {
+      setState(() => _discountActive = true);
+    }
+  }
+
+  // Returns the package used for purchase (discount if available, else regular).
   Package? _packageForIndex(int index) {
+    final pkgs = (_discountActive && _discountPackages.isNotEmpty)
+        ? _discountPackages
+        : _packages;
+    if (pkgs.isEmpty) return null;
+    try {
+      return pkgs.firstWhere(
+        (p) => p.packageType == _kTypes[index],
+        orElse: () => pkgs.first,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // Returns the original (full-price) package from the default offering.
+  Package? _originalPackageForIndex(int index) {
     if (_packages.isEmpty) return null;
-    final types = [
-      PackageType.monthly,
-      PackageType.monthly,
-      PackageType.threeMonth,
-      PackageType.annual,
-    ];
     try {
       return _packages.firstWhere(
-        (p) => p.packageType == types[index],
+        (p) => p.packageType == _kTypes[index],
         orElse: () => _packages.first,
       );
     } catch (_) {
@@ -71,7 +125,6 @@ class _PaywallSheetContentState extends ConsumerState<_PaywallSheetContent> {
   String _priceLabel(int index) {
     final pkg = _packageForIndex(index);
     if (pkg == null) {
-      // Fallback labels while RC loads or in simulator
       return switch (index) {
         0 => 'затем месяц',
         1 => '— ₽/мес',
@@ -80,7 +133,28 @@ class _PaywallSheetContentState extends ConsumerState<_PaywallSheetContent> {
         _ => '',
       };
     }
+    // Discount via intro pricing (no separate RC offering configured yet)
+    if (_discountActive && _discountPackages.isEmpty) {
+      final intro = pkg.storeProduct.introductoryPrice;
+      if (intro != null) return intro.priceString;
+    }
     return pkg.storeProduct.priceString;
+  }
+
+  // Returns the original price string for strikethrough display, or null if
+  // no real discount is available for this index.
+  String? _originalPriceLabel(int index) {
+    if (!_discountActive) return null;
+    if (_discountPackages.isNotEmpty) {
+      // Discount comes from a separate RC offering — show regular price as strikethrough
+      return _originalPackageForIndex(index)?.storeProduct.priceString;
+    }
+    // Discount comes from Apple intro pricing — show original price only if intro exists
+    final pkg = _originalPackageForIndex(index);
+    if (pkg?.storeProduct.introductoryPrice != null) {
+      return pkg!.storeProduct.priceString;
+    }
+    return null;
   }
 
   bool _isTrial(int index) => index == 0;
@@ -103,25 +177,6 @@ class _PaywallSheetContentState extends ConsumerState<_PaywallSheetContent> {
           ),
         );
       }
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _onRedeemCode() async {
-    if (!Platform.isIOS) return;
-    setState(() => _loading = true);
-    try {
-      await Purchases.presentCodeRedemptionSheet();
-      if (!mounted) return;
-      // Refresh subscription state after redemption
-      ref.invalidate(subscriptionNotifierProvider);
-      final state = ref.read(subscriptionNotifierProvider);
-      if (state is SubscriptionActive || state is SubscriptionGracePeriod) {
-        Navigator.of(context).pop(PaywallResult.subscribed);
-      }
-    } on Exception catch (_) {
-      // Sheet dismissed or cancelled — not an error
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -241,6 +296,7 @@ class _PaywallSheetContentState extends ConsumerState<_PaywallSheetContent> {
                         child: PaywallPlanCard(
                           title: 'СТАРТ\n7 дней 🆓',
                           priceLabel: _priceLabel(0),
+                          originalPriceLabel: _originalPriceLabel(0),
                           selected: _selected == 0,
                           onTap: () => setState(() => _selected = 0),
                         ),
@@ -250,6 +306,7 @@ class _PaywallSheetContentState extends ConsumerState<_PaywallSheetContent> {
                         child: PaywallPlanCard(
                           title: 'Месяц',
                           priceLabel: _priceLabel(1),
+                          originalPriceLabel: _originalPriceLabel(1),
                           selected: _selected == 1,
                           onTap: () => setState(() => _selected = 1),
                         ),
@@ -263,6 +320,7 @@ class _PaywallSheetContentState extends ConsumerState<_PaywallSheetContent> {
                         child: PaywallPlanCard(
                           title: '3 месяца',
                           priceLabel: _priceLabel(2),
+                          originalPriceLabel: _originalPriceLabel(2),
                           selected: _selected == 2,
                           badge: '★ ЛУЧШИЙ',
                           onTap: () => setState(() => _selected = 2),
@@ -273,6 +331,7 @@ class _PaywallSheetContentState extends ConsumerState<_PaywallSheetContent> {
                         child: PaywallPlanCard(
                           title: 'Год',
                           priceLabel: _priceLabel(3),
+                          originalPriceLabel: _originalPriceLabel(3),
                           selected: _selected == 3,
                           badge: '🔥 −40%',
                           onTap: () => setState(() => _selected = 3),
@@ -281,6 +340,9 @@ class _PaywallSheetContentState extends ConsumerState<_PaywallSheetContent> {
                     ],
                   ),
                   const SizedBox(height: 24),
+
+                  _DiscountTimerBanner(discountActive: _discountActive),
+                  const SizedBox(height: 12),
 
                   // CTA button
                   SizedBox(
@@ -308,7 +370,9 @@ class _PaywallSheetContentState extends ConsumerState<_PaywallSheetContent> {
                           : Text(
                               _isTrial(_selected)
                                   ? 'Начать 7 дней бесплатно'
-                                  : 'Подписаться',
+                                  : _discountActive
+                                      ? 'Подписаться со скидкой 20%'
+                                      : 'Подписаться',
                               style: const TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w700,
@@ -327,15 +391,8 @@ class _PaywallSheetContentState extends ConsumerState<_PaywallSheetContent> {
                     ),
                   const SizedBox(height: 16),
 
-                  // Promo code (iOS only)
-                  if (Platform.isIOS)
-                    TextButton(
-                      onPressed: _loading ? null : _onRedeemCode,
-                      child: const Text(
-                        'У меня есть промокод',
-                        style: TextStyle(fontSize: 14, color: _kAccent),
-                      ),
-                    ),
+                  _PromoCodeField(),
+                  const SizedBox(height: 8),
 
                   // Dismiss
                   TextButton(
@@ -391,6 +448,225 @@ class _PaywallSheetContentState extends ConsumerState<_PaywallSheetContent> {
 }
 
 enum _DocType { terms, privacy, subscriptionTerms }
+
+class _DiscountTimerBanner extends StatefulWidget {
+  const _DiscountTimerBanner({required this.discountActive});
+  final bool discountActive;
+
+  @override
+  State<_DiscountTimerBanner> createState() => _DiscountTimerBannerState();
+}
+
+class _DiscountTimerBannerState extends State<_DiscountTimerBanner> {
+  Timer? _timer;
+  int _remainingSecs = 0;
+  bool _loaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
+
+  Future<void> _init() async {
+    final prefs = await SharedPreferences.getInstance();
+    final storedMs = prefs.getInt('paywall_discount_start_ms');
+    if (!mounted) return;
+    if (storedMs == null) {
+      setState(() => _loaded = true);
+      return;
+    }
+    final remaining =
+        3600 - ((DateTime.now().millisecondsSinceEpoch - storedMs) / 1000).round();
+    if (remaining <= 0) {
+      setState(() => _loaded = true);
+      return;
+    }
+    setState(() {
+      _remainingSecs = remaining;
+      _loaded = true;
+    });
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (_remainingSecs <= 1) {
+        _timer?.cancel();
+        setState(() => _remainingSecs = 0);
+      } else {
+        setState(() => _remainingSecs--);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_loaded || _remainingSecs <= 0 || !widget.discountActive) return const SizedBox.shrink();
+    final mins = (_remainingSecs ~/ 60).toString().padLeft(2, '0');
+    final secs = (_remainingSecs % 60).toString().padLeft(2, '0');
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFE4D6),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        '🔥 Скидка сгорает через  $mins:$secs',
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          color: _kAccent,
+        ),
+      ),
+    );
+  }
+}
+
+class _PromoCodeField extends StatefulWidget {
+  @override
+  State<_PromoCodeField> createState() => _PromoCodeFieldState();
+}
+
+class _PromoCodeFieldState extends State<_PromoCodeField> {
+  final _controller = TextEditingController();
+  bool _loading = false;
+  String? _message;
+  bool _isSuccess = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _apply() async {
+    final code = _controller.text.trim().toUpperCase();
+    if (code.isEmpty) return;
+    setState(() {
+      _loading = true;
+      _message = null;
+    });
+    try {
+      final response = await apiDio.post(
+        '/api/promo/apply',
+        data: {'code': code},
+      );
+      if (!mounted) return;
+      final data = response.data;
+      if (data is Map && data['already_applied'] == true) {
+        setState(() {
+          _isSuccess = true;
+          _message = '✓ Промокод уже применён';
+        });
+      } else {
+        setState(() {
+          _isSuccess = true;
+          _message = '✓ Промокод принят';
+        });
+      }
+    } on Exception catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isSuccess = false;
+        _message = e.toString().contains('404')
+            ? 'Промокод не найден'
+            : 'Ошибка. Попробуйте ещё раз.';
+      });
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _controller,
+                textCapitalization: TextCapitalization.characters,
+                style: const TextStyle(fontSize: 14),
+                decoration: InputDecoration(
+                  hintText: 'Промокод от блогера',
+                  hintStyle: const TextStyle(fontSize: 14, color: _kDimText),
+                  filled: true,
+                  fillColor: Colors.white,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: Color(0xFFE9D5CB)),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: Color(0xFFE9D5CB)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: _kAccent),
+                  ),
+                ),
+                onChanged: (_) => setState(() {}),
+              ),
+            ),
+            const SizedBox(width: 8),
+            ValueListenableBuilder<TextEditingValue>(
+              valueListenable: _controller,
+              builder: (_, value, _) {
+                final enabled = value.text.trim().isNotEmpty && !_loading;
+                return TextButton(
+                  onPressed: enabled ? _apply : null,
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    backgroundColor: enabled ? _kAccent : _kAccent.withValues(alpha: 0.4),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: _loading
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Text(
+                          'Применить',
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                        ),
+                );
+              },
+            ),
+          ],
+        ),
+        if (_message != null) ...[
+          const SizedBox(height: 6),
+          Text(
+            _message!,
+            style: TextStyle(
+              fontSize: 12,
+              color: _isSuccess ? const Color(0xFF34A853) : const Color(0xFFE53935),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
 
 class _FooterLink extends StatelessWidget {
   const _FooterLink(this.label, {required this.onTap});
