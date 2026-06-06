@@ -1225,6 +1225,9 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
 
   Future<void> _stopAndTranscribe() async {
     debugPrint('[mic] stopping recorder');
+    // Capture before any await — WidgetRef throws AssertionError in debug mode
+    // after widget disposal, which is not caught by `on Exception catch`.
+    final pendingNotifier = ref.read(transcriptionPendingProvider.notifier);
     final savedPath = await _recorder.stop();
     debugPrint('[mic] stopped, file=$savedPath');
     // Capture language before the async HTTP call — context may be gone later.
@@ -1262,8 +1265,9 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
             TextPosition(offset: text.length),
           );
         } else {
-          // User navigated away — park the result so it appears when they return.
-          ref.read(transcriptionPendingProvider.notifier).state = text;
+          // User navigated away — park via pre-captured notifier (ref is
+          // invalid after disposal but the StateController lives on).
+          pendingNotifier.state = text;
         }
       } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2789,6 +2793,7 @@ class _WeightField extends StatelessWidget {
         focusNode: focusNode,
         readOnly: readOnly,
         keyboardType: const TextInputType.numberWithOptions(decimal: false),
+        textInputAction: TextInputAction.done,
         textAlign: TextAlign.center,
         onSubmitted: (_) => onSubmitted(),
         style: TextStyle(

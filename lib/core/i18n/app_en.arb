@@ -638,5 +638,7 @@
   "nav_add": "Add",
   "cal_on_track": "on track",
   "cal_over_goal": "over goal",
-  "cal_empty": "empty"
+  "cal_empty": "empty",
+
+  "session_expired": "Session expired. Please sign in again."
 }

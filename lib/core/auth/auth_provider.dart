@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
@@ -27,8 +28,27 @@ final secureStorageProvider = Provider<SecureTokenStorage>(
 
 @Riverpod(keepAlive: true)
 class AuthNotifier extends _$AuthNotifier {
+  StreamSubscription<void>? _sessionExpiredSub;
+
+  /// True when the last logout was triggered by an expired/revoked refresh
+  /// token (i.e. the server forced it, not a manual logout). LoginScreen
+  /// reads this once to show a "session expired" snackbar, then clears it.
+  bool _wasExpiredByServer = false;
+  bool get wasExpiredByServer => _wasExpiredByServer;
+  void clearExpiredFlag() => _wasExpiredByServer = false;
+
   @override
   AsyncValue<UserProfile?> build() {
+    _sessionExpiredSub?.cancel();
+    _sessionExpiredSub = sessionExpiredStream.listen((_) async {
+      // _AuthInterceptor already cleared tokens in storage; update Riverpod
+      // state immediately so GoRouter redirects to /login without waiting
+      // for the next checkSession() (app resume / cold start).
+      _wasExpiredByServer = true;
+      await _clearCache();
+      state = const AsyncValue.data(null);
+    });
+    ref.onDispose(() => _sessionExpiredSub?.cancel());
     return const AsyncValue.loading();
   }
 

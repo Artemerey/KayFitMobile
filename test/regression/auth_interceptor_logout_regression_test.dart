@@ -1,12 +1,13 @@
 // test/regression/auth_interceptor_logout_regression_test.dart
 //
-// Block B — _AuthInterceptor logout behaviour after H4 change.
+// Block B — _AuthInterceptor logout behaviour.
 //
-// H4: _handleLogout() only clears tokens; no global callback.
-//     AuthNotifier detects missing tokens on next checkSession call.
+// BUG-1 fix: _handleLogout() fires sessionExpiredStream so AuthNotifier
+// updates state to data(null) immediately (no longer waits for checkSession).
+// Prior behaviour (H4): only cleared tokens, AuthNotifier updated on next
+// app-resume checkSession. Updated: stream-driven immediate state update.
 //
-// These are pure unit tests (no WidgetsFlutterBinding) — matches the style
-// of the existing auth_interceptor_test.dart.
+// These are pure unit tests — matches the style of auth_interceptor_test.dart.
 
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -87,14 +88,12 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
-  // ── B1: 401 → refresh 401 → only clearTokens, no immediate state change ──
+  // ── B1: 401 → refresh 401 → sessionExpiredStream fires → state = data(null) ──
 
   test(
-    'B1 — 401 + failed refresh: clearTokens is called, '
-    'authNotifier state is NOT immediately set to data(null) by interceptor (H4)',
+    'BUG-1 / B1 — 401 + failed refresh: clearTokens called AND '
+    'AuthNotifier state becomes data(null) after microtasks drain',
     () async {
-      // H4: _handleLogout() only clears tokens.
-      // AuthNotifier remains in its current state — next checkSession() handles it.
       fakeStorage.seed(_validPair());
 
       final refreshAdapter = _MockAdapter(
@@ -118,10 +117,9 @@ void main() {
       );
       addTearDown(container.dispose);
 
-      // Set a known state before the 401 fires.
-      container
-          .read(authNotifierProvider.notifier)
-          .restoreFromCache(const UserProfile(id: 1, email: 'u@test.com'));
+      // Subscribe to stream by reading the notifier (triggers build()).
+      final notifier = container.read(authNotifierProvider.notifier);
+      notifier.restoreFromCache(const UserProfile(id: 1, email: 'u@test.com'));
 
       try {
         await apiDio.get('/api/v1/protected');
@@ -130,14 +128,22 @@ void main() {
       // clearTokens must be called (interceptor did its job).
       expect(fakeStorage.clearCount, greaterThan(0));
 
-      // AuthNotifier state must NOT have been set to data(null) by interceptor.
-      // H4: there is no global callback — the state is changed only by
-      // AuthNotifier.checkSession() on the next lifecycle resume.
+      // wasExpiredByServer flag is set synchronously when stream fires.
+      expect(
+        notifier.wasExpiredByServer,
+        isTrue,
+        reason: 'BUG-1: flag must be set so LoginScreen can show snackbar',
+      );
+
+      // Drain microtasks so the async stream listener completes.
+      await Future.delayed(Duration.zero);
+
+      // BUG-1 fix: state is now data(null) without waiting for checkSession().
       final state = container.read(authNotifierProvider);
       expect(
         state.value,
-        isNotNull,
-        reason: 'Interceptor must not mutate AuthNotifier state directly (H4)',
+        isNull,
+        reason: 'BUG-1: interceptor logout must immediately update AuthNotifier',
       );
     },
   );
@@ -233,6 +239,47 @@ void main() {
 
       // Network error (not 401) must not trigger token clearing.
       expect(fakeStorage.clearCount, equals(0));
+    },
+  );
+
+  // ── B5: wasExpiredByServer flag lifecycle ─────────────────────────────────
+
+  test(
+    'B5 — clearExpiredFlag() resets wasExpiredByServer to false',
+    () async {
+      fakeStorage.seed(_validPair());
+
+      final refreshAdapter = _MockAdapter((_) async => _json('{}', 401));
+
+      await initApiClient(
+        storage: fakeStorage,
+        refreshDioFactory: () {
+          final d = Dio(BaseOptions(baseUrl: 'https://app.carbcounter.online'));
+          d.httpClientAdapter = refreshAdapter;
+          return d;
+        },
+      );
+      apiDio.httpClientAdapter =
+          _MockAdapter((_) async => _json('{}', 401));
+
+      final container = ProviderContainer(
+        overrides: [secureStorageProvider.overrideWithValue(fakeStorage)],
+      );
+      addTearDown(container.dispose);
+
+      final notifier = container.read(authNotifierProvider.notifier);
+      notifier.restoreFromCache(const UserProfile(id: 2, email: 'y@t.com'));
+
+      try {
+        await apiDio.get('/api/v1/protected');
+      } on DioException catch (_) {}
+
+      expect(notifier.wasExpiredByServer, isTrue);
+
+      // LoginScreen calls clearExpiredFlag() after showing the snackbar.
+      notifier.clearExpiredFlag();
+      expect(notifier.wasExpiredByServer, isFalse,
+          reason: 'flag must be cleared so it does not show on next navigation');
     },
   );
 }

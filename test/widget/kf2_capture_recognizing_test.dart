@@ -16,6 +16,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:kayfit/features/add_meal/screens/kf2_capture_screen.dart';
 import 'package:kayfit/features/add_meal/screens/kf2_recognizing_screen.dart';
@@ -129,43 +130,47 @@ void main() {
     });
 
     // ── 5. Cancel pops navigator ──────────────────────────────────────────────
+    //
+    // Kf2CaptureScreen uses context.pop() from go_router (not Navigator.pop),
+    // so the test must set up a GoRouter to make the pop reachable.
 
     testWidgets('tapping X pops the navigator', (tester) async {
       bool popped = false;
-      final app = MaterialApp(
-        home: Navigator(
-          onGenerateRoute: (settings) => MaterialPageRoute<void>(
-            builder: (_) => Scaffold(
+
+      final router = GoRouter(
+        routes: [
+          GoRoute(
+            path: '/',
+            builder: (_, __) => Scaffold(
               body: Builder(
                 builder: (ctx) => ElevatedButton(
-                  onPressed: () {
-                    Navigator.of(ctx).push(
-                      MaterialPageRoute<XFile?>(
-                        builder: (_) => const Kf2CaptureScreen(),
-                      ),
-                    ).then((_) => popped = true);
+                  onPressed: () async {
+                    await ctx.push<XFile?>('/capture');
+                    popped = true;
                   },
                   child: const Text('open'),
                 ),
               ),
             ),
           ),
-        ),
+          GoRoute(
+            path: '/capture',
+            builder: (_, __) => const Kf2CaptureScreen(),
+          ),
+        ],
       );
 
-      await tester.pumpWidget(ProviderScope(child: app));
+      await tester.pumpWidget(
+        ProviderScope(child: MaterialApp.router(routerConfig: router)),
+      );
       await _pumpAndSettle(tester);
 
-      // Open Kf2CaptureScreen.
       await tester.tap(find.text('open'));
-      // Use pump + duration instead of pumpAndSettle: the screen has a
-      // repeating AnimationController that would cause pumpAndSettle to
-      // time out.
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 80));
       tester.takeException();
 
-      // Tap X.
+      // Tap X — triggers context.pop(null) via GoRouter.
       await tester.tap(find.byIcon(Icons.close));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 80));

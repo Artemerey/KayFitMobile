@@ -9,10 +9,14 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kayfit/core/i18n/generated/app_localizations.dart';
 import 'package:kayfit/shared/theme/kayfit2_theme.dart';
 import 'package:kayfit/shared/widgets/kayfit2_tab_bar.dart';
 
 Widget _wrap(Widget child) => MaterialApp(
+      locale: const Locale('en'),
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
       home: Scaffold(bottomNavigationBar: child),
     );
 
@@ -30,7 +34,7 @@ void main() {
         ),
       );
       expect(find.text('Journal'), findsOneWidget);
-      expect(find.text('Chat'), findsOneWidget);
+      expect(find.text('AI Chat'), findsOneWidget);
       expect(find.byIcon(Icons.add_rounded), findsOneWidget);
     });
   });
@@ -65,7 +69,7 @@ void main() {
           ),
         ),
       );
-      await tester.tap(find.text('Chat'));
+      await tester.tap(find.text('AI Chat'));
       await tester.pump();
       expect(fired, 'chat');
     });

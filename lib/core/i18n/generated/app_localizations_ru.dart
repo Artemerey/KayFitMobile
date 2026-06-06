@@ -1597,4 +1597,7 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get cal_empty => 'нет данных';
+
+  @override
+  String get session_expired => 'Сессия истекла. Войдите снова.';
 }

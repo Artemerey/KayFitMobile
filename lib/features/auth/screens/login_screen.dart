@@ -30,6 +30,20 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   void initState() {
     super.initState();
     AnalyticsService.loginPageOpened();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final notifier = ref.read(authNotifierProvider.notifier);
+      if (notifier.wasExpiredByServer) {
+        notifier.clearExpiredFlag();
+        final l10n = AppLocalizations.of(context)!;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(l10n.session_expired),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    });
   }
 
   // ---------------------------------------------------------------------------

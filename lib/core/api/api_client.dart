@@ -10,6 +10,21 @@ import 'locale_interceptor.dart';
 export '../auth/secure_token_storage.dart';
 export '../auth/token_pair.dart';
 
+// Broadcast stream: fires a void event when the interceptor clears tokens due
+// to an unrecoverable 401 (expired/revoked refresh token). AuthNotifier listens
+// to this and updates its state immediately, so GoRouter redirects to /login
+// without waiting for the next checkSession() call.
+final _sessionExpiredController = StreamController<void>.broadcast();
+
+/// Emits a single void event each time the interceptor forces a logout.
+/// AuthNotifier subscribes to this in its build() method.
+Stream<void> get sessionExpiredStream => _sessionExpiredController.stream;
+
+/// Fire the session-expired event from tests without going through a real
+/// Dio 401 flow. Mirrors the path that _handleLogout() takes at runtime.
+@visibleForTesting
+void fireSessionExpiredForTest() => _sessionExpiredController.add(null);
+
 const _baseUrl = 'https://app.carbcounter.online';
 
 const baseUrl = _baseUrl;
@@ -241,11 +256,10 @@ class _AuthInterceptor extends Interceptor {
   }
 
   Future<void> _handleLogout() async {
-    // Only clear tokens. AuthNotifier detects the absence of tokens on the
-    // next checkSession call (triggered via H2 WidgetsBindingObserver on
-    // resumed, or on the next API-driven auth check). There is no global
-    // callback — that was a race-condition source (H4).
     await _storage.clearTokens();
+    // Notify AuthNotifier immediately so GoRouter redirects to /login without
+    // waiting for the next checkSession() (app resume or cold start).
+    _sessionExpiredController.add(null);
   }
 }
 

@@ -9,10 +9,16 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kayfit/core/i18n/generated/app_localizations.dart';
 import 'package:kayfit/shared/theme/kayfit2_theme.dart';
 import 'package:kayfit/shared/widgets/kayfit2_calendar_strip.dart';
 
-Widget _wrap(Widget child) => MaterialApp(home: Scaffold(body: child));
+Widget _wrap(Widget child) => MaterialApp(
+      locale: const Locale('en'),
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      home: Scaffold(body: child),
+    );
 
 void main() {
   group('Kayfit2CalendarStrip compact', () {
@@ -58,6 +64,9 @@ void main() {
       // viewport, so we wrap in a scroll view to mirror real page layout.
       await tester.pumpWidget(
         MaterialApp(
+          locale: const Locale('en'),
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
           home: Scaffold(
             body: SingleChildScrollView(
               child: Kayfit2CalendarStrip(

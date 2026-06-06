@@ -3139,6 +3139,12 @@ abstract class AppLocalizations {
   /// In ru, this message translates to:
   /// **'нет данных'**
   String get cal_empty;
+
+  /// No description provided for @session_expired.
+  ///
+  /// In ru, this message translates to:
+  /// **'Сессия истекла. Войдите снова.'**
+  String get session_expired;
 }
 
 class _AppLocalizationsDelegate

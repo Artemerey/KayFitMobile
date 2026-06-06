@@ -1596,4 +1596,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get cal_empty => 'empty';
+
+  @override
+  String get session_expired => 'Session expired. Please sign in again.';
 }

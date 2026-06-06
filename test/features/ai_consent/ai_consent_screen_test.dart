@@ -140,18 +140,25 @@ void main() {
     );
 
     testWidgets(
-      'Accept button InkWell is disabled (onTap null) when checkbox is unchecked',
+      'Accept button InkWell is tappable when checkbox is unchecked (early-return guard in _onAccept)',
       (tester) async {
         await _pump(tester, _wrap(_FastNotifier()));
 
-        // The Accept InkWell must have onTap == null before checkbox is toggled.
+        // The Accept InkWell is always tappable — it guards early inside
+        // _onAccept when !_checked, so tapping it without the checkbox
+        // must NOT start processing (no CircularProgressIndicator).
         await tester.ensureVisible(find.byKey(_kAcceptInkWellKey));
         final inkWell = tester.widget<InkWell>(find.byKey(_kAcceptInkWellKey));
         expect(
           inkWell.onTap,
-          isNull,
-          reason: 'Accept InkWell should be disabled when _checked == false',
+          isNotNull,
+          reason: 'Accept InkWell is enabled; _onAccept guards _checked internally',
         );
+        // Tap without checking the checkbox — must not start loading.
+        await tester.tap(find.byKey(_kAcceptInkWellKey));
+        await tester.pump();
+        expect(find.byType(CircularProgressIndicator), findsNothing,
+            reason: 'tapping Accept unchecked must not start loading');
       },
     );
 
@@ -196,7 +203,7 @@ void main() {
     );
 
     testWidgets(
-      'LinearProgressIndicator appears at top of screen while processing',
+      'LinearProgressIndicator appears at top of screen after 300ms grace period',
       (tester) async {
         await _pump(tester, _wrap(_SlowNotifier()));
 
@@ -205,6 +212,11 @@ void main() {
         await _tapText(tester, 'Accept & Continue');
         await tester.pump();
 
+        // Not shown yet — 300ms grace period has not elapsed.
+        expect(find.byType(LinearProgressIndicator), findsNothing);
+
+        // Advance past the 300ms timer.
+        await tester.pump(const Duration(milliseconds: 350));
         expect(find.byType(LinearProgressIndicator), findsOneWidget);
       },
     );
@@ -228,7 +240,10 @@ void main() {
         }
         await tester.pump();
 
-        // Still exactly one progress bar.
+        // Advance past 300ms to trigger the linear loader.
+        await tester.pump(const Duration(milliseconds: 350));
+
+        // Still exactly one progress bar (not two).
         expect(find.byType(LinearProgressIndicator), findsOneWidget);
       },
     );
