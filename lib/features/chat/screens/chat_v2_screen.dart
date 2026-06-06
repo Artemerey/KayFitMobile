@@ -28,9 +28,8 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:record/record.dart';
+import 'package:speech_to_text/speech_to_text.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/analytics/analytics_service.dart';
@@ -127,10 +126,10 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
   // ref.listen and once via the initState post-frame check.
   bool _photoResultConsumed = false;
 
-  // Voice recording
-  final _recorder = AudioRecorder();
+  // Voice (on-device speech recognition)
+  final _speech = SpeechToText();
   _VoiceState _voiceState = _VoiceState.idle;
-  String? _recordPath;
+  bool _fromVoice = false;
 
   // Thinking step labels — locale-aware, mirrors the JSX prototype sequence.
   List<String> get _kThinkingSteps {
@@ -182,6 +181,20 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
         );
         ref.read(transcriptionPendingProvider.notifier).state = null;
       }
+      // If a transcription HTTP call is still in flight, show the spinner so
+      // the user knows their voice request is being processed.
+      if (ref.read(transcriptionInProgressProvider) &&
+          _voiceState == _VoiceState.idle) {
+        setState(() => _voiceState = _VoiceState.transcribing);
+      }
+      // If an AI chat call is still in flight, restore the thinking bubble
+      // so the user knows the response is coming.
+      if (ref.read(chatProcessingProvider) && _thinking == null) {
+        setState(() => _thinking = _ThinkingState(
+          steps: [_kThinkingSteps[0]],
+          done: false,
+        ));
+      }
     });
   }
 
@@ -190,12 +203,10 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     WidgetsBinding.instance.removeObserver(this);
     _scrollController.dispose();
     _textController.dispose();
-    // Stop any in-progress recording before disposing — otherwise the native
-    // audio session keeps the mic open in the background.
-    if (_voiceState != _VoiceState.idle) {
-      _recorder.stop().ignore();
+    // Stop any in-progress speech session — keeps the mic from running silently.
+    if (_voiceState == _VoiceState.recording) {
+      _speech.cancel().ignore();
     }
-    _recorder.dispose();
     super.dispose();
   }
 
@@ -206,11 +217,9 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive) {
       if (_voiceState == _VoiceState.recording) {
-        _recorder.stop().then((_) {
+        _speech.stop().then((_) {
           if (mounted) setState(() => _voiceState = _VoiceState.idle);
         }).ignore();
-      } else if (_voiceState == _VoiceState.transcribing) {
-        if (mounted) setState(() => _voiceState = _VoiceState.idle);
       }
     }
   }
@@ -323,6 +332,10 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     final text = _textController.text.trim();
     if (text.isEmpty || _isSending) return;
 
+    // Pre-capture before any await — WidgetRef throws after widget disposal.
+    final historyNotifier = ref.read(chatHistoryProvider.notifier);
+    final processingNotifier = ref.read(chatProcessingProvider.notifier);
+
     // Subscription gate — block AI chat for free users.
     final ok = await requireSubscription(context, ref);
     if (!ok || !mounted) return;
@@ -368,6 +381,7 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
       _isSending = true;
       _thinking = _ThinkingState(steps: [_kThinkingSteps[0]], done: false);
     });
+    processingNotifier.state = true;
     _scrollToBottom();
 
     try {
@@ -401,10 +415,13 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
           ? '$pendingOrig. ${text.trim()}'
           : text;
       // Only ever ask for clarification ONCE per meal session.
+      final isVoice = _fromVoice;
+      _fromVoice = false;
       final routed = await _tryParseAndOfferMeal(
         parseText,
         msgLang,
         skipClarify: forceMealFlow,
+        isVoice: isVoice,
       );
       if (routed) {
         if (mounted) setState(() => _isSending = false);
@@ -414,9 +431,11 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     }
 
     // Drip-feed step labels to simulate streaming progress.
+    // Use break (not return) so the API call still runs even if the user
+    // navigates away — the response will land in the global history provider.
     for (var i = 1; i < _kThinkingSteps.length; i++) {
       await Future<void>.delayed(Duration(milliseconds: 600 + i * 200));
-      if (!mounted) return;
+      if (!mounted) break;
       setState(() {
         _thinking = _thinking?.withStep(_kThinkingSteps[i]);
       });
@@ -442,23 +461,23 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
       final reply = ChatMessage.fromJson(
         resp.data['message'] as Map<String, dynamic>,
       );
-      if (!mounted) return;
-      ref.read(chatHistoryProvider.notifier).add(reply);
-      setState(() => _thinking = null);
-      try {
-        AnalyticsService.chatResponseReceived(
-          ref.read(chatHistoryProvider).length,
-        );
-      } catch (_) {}
-      _scrollToBottom();
-    } on Exception {
-      if (!mounted) return;
-      ref.read(chatHistoryProvider.notifier).removeLast();
-      setState(() {
-        _thinking = null;
-        // optimistic user message already removed via notifier above
-      });
+      // Always persist reply — historyNotifier is global and pre-captured above.
+      // The user will see the response when they return to the chat tab.
+      historyNotifier.add(reply);
       if (mounted) {
+        setState(() => _thinking = null);
+        try {
+          AnalyticsService.chatResponseReceived(
+            ref.read(chatHistoryProvider).length,
+          );
+        } catch (_) {}
+        _scrollToBottom();
+      }
+    } on Exception {
+      // Roll back optimistic user message even if screen was navigated away.
+      historyNotifier.removeLast();
+      if (mounted) {
+        setState(() => _thinking = null);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: const Text('Could not reach AI coach. Try again.'),
@@ -471,6 +490,7 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
         );
       }
     } finally {
+      processingNotifier.state = false;
       if (mounted) setState(() => _isSending = false);
     }
   }
@@ -493,11 +513,18 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     String text,
     String lang, {
     bool skipClarify = false,
+    bool isVoice = false,
   }) async {
+    // Pre-capture before the API await — ref is invalid after navigation.
+    final pendingMealNotifier = ref.read(pendingMealProvider.notifier);
     try {
       final resp = await apiDio.post(
         '/api/v2/parse_meal_suggestions',
-        data: {'text': text, 'language': lang},
+        data: {
+          'text': text,
+          'language': lang,
+          if (isVoice) 'is_voice': true,
+        },
         // Claude + FatSecret round-trip can take 40-60 s; global 30 s
         // receiveTimeout aborts too early on slow runs.
         options: Options(
@@ -555,12 +582,11 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
         return true;
       }
 
-      if (!mounted) return false;
-      setState(() => _thinking = null);
-      ref
-          .read(pendingMealProvider.notifier)
-          .setMeal(items, _inferMealTypeForNow());
-      _scrollToBottom();
+      // Always set the pending meal in the global provider — it survives tab
+      // navigation and the card will appear when the user returns to chat.
+      if (mounted) setState(() => _thinking = null);
+      pendingMealNotifier.setMeal(items, _inferMealTypeForNow());
+      if (mounted) _scrollToBottom();
       return true;
     } on Exception {
       return false;
@@ -1134,30 +1160,57 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     _scrollToBottom();
   }
 
-  /// Handles mic button tap: starts recording, or stops and transcribes.
+  /// Handles mic button tap: starts or stops on-device speech recognition.
   Future<void> _handleMic() async {
     debugPrint('[mic] tap state=$_voiceState');
     if (_voiceState == _VoiceState.transcribing) return;
 
     if (_voiceState == _VoiceState.recording) {
-      await _stopAndTranscribe();
+      await _stopListening();
     } else {
-      await _startRecording();
+      await _startListening();
     }
   }
 
-  Future<void> _startRecording() async {
-    debugPrint('[mic] requesting permission');
-    final status = await Permission.microphone.request();
-    debugPrint('[mic] permission=$status');
+  Future<void> _startListening() async {
+    final available = await _speech.initialize(
+      onStatus: (status) {
+        debugPrint('[mic] speech status=$status');
+        if ((status == SpeechToText.doneStatus ||
+                status == SpeechToText.notListeningStatus) &&
+            mounted) {
+          setState(() => _voiceState = _VoiceState.idle);
+        }
+      },
+      onError: (error) {
+        debugPrint('[mic] speech error=${error.errorMsg}');
+        if (!mounted) return;
+        setState(() => _voiceState = _VoiceState.idle);
+        // Silence-timeout is expected; don't show error for it.
+        if (error.errorMsg != 'error_speech_timeout' &&
+            error.errorMsg != 'error_no_match') {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('Не удалось распознать речь. Попробуйте ещё раз.'),
+              backgroundColor: K2Colors.error,
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 3),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+          );
+        }
+      },
+    );
+
     if (!mounted) return;
-    if (!status.isGranted) {
+
+    if (!available) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            status.isPermanentlyDenied
-                ? 'Mic blocked. Open Settings → Kayfit → Microphone.'
-                : 'Microphone permission denied',
+          content: const Text(
+            'Распознавание речи недоступно. Проверьте разрешения в Настройках.',
           ),
           backgroundColor: K2Colors.error,
           behavior: SnackBarBehavior.floating,
@@ -1165,142 +1218,47 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
           ),
-          action: status.isPermanentlyDenied
-              ? SnackBarAction(
-                  label: 'Settings',
-                  textColor: Colors.white,
-                  onPressed: openAppSettings,
-                )
-              : null,
+          action: SnackBarAction(
+            label: 'Настройки',
+            textColor: Colors.white,
+            onPressed: openAppSettings,
+          ),
         ),
       );
       return;
     }
 
-    try {
-      // Probe encoder support — surfaces a clear error if AAC is unsupported
-      // on this device/simulator instead of silently never recording.
-      final canRecord = await _recorder.hasPermission();
-      debugPrint('[mic] hasPermission=$canRecord');
-      if (!canRecord) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Recorder cannot access microphone.'),
-              backgroundColor: K2Colors.error,
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
-        return;
-      }
+    final lang = Localizations.localeOf(context).languageCode;
+    final localeId = lang == 'ru' ? 'ru-RU' : 'en-US';
 
-      final dir = await getTemporaryDirectory();
-      _recordPath = '${dir.path}/chat_voice.m4a';
-      debugPrint('[mic] starting recorder → $_recordPath');
-      await _recorder.start(
-        const RecordConfig(encoder: AudioEncoder.aacLc),
-        path: _recordPath!,
-      );
-      debugPrint('[mic] recorder started OK');
-      HapticFeedback.lightImpact();
-      if (mounted) setState(() => _voiceState = _VoiceState.recording);
-    } on Exception catch (e, st) {
-      debugPrint('[mic] start FAILED: $e\n$st');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not start recording: $e'),
-            backgroundColor: K2Colors.error,
-            behavior: SnackBarBehavior.floating,
-            duration: const Duration(seconds: 5),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
-          ),
-        );
-      }
-    }
+    HapticFeedback.lightImpact();
+    setState(() => _voiceState = _VoiceState.recording);
+
+    await _speech.listen(
+      onResult: (result) {
+        if (!mounted) return;
+        final words = result.recognizedWords;
+        setState(() {
+          _textController.text = words;
+          _textController.selection = TextSelection.fromPosition(
+            TextPosition(offset: words.length),
+          );
+          if (result.finalResult) _fromVoice = true;
+        });
+      },
+      localeId: localeId,
+      listenOptions: SpeechListenOptions(
+        partialResults: true,
+        listenMode: ListenMode.dictation,
+        listenFor: const Duration(seconds: 30),
+        pauseFor: const Duration(seconds: 3),
+      ),
+    );
   }
 
-  Future<void> _stopAndTranscribe() async {
-    debugPrint('[mic] stopping recorder');
-    // Capture before any await — WidgetRef throws AssertionError in debug mode
-    // after widget disposal, which is not caught by `on Exception catch`.
-    final pendingNotifier = ref.read(transcriptionPendingProvider.notifier);
-    final savedPath = await _recorder.stop();
-    debugPrint('[mic] stopped, file=$savedPath');
-    // Capture language before the async HTTP call — context may be gone later.
-    final lang = mounted ? Localizations.localeOf(context).languageCode : 'ru';
-    if (mounted) {
-      setState(() => _voiceState = _VoiceState.transcribing);
-      HapticFeedback.lightImpact();
-    }
-
-    try {
-      final form = FormData.fromMap({
-        'audio': await MultipartFile.fromFile(
-          _recordPath!,
-          filename: 'voice.m4a',
-        ),
-      });
-      debugPrint('[mic] POST /api/transcribe?language=$lang');
-      final resp = await apiDio.post(
-        '/api/transcribe?language=$lang',
-        data: form,
-      );
-      final raw = resp.data;
-      final text = raw is Map
-          ? (raw['text'] as String? ?? '')
-          : (raw?.toString() ?? '');
-      debugPrint(
-        '[mic] transcribe got text="${text.length > 50 ? '${text.substring(0, 50)}...' : text}"',
-      );
-
-      if (text.isNotEmpty) {
-        if (mounted) {
-          // Screen still visible — put directly in the text field.
-          _textController.text = text;
-          _textController.selection = TextSelection.fromPosition(
-            TextPosition(offset: text.length),
-          );
-        } else {
-          // User navigated away — park via pre-captured notifier (ref is
-          // invalid after disposal but the StateController lives on).
-          pendingNotifier.state = text;
-        }
-      } else if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text(
-              'Could not transcribe audio. Please try again.',
-            ),
-            backgroundColor: K2Colors.error,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
-          ),
-        );
-      }
-    } on Exception catch (e, st) {
-      debugPrint('[mic] transcribe FAILED: $e\n$st');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Transcription failed: $e'),
-            backgroundColor: K2Colors.error,
-            behavior: SnackBarBehavior.floating,
-            duration: const Duration(seconds: 5),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _voiceState = _VoiceState.idle);
-    }
+  Future<void> _stopListening() async {
+    await _speech.stop();
+    if (mounted) setState(() => _voiceState = _VoiceState.idle);
   }
 
   /// Opens the legacy barcode scanner via Navigator (no GoRouter route exists).
@@ -1317,6 +1275,15 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     const t = K2Theme.light;
     final messages = ref.watch(chatHistoryProvider);
     final pendingMeal = ref.watch(pendingMealProvider);
+
+    // Clear the restored thinking bubble when AI processing finishes on a
+    // background state (the widget was navigated away and remounted).
+    // When _isSending is true we own _thinking directly; skip the listener.
+    ref.listen<bool>(chatProcessingProvider, (_, next) {
+      if (!next && !_isSending && _thinking != null && mounted) {
+        setState(() => _thinking = null);
+      }
+    });
 
     // Auto-show result sheet when background photo recognition completes.
     ref.listen<PhotoRecognitionState>(photoRecognitionProvider, (prev, next) {
@@ -2657,6 +2624,7 @@ class _PendingMealItemRowState extends State<_PendingMealItemRow> {
   }
 
   void _onFocusChange() {
+    setState(() {}); // show/hide apply button
     if (!_weightFocus.hasFocus) _commit();
   }
 
@@ -2724,7 +2692,7 @@ class _PendingMealItemRowState extends State<_PendingMealItemRow> {
             ],
           ),
           const SizedBox(height: 6),
-          // Line 2 — weight pill + macros + kcal
+          // Line 2 — weight pill + apply button (when editing) + macros + kcal
           Row(
             children: [
               _WeightField(
@@ -2735,6 +2703,28 @@ class _PendingMealItemRowState extends State<_PendingMealItemRow> {
                 theme: t,
                 readOnly: widget.isAdding,
               ),
+              if (!widget.isAdding && _weightFocus.hasFocus) ...[
+                const SizedBox(width: 4),
+                GestureDetector(
+                  onTap: () {
+                    _commit();
+                    _weightFocus.unfocus();
+                  },
+                  child: Container(
+                    width: 26,
+                    height: 26,
+                    decoration: BoxDecoration(
+                      color: K2Colors.accent,
+                      borderRadius: BorderRadius.circular(13),
+                    ),
+                    child: const Icon(
+                      Icons.check_rounded,
+                      size: 14,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(width: 8),
               Expanded(
                 child: _MacroLine(
