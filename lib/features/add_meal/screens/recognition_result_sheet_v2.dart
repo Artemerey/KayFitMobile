@@ -1473,6 +1473,7 @@ class _VariantGroup {
   _VariantGroup({
     required this.food,
     required this.variants,
+    // ignore: unused_element_parameter
     this.selectedIndex = 0,
   });
 }
@@ -1481,6 +1482,7 @@ class _VariantGroup {
 
 class _V2IngredientSearchSheet extends StatefulWidget {
   final String? initialQuery;
+  // ignore: unused_element_parameter
   const _V2IngredientSearchSheet({this.initialQuery});
 
   @override

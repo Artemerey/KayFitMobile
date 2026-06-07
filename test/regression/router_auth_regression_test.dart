@@ -51,7 +51,7 @@ String? _redirectFor({
 
   // Logged in
   if (loc == '/login' || loc == '/email-auth' || loc == '/onboarding') {
-    return kfJournal ? '/journal-v2' : '/';
+    return '/journal-v2';
   }
 
   if (showWayToGoal && loc != '/way-to-goal') {

@@ -72,7 +72,6 @@ class _StatsCardState extends State<StatsCard>
     final l10n = AppLocalizations.of(context)!;
     final s = widget.stats;
     final isOver = s.caloriesGoal > 0 && s.caloriesEaten > s.caloriesGoal;
-    final isRu = Localizations.localeOf(context).languageCode == 'ru';
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 16, 16, 8),

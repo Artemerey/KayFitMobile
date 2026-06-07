@@ -36,7 +36,6 @@ void main() {
       // Assert: drag handle container exists (36x4)
       final containers = tester.widgetList<Container>(find.byType(Container));
       final dragHandle = containers.where((c) {
-        final w = c.constraints?.maxWidth;
         // The drag handle is a Container with width 36 and height 4
         final decorated = c.decoration;
         return decorated != null &&

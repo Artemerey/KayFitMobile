@@ -20,49 +20,13 @@
 // Firebase / Analytics errors are suppressed via FlutterError.onError.
 
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:go_router/go_router.dart';
-import 'package:kayfit/core/ai_consent/ai_consent_provider.dart';
 import 'package:kayfit/features/chat/models/chat_message.dart';
-import 'package:kayfit/features/chat/screens/chat_v2_screen.dart';
 import 'package:kayfit/shared/theme/kayfit2_theme.dart';
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Fake AI consent — always granted so the screen renders fully.
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _FakeConsentNotifier extends AiConsentNotifier {
-  @override
-  bool? build() => true;
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
-
-/// Wraps [child] in a minimal router + ProviderScope that lets [ChatV2Screen]
-/// call context.go() without crashing.
-Widget _buildApp({Widget? home}) {
-  final router = GoRouter(
-    initialLocation: '/chat-v2',
-    routes: [
-      GoRoute(path: '/', builder: (_, __) => const SizedBox()),
-      GoRoute(path: '/journal-v2', builder: (_, __) => const SizedBox()),
-      GoRoute(
-        path: '/chat-v2',
-        builder: (_, __) => home ?? const ChatV2Screen(),
-      ),
-    ],
-  );
-
-  return ProviderScope(
-    overrides: [
-      aiConsentProvider.overrideWith(() => _FakeConsentNotifier()),
-    ],
-    child: MaterialApp.router(routerConfig: router),
-  );
-}
 
 /// Suppresses Firebase / network errors that fire from initState during tests.
 void Function(FlutterErrorDetails)? _savedHandler;
@@ -83,14 +47,6 @@ void _suppressFirebase() {
 }
 
 void _restoreHandler() => FlutterError.onError = _savedHandler;
-
-/// Minimal pump sequence that lets GoRouter and initState settle.
-Future<void> _settle(WidgetTester tester) async {
-  await tester.pump();
-  await tester.pump(const Duration(milliseconds: 60));
-  // Drain any exception from network-less Dio calls.
-  tester.takeException();
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Isolated widgets for state testing (avoid Dio in initState)

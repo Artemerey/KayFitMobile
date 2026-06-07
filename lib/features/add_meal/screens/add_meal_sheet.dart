@@ -35,28 +35,6 @@ enum _InputMode { choose, text, voice, photo }
 enum _LoadingType { none, voice, photo, parsing }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Method card config
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _MethodConfig {
-  final IconData icon;
-  final String emoji;
-  final List<Color> gradient;
-  final Color shadowColor;
-  final _InputMode mode;
-  String label(_) => '';
-  String desc(_) => '';
-
-  const _MethodConfig({
-    required this.icon,
-    required this.emoji,
-    required this.gradient,
-    required this.shadowColor,
-    required this.mode,
-  });
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // AddMealSheet
 // ─────────────────────────────────────────────────────────────────────────────
 

@@ -75,7 +75,6 @@ class _DaySummaryCardState extends State<DaySummaryCard>
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final isRu = l10n.localeName == 'ru';
     final calPct = widget.caloriesGoal > 0
         ? (widget.calories / widget.caloriesGoal).clamp(0.0, 1.0)
         : 0.0;

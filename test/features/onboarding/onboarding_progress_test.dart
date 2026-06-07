@@ -138,7 +138,6 @@ void main() {
         _kAnswers: '{"age":30}',
         'onboarding_done': true,
         'cached_user': '{"id":"1","email":"a@b.com"}',
-        'onboarding_answers': '{}',
       });
 
       final prefs = await SharedPreferences.getInstance();

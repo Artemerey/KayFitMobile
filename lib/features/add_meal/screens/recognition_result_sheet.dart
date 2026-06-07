@@ -72,29 +72,14 @@ class _RecognitionResultSheetState
       _selected.fold(0.0, (s, i) => s + i.fat);
   double get _totalCarbs =>
       _selected.fold(0.0, (s, i) => s + i.carbs);
-  double get _totalFiber =>
-      _selected.fold(0.0, (s, i) => s + i.fiber);
   double get _totalSugar =>
       _selected.fold(0.0, (s, i) => s + i.sugar);
-  double get _totalSugarAlcohols =>
-      _selected.fold(0.0, (s, i) => s + i.sugarAlcohols);
   double get _totalNetCarbs =>
       _selected.fold(0.0, (s, i) => s + i.netCarbs);
   double get _totalSatFat =>
       _selected.fold(0.0, (s, i) => s + i.saturatedFat);
   double get _totalUnsatFat =>
       _selected.fold(0.0, (s, i) => s + i.unsaturatedFat);
-
-  int? get _weightedGI {
-    double carbSum = 0, giSum = 0;
-    for (final i in _selected) {
-      if (i.glycemicIndex != null && i.carbs > 0) {
-        giSum += i.glycemicIndex! * i.carbs;
-        carbSum += i.carbs;
-      }
-    }
-    return carbSum > 0 ? (giSum / carbSum).round() : widget.glycemicIndex;
-  }
 
   void _toggleIngredient(int index) {
     HapticFeedback.selectionClick();
@@ -211,7 +196,6 @@ class _RecognitionResultSheetState
 
   @override
   Widget build(BuildContext context) {
-    final gi = _weightedGI;
     final mealLabel = {
       'breakfast': 'breakfast',
       'lunch': 'lunch',
