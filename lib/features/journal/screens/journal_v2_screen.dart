@@ -16,6 +16,7 @@ import 'package:intl/intl.dart' as intl;
 
 import '../../../core/api/api_client.dart';
 import '../../../core/i18n/generated/app_localizations.dart';
+import '../../../core/paywall/paywall_auto_show.dart';
 import '../../../features/dashboard/providers/dashboard_provider.dart';
 import '../../../features/journal/screens/journal_screen.dart'
     show journalDayMealsProvider;
@@ -140,6 +141,7 @@ class JournalV2Screen extends ConsumerStatefulWidget {
 class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
   bool _calExpanded = false;
   String _calSelected = 'today';
+  bool _paywallCheckDone = false;
 
   // The date key that drives provider lookups.
   String get _dateKey =>
@@ -406,6 +408,14 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
 
   @override
   Widget build(BuildContext context) {
+    if (!_paywallCheckDone) {
+      _paywallCheckDone = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!mounted) return;
+        await maybeShowPaywallOnce(context, ref);
+      });
+    }
+
     const t = K2Theme.light;
 
     final goalsAsync = ref.watch(userGoalsProvider);

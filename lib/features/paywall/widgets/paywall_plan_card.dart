@@ -8,6 +8,7 @@ class PaywallPlanCard extends StatelessWidget {
     required this.selected,
     required this.onTap,
     this.badge,
+    this.originalPriceLabel,
   });
 
   final String title;
@@ -15,6 +16,7 @@ class PaywallPlanCard extends StatelessWidget {
   final bool selected;
   final VoidCallback onTap;
   final String? badge;
+  final String? originalPriceLabel;
 
   static const _kAccent = Color(0xFFFF597D);
 
@@ -68,15 +70,33 @@ class PaywallPlanCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 4),
+            if (originalPriceLabel != null) ...[
+              Text(
+                originalPriceLabel!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 10,
+                  color: Color(0xFF9CA3AF),
+                  decoration: TextDecoration.lineThrough,
+                ),
+              ),
+              const SizedBox(height: 2),
+            ],
             Text(
               priceLabel,
               textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 12,
-                color: selected
-                    ? _kAccent.withValues(alpha: 0.85)
-                    : const Color(0xFF6B7280),
-              ),
+              style: originalPriceLabel != null
+                  ? const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: _kAccent,
+                    )
+                  : TextStyle(
+                      fontSize: 12,
+                      color: selected
+                          ? _kAccent.withValues(alpha: 0.85)
+                          : const Color(0xFF6B7280),
+                    ),
             ),
           ],
         ),

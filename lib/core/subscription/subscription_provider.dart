@@ -84,6 +84,17 @@ Future<Offering?> currentOffering(Ref ref) async {
   }
 }
 
+/// Loads the "discount" RevenueCat offering (must be created in RC dashboard).
+/// Returns null if the offering is not configured or unavailable.
+final discountOfferingProvider = FutureProvider<Offering?>((ref) async {
+  try {
+    final offerings = await Purchases.getOfferings();
+    return offerings.getOffering('discount');
+  } on PlatformException {
+    return null;
+  }
+});
+
 /// Backend subscription check (for YooKassa web payments).
 final backendSubscriptionProvider = FutureProvider.autoDispose<Map<String, dynamic>?>((ref) async {
   try {
