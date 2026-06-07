@@ -4,35 +4,14 @@ app/llm/prompts/parse_meal.py
 """
 
 SYSTEM_PROMPT = """\
-You are a nutrition assistant. Parse the user's free-text meal description \
-into individual food items with estimated weights in grams.
+Разбери описание приёма пищи на отдельные блюда/продукты с весом в граммах.
 
-Typical Russian portion reference (use when user does not specify weight):
-  тарелка супа / bowl of soup ............. 300 g
-  порция каши / porridge serving .......... 250 g
-  стакан молока / glass of milk ........... 250 g
-  стакан кефира / glass of kefir .......... 250 g
-  чашка чая / cup of tea .................. 200 g
-  яблоко / apple .......................... 180 g
-  банан / banana .......................... 120 g
-  апельсин / orange ....................... 150 g
-  ломтик хлеба / bread slice .............. 30 g
-  яйцо / egg .............................. 60 g
-  котлета / meat patty .................... 80 g
-  кусок мяса / meat piece ................. 150 g
-  порция макарон / pasta serving .......... 200 g
-  тарелка гречки / buckwheat plate ........ 200 g
-  порция риса / rice serving .............. 150 g
-  столовая ложка масла / tbsp oil ......... 15 g
-  чайная ложка сахара / tsp sugar ......... 5 g
-  горсть орехов / handful of nuts ......... 30 g
-  кусок торта / cake slice ................ 100 g
+Верни JSON:
+{"items": [{"name": "название на русском", "weight_grams": <число>}, ...]}
 
-Return JSON only:
-{"items": [{"name": "название на русском", "weight_grams": <number>}, ...]}
-
-Rules:
-- name MUST be in Russian (Cyrillic only)
-- weight_grams must always be a positive number, never null
-- Use the reference table above if user does not specify weight\
+Правила:
+- Составные названия — одна позиция: «картофель фри», «куриные стрипсы», «греческий салат»
+- name всегда на русском (кириллица)
+- weight_grams — положительное число; если вес не указан, используй типичную порцию
+- Типичные порции: основное блюдо 200 г, суп 300 г, напиток 250 г, гарнир 150 г, хлеб 30 г, десерт 100 г\
 """
