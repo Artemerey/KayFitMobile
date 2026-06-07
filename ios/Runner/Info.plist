@@ -56,6 +56,8 @@
 	<string>Kayfit uses Face ID to protect your account data in the Keychain.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Kayfit uses the microphone for voice-based meal logging</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Kayfit uses speech recognition to transcribe your voice notes into text</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Kayfit uses the photo library to select meal photos</string>
 	<key>UIApplicationSceneManifest</key>

@@ -203,6 +203,10 @@ PODS:
     - FlutterMacOS
   - sign_in_with_apple (0.0.1):
     - Flutter
+  - speech_to_text (0.0.1):
+    - Flutter
+    - Try
+  - Try (2.1.1)
   - url_launcher_ios (0.0.1):
     - Flutter
 
@@ -223,6 +227,7 @@ DEPENDENCIES:
   - record_ios (from `.symlinks/plugins/record_ios/ios`)
   - shared_preferences_foundation (from `.symlinks/plugins/shared_preferences_foundation/darwin`)
   - sign_in_with_apple (from `.symlinks/plugins/sign_in_with_apple/ios`)
+  - speech_to_text (from `.symlinks/plugins/speech_to_text/ios`)
   - url_launcher_ios (from `.symlinks/plugins/url_launcher_ios/ios`)
 
 SPEC REPOS:
@@ -252,6 +257,7 @@ SPEC REPOS:
     - RevenueCat
     - SDWebImage
     - SDWebImageWebPCoder
+    - Try
 
 EXTERNAL SOURCES:
   firebase_analytics:
@@ -286,6 +292,8 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/shared_preferences_foundation/darwin"
   sign_in_with_apple:
     :path: ".symlinks/plugins/sign_in_with_apple/ios"
+  speech_to_text:
+    :path: ".symlinks/plugins/speech_to_text/ios"
   url_launcher_ios:
     :path: ".symlinks/plugins/url_launcher_ios/ios"
 
@@ -331,6 +339,8 @@ SPEC CHECKSUMS:
   SDWebImageWebPCoder: 0e06e365080397465cc73a7a9b472d8a3bd0f377
   shared_preferences_foundation: 5086985c1d43c5ba4d5e69a4e8083a389e2909e6
   sign_in_with_apple: f3bf75217ea4c2c8b91823f225d70230119b8440
+  speech_to_text: b43a7d99aef037bd758ed8e45d79bbac035d2dfe
+  Try: 5ef669ae832617b3cee58cb2c6f99fb767a4ff96
   url_launcher_ios: bb13df5870e8c4234ca12609d04010a21be43dfa
 
 PODFILE CHECKSUM: 221c7b8fb6fc0c180fa8a28258fb3e233348270c
