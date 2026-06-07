@@ -1,9 +1,13 @@
 import 'dart:async';
 import 'dart:ui';
+import 'package:shared_preferences/shared_preferences.dart';
+
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+
+import 'package:flutter/services.dart';
 
 import '../../../core/analytics/analytics_service.dart';
 import '../../../core/subscription/subscription_provider.dart';
@@ -197,16 +201,44 @@ class _TariffsScreenState extends ConsumerState<TariffsScreen>
         if (mounted) setState(() => _selectedId = def['id'] as int?);
       });
     }
+    // Timer already running — do not reinitialise.
+    if (_saleEndsAt != null) return;
     final showTimer = d['show_discount_timer'] as bool? ?? false;
     final expiresStr = d['discount_timer_expires_at'] as String?;
-    if (showTimer && expiresStr != null && _saleEndsAt == null) {
+    if (showTimer && expiresStr != null) {
       final endsAt = DateTime.tryParse(expiresStr);
       if (endsAt != null && endsAt.isAfter(DateTime.now())) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) _startTimer(endsAt);
         });
+        return;
       }
     }
+    // Backend did not supply a timer — show client-side 24-hour fallback.
+    // The deadline is persisted so it survives hot restarts and short backgrounding.
+    unawaited(_initFallbackTimer());
+  }
+
+  static const _kTimerFallbackKey = 'paywall_timer_ends_at';
+
+  Future<void> _initFallbackTimer() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    final saved = prefs.getString(_kTimerFallbackKey);
+    final DateTime endsAt;
+    if (saved != null) {
+      final parsed = DateTime.tryParse(saved);
+      if (parsed != null && parsed.isAfter(DateTime.now())) {
+        endsAt = parsed;
+      } else {
+        endsAt = DateTime.now().add(const Duration(hours: 24));
+        await prefs.setString(_kTimerFallbackKey, endsAt.toIso8601String());
+      }
+    } else {
+      endsAt = DateTime.now().add(const Duration(hours: 24));
+      await prefs.setString(_kTimerFallbackKey, endsAt.toIso8601String());
+    }
+    if (mounted) _startTimer(endsAt);
   }
 
   Future<void> _pay(Map<String, dynamic>? tariff) async {
@@ -307,6 +339,10 @@ class _TariffsScreenState extends ConsumerState<TariffsScreen>
                         ),
 
                         const SizedBox(height: 8),
+
+                        // ── Promo code ──────────────────────────────────────
+                        _PromoCodeField(isRu: isRu),
+                        const SizedBox(height: 16),
 
                         // ── Russia payment banner (Russian only) ─────────────
                         if (isRu)
@@ -721,6 +757,160 @@ class _Dot extends StatelessWidget {
     return const Padding(
       padding: EdgeInsets.symmetric(horizontal: 6),
       child: Text(' · ', style: TextStyle(fontSize: 12, color: _kMuted)),
+    );
+  }
+}
+
+// ─── Promo code field ─────────────────────────────────────────────────────────
+
+class _PromoCodeField extends StatefulWidget {
+  final bool isRu;
+  const _PromoCodeField({required this.isRu});
+
+  @override
+  State<_PromoCodeField> createState() => _PromoCodeFieldState();
+}
+
+class _PromoCodeFieldState extends State<_PromoCodeField> {
+  final _controller = TextEditingController();
+  bool _loading = false;
+  String? _message;
+  bool _isSuccess = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _apply() async {
+    final code = _controller.text.trim().toUpperCase();
+    if (code.isEmpty) return;
+    setState(() {
+      _loading = true;
+      _message = null;
+    });
+    try {
+      final response = await apiDio.post(
+        '/api/promo/apply',
+        data: {'code': code},
+      );
+      if (!mounted) return;
+      final data = response.data;
+      setState(() {
+        _isSuccess = true;
+        _message = (data is Map && data['already_applied'] == true)
+            ? (widget.isRu ? '✓ Промокод уже применён' : '✓ Promo code already applied')
+            : (widget.isRu ? '✓ Промокод принят' : '✓ Promo code accepted');
+      });
+    } on Exception catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isSuccess = false;
+        _message = e.toString().contains('404')
+            ? (widget.isRu ? 'Промокод не найден' : 'Promo code not found')
+            : (widget.isRu ? 'Ошибка. Попробуйте ещё раз.' : 'Error. Please try again.');
+      });
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _controller,
+                textCapitalization: TextCapitalization.characters,
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'[A-Z0-9a-z]')),
+                ],
+                style: const TextStyle(fontSize: 14),
+                decoration: InputDecoration(
+                  hintText: 'Промокод',
+                  hintStyle: const TextStyle(fontSize: 14, color: _kMuted),
+                  filled: true,
+                  fillColor: const Color(0xFFF9FAFB),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 12,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: _kBorder),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: _kBorder),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: AppColors.accent),
+                  ),
+                ),
+                onChanged: (_) => setState(() {}),
+              ),
+            ),
+            const SizedBox(width: 8),
+            ValueListenableBuilder<TextEditingValue>(
+              valueListenable: _controller,
+              builder: (_, value, _) {
+                final enabled = value.text.trim().isNotEmpty && !_loading;
+                return TextButton(
+                  onPressed: enabled ? _apply : null,
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    backgroundColor:
+                        enabled ? AppColors.accent : AppColors.accent.withValues(alpha: 0.4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: _loading
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Text(
+                          'Применить',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                );
+              },
+            ),
+          ],
+        ),
+        if (_message != null) ...[
+          const SizedBox(height: 6),
+          Text(
+            _message!,
+            style: TextStyle(
+              fontSize: 12,
+              color: _isSuccess
+                  ? const Color(0xFF059669)
+                  : const Color(0xFFE53935),
+            ),
+          ),
+        ],
+      ],
     );
   }
 }

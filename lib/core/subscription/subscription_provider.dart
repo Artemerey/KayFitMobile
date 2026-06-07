@@ -17,6 +17,7 @@ class SubscriptionNotifier extends _$SubscriptionNotifier {
 
   Future<void> refresh() async {
     try {
+      if (!await Purchases.isConfigured) return;
       final info = await Purchases.getCustomerInfo();
       state = _stateFrom(info);
     } on PlatformException {
@@ -77,6 +78,7 @@ class SubscriptionNotifier extends _$SubscriptionNotifier {
 @riverpod
 Future<Offering?> currentOffering(Ref ref) async {
   try {
+    if (!await Purchases.isConfigured) return null;
     final offerings = await Purchases.getOfferings();
     return offerings.current;
   } on PlatformException {
@@ -88,6 +90,7 @@ Future<Offering?> currentOffering(Ref ref) async {
 /// Returns null if the offering is not configured or unavailable.
 final discountOfferingProvider = FutureProvider<Offering?>((ref) async {
   try {
+    if (!await Purchases.isConfigured) return null;
     final offerings = await Purchases.getOfferings();
     return offerings.getOffering('discount');
   } on PlatformException {

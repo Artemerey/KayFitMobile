@@ -51,6 +51,15 @@ const _kOnboardingDoneKey = 'onboarding_done';
 Future<void> markOnboardingDone(WidgetRef ref) async {
   final prefs = await SharedPreferences.getInstance();
   await prefs.setBool(_kOnboardingDoneKey, true);
+  // Read locale from SharedPreferences directly to avoid async race with
+  // LocaleNotifier._load() — the notifier initialises from deviceLocale
+  // synchronously and only applies the explicit user override asynchronously.
+  // Falling back to PlatformDispatcher ensures correctness before _load completes.
+  final savedLocale = prefs.getString('app_locale');
+  final langCode = savedLocale ?? PlatformDispatcher.instance.locale.languageCode;
+  if (langCode == 'ru') {
+    await prefs.setBool('paywall_show_pending', true);
+  }
   ref.read(onboardingDoneProvider.notifier).state = true;
 }
 
