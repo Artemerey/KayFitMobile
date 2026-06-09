@@ -1582,6 +1582,14 @@ class AppLocalizationsEn extends AppLocalizations {
   String get journal_copy_to_another_date => 'Copy to another date';
 
   @override
+  String get journal_copy_select_dates => 'Select dates';
+
+  @override
+  String journal_copied_n_dates(int n, String noun) {
+    return 'Copied to $n $noun';
+  }
+
+  @override
   String get journal_disclaimer =>
       'Calorie estimates are approximate. Not a substitute for medical advice.';
 

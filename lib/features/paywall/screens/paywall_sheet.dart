@@ -214,7 +214,9 @@ class _PaywallSheetContentState extends ConsumerState<_PaywallSheetContent> {
 
   @override
   Widget build(BuildContext context) {
-    final bottomPadding = MediaQuery.paddingOf(context).bottom;
+    final safeBottom = MediaQuery.paddingOf(context).bottom;
+    final keyboardBottom = MediaQuery.viewInsetsOf(context).bottom;
+    final bottomPadding = safeBottom > keyboardBottom ? safeBottom : keyboardBottom;
 
     return Container(
       decoration: const BoxDecoration(

@@ -7,6 +7,8 @@
 // Gated via --dart-define=KF2_JOURNAL=true in router.dart.
 // The legacy JournalScreen remains untouched.
 
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -28,6 +30,7 @@ import '../../../shared/widgets/kayfit2_calendar_strip.dart';
 import '../../../shared/widgets/kayfit2_meal_row.dart';
 import '../../../shared/widgets/kayfit2_tab_bar.dart';
 import '../../../shared/widgets/kayfit_rings.dart';
+import '../widgets/copy_target_sheet.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -210,6 +213,15 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
   /// same copy twice.
   bool _isCopying = false;
 
+  /// IDs of the most recently copied meals — used for Undo.
+  List<int>? _lastCopiedIds;
+
+  /// Target dates of the most recent copy — used to invalidate providers on Undo.
+  List<String>? _lastCopiedDates;
+
+  /// Cancels the Undo window when it expires or a new copy starts.
+  Timer? _undoTimer;
+
   /// Tracks in-flight inline weight PATCHes per meal id so a fast double-tap
   /// can't fire two requests for the same row.
   final Set<int> _weightInflight = <int>{};
@@ -291,68 +303,124 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
     }
   }
 
-  /// Long-press handler — confirms the intent, picks a target date, copies
-  /// the meal, refreshes the affected day's provider, shows a snackbar with
-  /// a CTA back to that date.
-  Future<void> _onCopyTapped(String idStr) async {
-    final intId = int.tryParse(idStr);
-    if (intId == null || _isCopying) return;
-    HapticFeedback.selectionClick();
-    final l10n = AppLocalizations.of(context)!;
-    final confirmed = await showModalBottomSheet<bool>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (sheetCtx) => _CopyMealActionSheet(l10n: l10n),
-    );
-    if (confirmed != true || !mounted) return;
-
-    final today = DateTime.now();
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: today,
-      firstDate: today.subtract(const Duration(days: 365)),
-      lastDate: today.add(const Duration(days: 365)),
-      helpText: l10n.journal_copy_date,
-      cancelText: l10n.common_cancel,
-      confirmText: l10n.journal_copy_btn,
-    );
-    if (picked == null || !mounted) return;
-
-    final targetIso =
-        '${picked.year.toString().padLeft(4, '0')}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
-    await _copyMealToDate(intId, targetIso);
+  @override
+  void dispose() {
+    _undoTimer?.cancel();
+    super.dispose();
   }
 
-  Future<void> _copyMealToDate(int mealId, String targetIso) async {
+  void _clearUndo() {
+    _undoTimer?.cancel();
+    _undoTimer = null;
+    _lastCopiedIds = null;
+    _lastCopiedDates = null;
+  }
+
+  Future<void> _undoLastCopy() async {
+    final ids = _lastCopiedIds;
+    final dates = _lastCopiedDates;
+    _clearUndo();
+    if (ids == null || ids.isEmpty) return;
+
+    await Future.wait(
+      ids.map((id) async {
+        try {
+          await apiDio.delete('/api/meals/$id');
+        } on Exception {
+          // Ignore individual delete failures during undo
+        }
+      }),
+    );
+
+    if (dates != null) {
+      for (final iso in dates) {
+        ref.invalidate(journalDayMealsProvider(iso));
+      }
+    }
+    ref.invalidate(todayStatsProvider);
+    ref.invalidate(todayMealsProvider);
+    ref.invalidate(dailyKcalHistoryProvider);
+
+    if (!mounted) return;
+    final isRu = Localizations.localeOf(context).languageCode == 'ru';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(isRu ? 'Скопированные записи удалены' : 'Copy undone'),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
+  }
+
+  /// Opens [CopyTargetSheet], then copies [mealIds] to every selected date.
+  Future<void> _openCopySheet(List<int> mealIds) async {
+    if (_isCopying) return;
+    HapticFeedback.selectionClick();
+
+    final targetDates = await showModalBottomSheet<List<String>>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => CopyTargetSheet(currentDate: _dateKey),
+    );
+
+    if (targetDates == null || targetDates.isEmpty || !mounted) return;
+    await _copyMealsBatch(mealIds, targetDates);
+  }
+
+  Future<void> _copyMealsBatch(
+    List<int> mealIds,
+    List<String> targetDates,
+  ) async {
     setState(() => _isCopying = true);
+    _clearUndo();
     try {
-      await apiDio.post(
-        '/api/meals/$mealId/copy',
-        data: {'target_date': targetIso},
-      );
-      ref.invalidate(journalDayMealsProvider(targetIso));
+      final response = await apiDio.post('/api/meals/copy-batch', data: {
+        'meal_ids': mealIds,
+        'target_dates': targetDates,
+      });
+      final copiedIds =
+          (response.data['copied_ids'] as List).cast<int>();
+
+      _lastCopiedIds = copiedIds;
+      _lastCopiedDates = targetDates;
+
+      for (final iso in targetDates) {
+        ref.invalidate(journalDayMealsProvider(iso));
+      }
       ref.invalidate(dailyKcalHistoryProvider);
+
       if (!mounted) return;
-      final l10n = AppLocalizations.of(context)!;
-      final humanDate = _humanReadableDate(targetIso, l10n: l10n);
       HapticFeedback.lightImpact();
+
+      // Navigate to the first (earliest) target date so the user sees the result.
+      setState(() => _calSelected = targetDates.first);
+
+      final l10n = AppLocalizations.of(context)!;
+      final isRu = l10n.localeName == 'ru';
+      final n = targetDates.length;
+      final snackText = n == 1
+          ? l10n.journal_copied_to(_humanReadableDate(targetDates.first, l10n: l10n))
+          : l10n.journal_copied_n_dates(n, isRu ? _russianDayWord(n) : (n == 1 ? 'day' : 'days'));
+
+      ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(l10n.journal_copied_to(humanDate)),
+          content: Text(snackText),
           behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 4),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
           ),
           action: SnackBarAction(
-            label: l10n.journal_open_btn,
-            onPressed: () {
-              if (!mounted) return;
-              setState(() => _calSelected = targetIso);
-            },
+            label: isRu ? 'Отменить' : 'Undo',
+            onPressed: _undoLastCopy,
           ),
         ),
       );
+
+      _undoTimer = Timer(const Duration(seconds: 4), _clearUndo);
     } on Exception {
       if (!mounted) return;
       final l10n = AppLocalizations.of(context)!;
@@ -367,6 +435,32 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
     } finally {
       if (mounted) setState(() => _isCopying = false);
     }
+  }
+
+  String _russianDayWord(int n) {
+    if (n % 100 >= 11 && n % 100 <= 14) return 'дн.';
+    return switch (n % 10) {
+      1 => 'день',
+      2 || 3 || 4 => 'дня',
+      _ => 'дн.',
+    };
+  }
+
+  /// Long-press handler — opens CopyTargetSheet for a single meal.
+  Future<void> _onCopyTapped(String idStr) async {
+    final intId = int.tryParse(idStr);
+    if (intId == null) return;
+    await _openCopySheet([intId]);
+  }
+
+  /// ⋮ handler on a meal-type group header — copies all meals in the group.
+  Future<void> _onCopyGroupTapped(
+    String mealType,
+    List<String> ids,
+  ) async {
+    final intIds = ids.map(int.parse).toList();
+    if (intIds.isEmpty) return;
+    await _openCopySheet(intIds);
   }
 
   String _humanReadableDate(String iso, {required AppLocalizations l10n}) {
@@ -578,6 +672,7 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
                       },
                       onDelete: _deleteMeal,
                       onCopy: _onCopyTapped,
+                      onCopyGroup: _onCopyGroupTapped,
                       onWeightChange: _onRowWeightChange,
                     );
                   },
@@ -661,6 +756,7 @@ class _MealList extends StatelessWidget {
     required this.onRowTap,
     this.onDelete,
     this.onCopy,
+    this.onCopyGroup,
     this.onWeightChange,
   });
 
@@ -673,8 +769,11 @@ class _MealList extends StatelessWidget {
   /// rows in error state pass null and don't render the swipe action).
   final Future<bool> Function(String id)? onDelete;
 
-  /// Long-press handler that copies the meal to another date.
+  /// Long-press / ⋮ handler that copies a single meal.
   final void Function(String id)? onCopy;
+
+  /// ⋮ handler on a group header — copies the entire meal-type group.
+  final void Function(String mealType, List<String> ids)? onCopyGroup;
 
   /// Inline weight edit committed on a row. Receives `(mealId, newGrams)`.
   /// Null disables the inline edit (pill becomes read-only).
@@ -688,7 +787,17 @@ class _MealList extends StatelessWidget {
       padding: EdgeInsets.zero,
       children: [
         for (final (type, meals) in groups) ...[
-          _GroupHeader(type: type, meals: meals, theme: theme),
+          _GroupHeader(
+            type: type,
+            meals: meals,
+            theme: theme,
+            onCopyGroup: onCopyGroup == null
+                ? null
+                : () => onCopyGroup!(
+                      type,
+                      meals.map((m) => m.id).toList(),
+                    ),
+          ),
           for (final meal in meals)
             if (onDelete != null)
               Dismissible(
@@ -704,6 +813,7 @@ class _MealList extends StatelessWidget {
                   theme: theme,
                   onTap: () => onRowTap(meal.id),
                   onLongPress: onCopy == null ? null : () => onCopy!(meal.id),
+                  onMore: onCopy == null ? null : () => onCopy!(meal.id),
                   onWeightChange: onWeightChange == null
                       ? null
                       : (g) => onWeightChange!(meal.id, g),
@@ -716,6 +826,7 @@ class _MealList extends StatelessWidget {
                 theme: theme,
                 onTap: () => onRowTap(meal.id),
                 onLongPress: onCopy == null ? null : () => onCopy!(meal.id),
+                onMore: onCopy == null ? null : () => onCopy!(meal.id),
                 onWeightChange: onWeightChange == null
                     ? null
                     : (g) => onWeightChange!(meal.id, g),
@@ -723,56 +834,6 @@ class _MealList extends StatelessWidget {
         ],
         const SizedBox(height: 16),
       ],
-    );
-  }
-}
-
-/// Bottom sheet shown on long-press of a meal row. A confirmation step
-/// before the date picker so accidental long-presses don't immediately
-/// open the calendar.
-class _CopyMealActionSheet extends StatelessWidget {
-  const _CopyMealActionSheet({required this.l10n});
-
-  final AppLocalizations l10n;
-
-  @override
-  Widget build(BuildContext context) {
-    const t = K2Theme.light;
-    return SafeArea(
-      child: Container(
-        margin: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: t.surface,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
-              child: Text(
-                l10n.journal_meal_actions,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: t.fgMute,
-                  letterSpacing: 0.4,
-                ),
-              ),
-            ),
-            Container(height: 1, color: t.hairline),
-            ListTile(
-              leading: const Icon(Icons.calendar_month_rounded),
-              title: Text(l10n.journal_copy_to_another_date),
-              onTap: () => Navigator.of(context).pop(true),
-            ),
-            Container(height: 1, color: t.hairline),
-            ListTile(
-              title: Text(l10n.common_cancel),
-              onTap: () => Navigator.of(context).pop(false),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }
@@ -816,11 +877,16 @@ class _GroupHeader extends StatelessWidget {
     required this.type,
     required this.meals,
     required this.theme,
+    this.onCopyGroup,
   });
 
   final String type;
   final List<K2MealRowData> meals;
   final K2Theme theme;
+
+  /// When non-null, a ⋮ icon button appears at the trailing edge of the header
+  /// and triggers copying the entire group.
+  final VoidCallback? onCopyGroup;
 
   @override
   Widget build(BuildContext context) {
@@ -832,7 +898,7 @@ class _GroupHeader extends StatelessWidget {
 
     return Container(
       margin: const EdgeInsets.only(top: 20, bottom: 4),
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      padding: EdgeInsets.fromLTRB(16, 12, onCopyGroup != null ? 4 : 16, 8),
       decoration: BoxDecoration(
         border: Border(
           top: BorderSide(color: theme.hairline),
@@ -872,6 +938,23 @@ class _GroupHeader extends StatelessWidget {
               color: theme.fgDim,
             ),
           ),
+          if (onCopyGroup != null) ...[
+            const SizedBox(width: 4),
+            SizedBox(
+              width: 32,
+              height: 32,
+              child: IconButton(
+                padding: EdgeInsets.zero,
+                icon: Icon(
+                  Icons.content_copy_rounded,
+                  size: 16,
+                  color: theme.fgMute,
+                ),
+                onPressed: onCopyGroup,
+                tooltip: l10n.journal_copy_to_another_date,
+              ),
+            ),
+          ],
         ],
       ),
     );

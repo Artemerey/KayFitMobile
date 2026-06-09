@@ -3110,6 +3110,18 @@ abstract class AppLocalizations {
   /// **'Копировать на другую дату'**
   String get journal_copy_to_another_date;
 
+  /// No description provided for @journal_copy_select_dates.
+  ///
+  /// In ru, this message translates to:
+  /// **'Выберите даты'**
+  String get journal_copy_select_dates;
+
+  /// No description provided for @journal_copied_n_dates.
+  ///
+  /// In ru, this message translates to:
+  /// **'{n} {noun} — скопировано'**
+  String journal_copied_n_dates(int n, String noun);
+
   /// No description provided for @journal_disclaimer.
   ///
   /// In ru, this message translates to:

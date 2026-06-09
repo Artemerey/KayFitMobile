@@ -33,6 +33,7 @@ class Kayfit2MealRow extends StatelessWidget {
     this.dense = false,
     this.onTap,
     this.onLongPress,
+    this.onMore,
     this.onWeightChange,
   });
 
@@ -52,6 +53,10 @@ class Kayfit2MealRow extends StatelessWidget {
   /// surface the "Copy to another date" action — keeps the primary tap
   /// gesture available for the meal-edit screen.
   final VoidCallback? onLongPress;
+
+  /// When non-null, a ⋮ icon button is rendered at the trailing edge of the
+  /// row and calls this callback on press (same action as long-press).
+  final VoidCallback? onMore;
 
   /// Called when the user commits an inline weight edit on this row.
   /// Receives the new weight in grams. Null disables the inline edit
@@ -94,6 +99,24 @@ class Kayfit2MealRow extends StatelessWidget {
 
             // ── RIGHT: kcal number + label ─────────────────────────────────
             _KcalColumn(meal: meal, theme: theme),
+
+            // ── FAR RIGHT: ⋮ copy button (optional) ───────────────────────
+            if (onMore != null) ...[
+              const SizedBox(width: 2),
+              SizedBox(
+                width: 28,
+                height: 28,
+                child: IconButton(
+                  padding: EdgeInsets.zero,
+                  icon: Icon(
+                    Icons.content_copy_rounded,
+                    size: 16,
+                    color: theme.fgMute,
+                  ),
+                  onPressed: onMore,
+                ),
+              ),
+            ],
           ],
         ),
       ),

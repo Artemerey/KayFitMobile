@@ -632,6 +632,14 @@
   "journal_open_btn": "Open",
   "journal_could_not_copy": "Could not copy",
   "journal_copy_to_another_date": "Copy to another date",
+  "journal_copy_select_dates": "Select dates",
+  "journal_copied_n_dates": "Copied to {n} {noun}",
+  "@journal_copied_n_dates": {
+    "placeholders": {
+      "n": {"type": "int"},
+      "noun": {"type": "String"}
+    }
+  },
 
   "journal_disclaimer": "Calorie estimates are approximate. Not a substitute for medical advice.",
 

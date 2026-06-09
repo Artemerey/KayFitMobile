@@ -115,6 +115,23 @@ String? _savingsBadge(Map<String, dynamic> t, {bool isRu = true}) {
 bool _isPopular(Map<String, dynamic> t) =>
     (t['code'] as String? ?? '') == 'yearly';
 
+num? _discountedPrice(Map<String, dynamic> t) {
+  final v = t['discounted_price'];
+  if (v == null) return null;
+  final n = v as num;
+  final price = (t['price'] as num?) ?? 0;
+  return n < price ? n : null;
+}
+
+String _discountBadge(Map<String, dynamic> t) {
+  final discounted = _discountedPrice(t);
+  if (discounted == null) return '';
+  final price = (t['price'] as num?) ?? 0;
+  if (price <= 0) return '';
+  final pct = ((1 - discounted / price) * 100).round();
+  return '−$pct%';
+}
+
 int _order(Map<String, dynamic> t) {
   final code = t['code'] as String? ?? '';
   if (code == 'monthly') return 1;
@@ -203,6 +220,9 @@ class _TariffsScreenState extends ConsumerState<TariffsScreen>
     }
     // Timer already running — do not reinitialise.
     if (_saleEndsAt != null) return;
+    // Only show timer when there's an actual promo discount on at least one tariff.
+    final hasDiscount = _sorted(d).any((t) => _discountedPrice(t) != null);
+    if (!hasDiscount) return;
     final showTimer = d['show_discount_timer'] as bool? ?? false;
     final expiresStr = d['discount_timer_expires_at'] as String?;
     if (showTimer && expiresStr != null) {
@@ -341,7 +361,10 @@ class _TariffsScreenState extends ConsumerState<TariffsScreen>
                         const SizedBox(height: 8),
 
                         // ── Promo code ──────────────────────────────────────
-                        _PromoCodeField(isRu: isRu),
+                        _PromoCodeField(
+                          isRu: isRu,
+                          activePromoCode: d['active_promo_code'] as String?,
+                        ),
                         const SizedBox(height: 16),
 
                         // ── Russia payment banner (Russian only) ─────────────
@@ -517,6 +540,7 @@ class _PlanCard extends StatelessWidget {
     final savings = _savingsBadge(tariff, isRu: isRu);
     final perMonth = _perMonthPrice(tariff, isRu: isRu);
     final billedNote = _billedAfterTrial(tariff, isRu: isRu);
+    final hasDiscount = _discountedPrice(tariff) != null;
 
     return GestureDetector(
       onTap: onTap,
@@ -535,7 +559,7 @@ class _PlanCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Badges
-            if (popular || savings != null) ...[
+            if (popular || savings != null || hasDiscount) ...[
               Row(
                 children: [
                   if (popular)
@@ -578,6 +602,27 @@ class _PlanCard extends StatelessWidget {
                         ),
                       ),
                     ),
+                  if (hasDiscount) ...[
+                    if (popular || savings != null) const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFF0F3),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        _discountBadge(tariff),
+                        style: const TextStyle(
+                          color: Color(0xFFE5175E),
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
               ),
               const SizedBox(height: 10),
@@ -599,14 +644,36 @@ class _PlanCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.baseline,
               textBaseline: TextBaseline.alphabetic,
               children: [
-                Text(
-                  _totalPrice(tariff, isRu: isRu),
-                  style: const TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
-                    color: _kDark,
+                if (_discountedPrice(tariff) != null) ...[
+                  Text(
+                    _totalPrice(tariff, isRu: isRu),
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                      color: _kMuted,
+                      decoration: TextDecoration.lineThrough,
+                    ),
                   ),
-                ),
+                  const SizedBox(width: 8),
+                  Text(
+                    isRu
+                        ? _rubFormatted(_discountedPrice(tariff)!)
+                        : _usdFormatted(_discountedPrice(tariff)!.toDouble()),
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFFE5175E),
+                    ),
+                  ),
+                ] else
+                  Text(
+                    _totalPrice(tariff, isRu: isRu),
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      color: _kDark,
+                    ),
+                  ),
                 if (perMonth != null) ...[
                   const Spacer(),
                   Text(
@@ -763,19 +830,44 @@ class _Dot extends StatelessWidget {
 
 // ─── Promo code field ─────────────────────────────────────────────────────────
 
-class _PromoCodeField extends StatefulWidget {
+class _PromoCodeField extends ConsumerStatefulWidget {
   final bool isRu;
-  const _PromoCodeField({required this.isRu});
+  final String? activePromoCode;
+  const _PromoCodeField({required this.isRu, this.activePromoCode});
 
   @override
-  State<_PromoCodeField> createState() => _PromoCodeFieldState();
+  ConsumerState<_PromoCodeField> createState() => _PromoCodeFieldState();
 }
 
-class _PromoCodeFieldState extends State<_PromoCodeField> {
+class _PromoCodeFieldState extends ConsumerState<_PromoCodeField> {
   final _controller = TextEditingController();
   bool _loading = false;
   String? _message;
   bool _isSuccess = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _applyPreloaded(widget.activePromoCode);
+  }
+
+  @override
+  void didUpdateWidget(_PromoCodeField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.activePromoCode != oldWidget.activePromoCode) {
+      _applyPreloaded(widget.activePromoCode);
+    }
+  }
+
+  void _applyPreloaded(String? code) {
+    if (code == null || _loading) return;
+    setState(() {
+      _isSuccess = true;
+      _message = widget.isRu
+          ? '✓ Промокод $code применён'
+          : '✓ Promo code $code applied';
+    });
+  }
 
   @override
   void dispose() {
@@ -803,6 +895,7 @@ class _PromoCodeFieldState extends State<_PromoCodeField> {
             ? (widget.isRu ? '✓ Промокод уже применён' : '✓ Promo code already applied')
             : (widget.isRu ? '✓ Промокод принят' : '✓ Promo code accepted');
       });
+      ref.invalidate(tariffsDataProvider);
     } on Exception catch (e) {
       if (!mounted) return;
       setState(() {
@@ -832,7 +925,7 @@ class _PromoCodeFieldState extends State<_PromoCodeField> {
                 ],
                 style: const TextStyle(fontSize: 14),
                 decoration: InputDecoration(
-                  hintText: 'Промокод',
+                  hintText: widget.isRu ? 'Промокод' : 'Promo code',
                   hintStyle: const TextStyle(fontSize: 14, color: _kMuted),
                   filled: true,
                   fillColor: const Color(0xFFF9FAFB),
@@ -886,9 +979,9 @@ class _PromoCodeFieldState extends State<_PromoCodeField> {
                             color: Colors.white,
                           ),
                         )
-                      : const Text(
-                          'Применить',
-                          style: TextStyle(
+                      : Text(
+                          widget.isRu ? 'Применить' : 'Apply',
+                          style: const TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
                           ),

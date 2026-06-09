@@ -632,6 +632,14 @@
   "journal_open_btn": "Перейти",
   "journal_could_not_copy": "Не удалось скопировать",
   "journal_copy_to_another_date": "Копировать на другую дату",
+  "journal_copy_select_dates": "Выберите даты",
+  "journal_copied_n_dates": "{n} {noun} — скопировано",
+  "@journal_copied_n_dates": {
+    "placeholders": {
+      "n": {"type": "int"},
+      "noun": {"type": "String"}
+    }
+  },
 
   "journal_disclaimer": "Расчёты КБЖУ — ориентировочные. Не заменяют консультацию врача.",
 

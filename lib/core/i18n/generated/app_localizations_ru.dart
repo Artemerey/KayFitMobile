@@ -1583,6 +1583,14 @@ class AppLocalizationsRu extends AppLocalizations {
   String get journal_copy_to_another_date => 'Копировать на другую дату';
 
   @override
+  String get journal_copy_select_dates => 'Выберите даты';
+
+  @override
+  String journal_copied_n_dates(int n, String noun) {
+    return '$n $noun — скопировано';
+  }
+
+  @override
   String get journal_disclaimer =>
       'Расчёты КБЖУ — ориентировочные. Не заменяют консультацию врача.';
 

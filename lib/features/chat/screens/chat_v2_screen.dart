@@ -108,6 +108,12 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
   // survives navigation away from chat (e.g. tab switch to journal).
   // Cleared on confirm/cancel/restart through the notifier API.
 
+  /// Timestamp when the pending meal card first became active in this session.
+  /// Used to implement a 700ms tap-cooldown on the Add button so that the card
+  /// appearing does not immediately register a touch that was intended for
+  /// something underneath it (e.g. home-gesture swipe on iPhone).
+  DateTime? _pendingMealShownAt;
+
   /// Set when the assistant just asked the user to clarify a meal
   /// (type/portion). The next user message is then routed to the meal
   /// parser regardless of regex — we already know we're in a meal flow.
@@ -715,6 +721,14 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
   /// dashboard/journal providers, replaces the preview with a synthetic
   /// "✓ added" assistant message (local-only, not persisted on backend).
   Future<void> _confirmAddPendingMeal() async {
+    // Tap-cooldown guard: ignore taps in the first 700ms after the card
+    // appeared. Prevents accidental confirms when the card slides in right
+    // under the user's thumb (e.g. while swiping up to the home screen).
+    if (_pendingMealShownAt != null) {
+      final elapsed = DateTime.now().difference(_pendingMealShownAt!);
+      if (elapsed < const Duration(milliseconds: 700)) return;
+    }
+
     final pendingState = ref.read(pendingMealProvider);
     final pending = pendingState.items;
     if (pending == null || pending.isEmpty || pendingState.isAdding) return;
@@ -1066,33 +1080,28 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     _photoResultConsumed = false;
 
     final isRu = state.langCode == 'ru';
-    // Surface the real backend error in debug/profile builds — the bare
-    // "что-то пошло не так" message hides whether it was a 4xx, timeout,
-    // connectivity issue, or Claude vision failure. Strip generic
-    // "Exception:" prefix.
     String details = (state.errorMessage ?? '').trim();
     if (details.startsWith('Exception:')) {
       details = details.substring('Exception:'.length).trim();
     }
     final msg = state.isNotFood
         ? (isRu
-              ? 'Это не похоже на еду. Попробуйте ещё раз.'
-              : "That doesn't look like food. Please try again.")
+              ? 'Не похоже на еду 🍽 Попробуйте сфотографировать ближе.'
+              : "Doesn't look like food 🍽 Try taking a closer photo.")
         : (isRu
-              ? 'Что-то пошло не так${details.isEmpty ? "" : ": $details"}. '
+              ? 'Не удалось распознать еду${details.isEmpty ? "" : ": $details"}. '
                     'Попробуйте ещё раз.'
-              : 'Something went wrong'
-                    '${details.isEmpty ? "" : ": $details"}. Please try again.');
+              : 'Could not recognize food${details.isEmpty ? "" : ": $details"}. '
+                    'Please try again.');
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(msg),
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: state.isNotFood ? null : K2Colors.error,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        duration: const Duration(seconds: 4),
+    ref.read(chatHistoryProvider.notifier).add(
+      ChatMessage(
+        role: 'assistant',
+        content: msg,
+        createdAt: DateTime.now(),
       ),
     );
+    _scrollToBottom();
   }
 
   void _pushPhotoResult(String dishName, List<IngredientV2> items) {
@@ -1266,9 +1275,29 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
 
   /// Opens the legacy barcode scanner via Navigator (no GoRouter route exists).
   Future<void> _handleBarcode() async {
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(builder: (_) => const BarcodeScannerScreenV2()),
+    final saved = await Navigator.of(context).push<bool?>(
+      MaterialPageRoute<bool?>(builder: (_) => const BarcodeScannerScreenV2()),
     );
+
+    if (!mounted) return;
+
+    // Always clear any stuck thinking/sending state that may have been active
+    // before the scanner was opened (e.g. a previous message left it hanging).
+    setState(() {
+      _thinking = null;
+      _isSending = false;
+    });
+
+    if (saved == true) {
+      final isRu = Localizations.localeOf(context).languageCode == 'ru';
+      final confirmMsg = ChatMessage(
+        role: 'assistant',
+        content: isRu ? 'Продукт добавлен в журнал 📖' : 'Product added to your journal 📖',
+        createdAt: DateTime.now(),
+      );
+      ref.read(chatHistoryProvider.notifier).add(confirmMsg);
+      _scrollToBottom();
+    }
   }
 
   // ── Build ───────────────────────────────────────────────────────────────────
@@ -1285,6 +1314,17 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     ref.listen<bool>(chatProcessingProvider, (_, next) {
       if (!next && !_isSending && _thinking != null && mounted) {
         setState(() => _thinking = null);
+      }
+    });
+
+    // Record when the pending meal card first becomes active so the Add button
+    // tap-cooldown knows how long the card has been visible.
+    ref.listen<PendingMealState>(pendingMealProvider, (prev, next) {
+      final wasActive = prev?.isActive ?? false;
+      if (!wasActive && next.isActive) {
+        _pendingMealShownAt = DateTime.now();
+      } else if (!next.isActive) {
+        _pendingMealShownAt = null;
       }
     });
 
