@@ -109,6 +109,17 @@ class _PreviewEditState {
     );
   }
 
+  _PreviewEditState withCaloriesAt(int index, double kcal) {
+    final item = items[index];
+    final ratio = item.weightGrams > 0 ? item.weightGrams / 100.0 : 1.0;
+    final newTotal = item.nutrientsTotal.copyWith(calories: kcal);
+    final newPer100 = item.nutrientsPer100g.copyWith(calories: kcal / ratio);
+    return withItemAt(
+      index,
+      item.copyWith(nutrientsTotal: newTotal, nutrientsPer100g: newPer100),
+    );
+  }
+
   _PreviewEditState withMealType(String t) => _copyWith(mealType: t);
   _PreviewEditState withSaving(bool v) => _copyWith(saving: v);
   _PreviewEditState withItems(List<IngredientV2> newItems) =>
@@ -189,6 +200,11 @@ class _RecognitionResultSheetKF2State
 
   void _updateMacros(int index, double p, double f, double c) {
     setState(() => _state = _state.withMacrosAt(index, p, f, c));
+  }
+
+  void _updateCalories(int index, double kcal) {
+    if (kcal < 0) return;
+    setState(() => _state = _state.withCaloriesAt(index, kcal));
   }
 
   void _delete(int index) {
@@ -469,6 +485,8 @@ class _RecognitionResultSheetKF2State
                           onWeightChanged: (w) => _updateWeight(i, w),
                           onMacrosChanged: (p, f, c) =>
                               _updateMacros(i, p, f, c),
+                          onCaloriesChanged: (kcal) =>
+                              _updateCalories(i, kcal),
                           onDelete: () => _delete(i),
                           theme: t,
                         ),

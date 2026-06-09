@@ -406,12 +406,13 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     final pendingOrig = _pendingClarifyOriginal;
     _awaitingMealClarification = false; // one-shot
     _pendingClarifyOriginal = null;
-    // Try the food parser for ANY message that doesn't contain '?' —
-    // covers verbs ("съел омлет"), plain nouns ("омлет"), voice-dictated
-    // lists ("сосиска, бургер, роллы") and everything in between.
+    // Try the food parser when:
+    //   • message has no '?' (question mark strongly implies a non-food query)
+    //   • message is not a clear advisory/recommendation request —
+    //     e.g. "посоветуй что съесть" should go straight to the consultant.
     // If the backend returns no items the call completes quickly and we
     // fall through to the consultant as usual.
-    final mightBeFood = !text.contains('?');
+    final mightBeFood = !text.contains('?') && !_isAdvisoryIntent(text);
     if (forceMealFlow || mightBeFood) {
       // Detect language from the user's message itself, not from app locale —
       // the user can write Russian inside an English app and vice versa.
@@ -617,6 +618,37 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
   static final _kCyrillic = RegExp(r'[а-яё]', caseSensitive: false);
   String _detectMessageLang(String text) =>
       _kCyrillic.hasMatch(text) ? 'ru' : 'en';
+
+  /// Returns true when the message is clearly asking for advice or
+  /// recommendations rather than reporting food consumption. These intents
+  /// should bypass the food parser and go straight to the AI consultant.
+  static bool _isAdvisoryIntent(String text) {
+    final lower = text.toLowerCase();
+    // Advisory command verbs — if message starts with or contains these,
+    // it's a recommendation request, not a food log entry.
+    const advisoryFragments = [
+      // Russian advisory verbs
+      'посоветуй', 'посовет', 'порекоменд', 'рекоменд',
+      'подскажи', 'подскаж',
+      'помоги мне', 'помогите мне',
+      // Common "what to eat" phrases (Russian)
+      'что поесть', 'что съесть', 'что скушать', 'что покушать',
+      'что приготовить', 'что выбрать',
+      'что мне съесть', 'что мне поесть', 'что мне скушать',
+      'что бы поесть', 'что бы съесть',
+      'что лучше съесть', 'что лучше поесть', 'что лучше есть',
+      // Diet / nutrition advice (Russian)
+      'план питания', 'чем питаться', 'как питаться',
+      'что питаться', 'как мне питаться',
+      // English equivalents
+      'what should i eat', 'what to eat', 'what can i eat',
+      'recommend me', 'suggest what', 'advise me',
+    ];
+    for (final fragment in advisoryFragments) {
+      if (lower.contains(fragment)) return true;
+    }
+    return false;
+  }
 
   /// Translates English goal-type labels and formats raw floats coming from
   /// the backend `/api/coach/advice` response when the UI language is Russian.
@@ -1044,6 +1076,12 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     ref.read(photoRecognitionProvider.notifier).clear();
     _photoResultConsumed = false;
 
+    // Remove any previous orphaned analyzing bubble (happens when the user
+    // takes a second photo while the first is still being recognized).
+    ref.read(chatHistoryProvider.notifier).removeWhere(
+      (m) => m.role == _kPhotoAnalyzingRole,
+    );
+
     // Immediately show the photo in chat with a loading indicator.
     final photoMsg = ChatMessage(
       role: _kPhotoAnalyzingRole,
@@ -1113,28 +1151,31 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
           MaterialPageRoute<bool>(
             fullscreenDialog: true,
             builder: (_) => Scaffold(
-              backgroundColor: Colors.transparent,
-              body: DraggableScrollableSheet(
-                expand: false,
-                initialChildSize: 1.0,
-                builder: (_, sc) => RecognitionResultSheetKF2(
-                  dishName: dishName,
-                  ingredients: items,
-                  mealDate: null,
-                  originalText: null,
-                  onSaved: (name) {
-                    ref.read(photoRecognitionProvider.notifier).clear();
-                    unawaited(_onPhotoSaved(name));
-                  },
-                ),
+              backgroundColor: K2Colors.darkBg,
+              body: RecognitionResultSheetKF2(
+                dishName: dishName,
+                ingredients: items,
+                mealDate: null,
+                originalText: null,
+                onSaved: (name) {
+                  ref.read(photoRecognitionProvider.notifier).clear();
+                  unawaited(_onPhotoSaved(name));
+                },
               ),
             ),
           ),
         )
         .then((_) {
-          // User dismissed the sheet without saving.
+          // User dismissed the sheet without saving — clear recognition state
+          // and any stuck thinking overlay (same as _handleBarcode does).
           ref.read(photoRecognitionProvider.notifier).clear();
           _photoResultConsumed = false;
+          if (mounted) {
+            setState(() {
+              _thinking = null;
+              _isSending = false;
+            });
+          }
         });
   }
 

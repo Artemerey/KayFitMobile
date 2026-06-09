@@ -103,6 +103,16 @@ class _BarcodeScannerScreenV2State extends State<BarcodeScannerScreenV2>
         return;
       }
 
+      if (data['found'] != true) {
+        if (!mounted) return;
+        final l10n = AppLocalizations.of(context)!;
+        setState(() {
+          _state = _ScanState.error;
+          _errorText = l10n.barcode_not_found;
+        });
+        return;
+      }
+
       // Parse barcode response — all values are per 100g
       double _d(String key) => (data[key] as num?)?.toDouble() ?? 0.0;
       double? _dn(String key) => (data[key] as num?)?.toDouble();
@@ -125,13 +135,16 @@ class _BarcodeScannerScreenV2State extends State<BarcodeScannerScreenV2>
       final productName = (data['name'] as String?)?.isNotEmpty == true
           ? data['name'] as String
           : (data['brand_name'] as String? ?? 'Product');
+      final servingGrams = (data['serving_size'] as num?)?.toDouble() ?? 100.0;
+      // Build a 100g base first, then scale to the actual serving size so that
+      // nutrientsTotal reflects the real portion (not the per-100g values).
       final ingV2 = IngredientV2(
         name: productName,
-        weightGrams: (data['serving_size'] as num?)?.toDouble() ?? 100.0,
+        weightGrams: 100.0,
         nutrientsPer100g: nutrients,
         nutrientsTotal: nutrients,
         source: data['source'] as String? ?? 'barcode',
-      );
+      ).withWeight(servingGrams);
 
       if (!mounted) return;
 

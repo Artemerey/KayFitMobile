@@ -20,6 +20,7 @@ class KF2ItemTile extends StatefulWidget {
     required this.item,
     required this.onWeightChanged,
     required this.onMacrosChanged,
+    required this.onCaloriesChanged,
     required this.onDelete,
     required this.theme,
   });
@@ -29,6 +30,9 @@ class KF2ItemTile extends StatefulWidget {
 
   /// Called with (protein, fat, carbs) in grams when the user edits macros.
   final void Function(double p, double f, double c) onMacrosChanged;
+
+  /// Called with the new calories value when the user edits kcal directly.
+  final ValueChanged<double> onCaloriesChanged;
   final VoidCallback onDelete;
   final K2Theme theme;
 
@@ -46,9 +50,11 @@ class _KF2ItemTileState extends State<KF2ItemTile> {
   late final TextEditingController _proteinCtrl;
   late final TextEditingController _fatCtrl;
   late final TextEditingController _carbsCtrl;
+  late final TextEditingController _caloriesCtrl;
   late final FocusNode _proteinFocus;
   late final FocusNode _fatFocus;
   late final FocusNode _carbsFocus;
+  late final FocusNode _caloriesFocus;
 
   @override
   void initState() {
@@ -63,10 +69,13 @@ class _KF2ItemTileState extends State<KF2ItemTile> {
         TextEditingController(text: n.protein.toStringAsFixed(1));
     _fatCtrl = TextEditingController(text: n.fat.toStringAsFixed(1));
     _carbsCtrl = TextEditingController(text: n.carbs.toStringAsFixed(1));
+    _caloriesCtrl =
+        TextEditingController(text: n.calories.toStringAsFixed(0));
 
     _proteinFocus = FocusNode();
     _fatFocus = FocusNode();
     _carbsFocus = FocusNode();
+    _caloriesFocus = FocusNode();
   }
 
   @override
@@ -90,6 +99,7 @@ class _KF2ItemTileState extends State<KF2ItemTile> {
       _syncMacroField(_proteinCtrl, n.protein);
       _syncMacroField(_fatCtrl, n.fat);
       _syncMacroField(_carbsCtrl, n.carbs);
+      _syncCaloriesField(n.calories);
     }
     // Edge-triggered: open macro editor when item transitions into the
     // "needs manual nutrition" state (e.g. after an undo that clears calories).
@@ -110,6 +120,16 @@ class _KF2ItemTileState extends State<KF2ItemTile> {
     }
   }
 
+  void _syncCaloriesField(double value) {
+    final newText = value.toStringAsFixed(0);
+    if (_caloriesCtrl.text != newText && !_caloriesFocus.hasFocus) {
+      _caloriesCtrl.value = TextEditingValue(
+        text: newText,
+        selection: TextSelection.collapsed(offset: newText.length),
+      );
+    }
+  }
+
   @override
   void dispose() {
     _weightFocus
@@ -119,9 +139,11 @@ class _KF2ItemTileState extends State<KF2ItemTile> {
     _proteinCtrl.dispose();
     _fatCtrl.dispose();
     _carbsCtrl.dispose();
+    _caloriesCtrl.dispose();
     _proteinFocus.dispose();
     _fatFocus.dispose();
     _carbsFocus.dispose();
+    _caloriesFocus.dispose();
     super.dispose();
   }
 
@@ -153,6 +175,16 @@ class _KF2ItemTileState extends State<KF2ItemTile> {
     final c = double.tryParse(_carbsCtrl.text.trim()) ?? 0;
     widget.onMacrosChanged(p.clamp(0, double.infinity),
         f.clamp(0, double.infinity), c.clamp(0, double.infinity));
+    // Sync calories field to reflect recalculated value (4/9/4 rule).
+    final recalc = p * 4 + f * 9 + c * 4;
+    _syncCaloriesField(recalc);
+  }
+
+  void _onCaloriesChanged(String v) {
+    final kcal = double.tryParse(v.trim());
+    if (kcal != null && kcal >= 0) {
+      widget.onCaloriesChanged(kcal);
+    }
   }
 
   void _showDetailSheet() {
@@ -350,10 +382,13 @@ class _KF2ItemTileState extends State<KF2ItemTile> {
                 proteinCtrl: _proteinCtrl,
                 fatCtrl: _fatCtrl,
                 carbsCtrl: _carbsCtrl,
+                caloriesCtrl: _caloriesCtrl,
                 proteinFocus: _proteinFocus,
                 fatFocus: _fatFocus,
                 carbsFocus: _carbsFocus,
-                onChanged: _onMacroChanged,
+                caloriesFocus: _caloriesFocus,
+                onMacrosChanged: _onMacroChanged,
+                onCaloriesChanged: _onCaloriesChanged,
                 onDone: () => setState(() => _editingMacros = false),
                 theme: t,
               ),
@@ -408,6 +443,10 @@ class _SourceBadge extends StatelessWidget {
       case 'claude':
       case 'anthropic':
         return 'AI';
+      case 'openfoodfacts':
+        return 'Open Food Facts';
+      case 'label':
+        return 'Этикетка';
       default:
         return source.toUpperCase();
     }
@@ -423,6 +462,11 @@ class _SourceBadge extends StatelessWidget {
         return const Color(0xFF6B7280); // gray — local
       case 'claude':
       case 'anthropic':
+        return const Color(0xFF7C3AED); // purple — AI
+      case 'openfoodfacts':
+        return const Color(0xFF059669); // green — trusted DB
+      case 'label':
+        return const Color(0xFF0284C7); // blue — direct read from packaging
       default:
         return const Color(0xFF7C3AED); // purple — AI
     }
@@ -493,10 +537,13 @@ class _KF2MacroInlineEdit extends StatelessWidget {
     required this.proteinCtrl,
     required this.fatCtrl,
     required this.carbsCtrl,
+    required this.caloriesCtrl,
     required this.proteinFocus,
     required this.fatFocus,
     required this.carbsFocus,
-    required this.onChanged,
+    required this.caloriesFocus,
+    required this.onMacrosChanged,
+    required this.onCaloriesChanged,
     required this.onDone,
     required this.theme,
   });
@@ -504,10 +551,13 @@ class _KF2MacroInlineEdit extends StatelessWidget {
   final TextEditingController proteinCtrl;
   final TextEditingController fatCtrl;
   final TextEditingController carbsCtrl;
+  final TextEditingController caloriesCtrl;
   final FocusNode proteinFocus;
   final FocusNode fatFocus;
   final FocusNode carbsFocus;
-  final VoidCallback onChanged;
+  final FocusNode caloriesFocus;
+  final VoidCallback onMacrosChanged;
+  final ValueChanged<String> onCaloriesChanged;
   final VoidCallback onDone;
   final K2Theme theme;
 
@@ -517,13 +567,28 @@ class _KF2MacroInlineEdit extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // Calories row (direct edit)
+        Row(
+          children: [
+            Expanded(
+              child: _MacroField(
+                label: 'KCAL',
+                ctrl: caloriesCtrl,
+                focus: caloriesFocus,
+                onChanged: onCaloriesChanged,
+                theme: theme,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
         Row(
           children: [
             _MacroField(
               label: l10n.macro_protein.toUpperCase(),
               ctrl: proteinCtrl,
               focus: proteinFocus,
-              onChanged: (_) => onChanged(),
+              onChanged: (_) => onMacrosChanged(),
               theme: theme,
             ),
             const SizedBox(width: 8),
@@ -531,7 +596,7 @@ class _KF2MacroInlineEdit extends StatelessWidget {
               label: l10n.macro_fat.toUpperCase(),
               ctrl: fatCtrl,
               focus: fatFocus,
-              onChanged: (_) => onChanged(),
+              onChanged: (_) => onMacrosChanged(),
               theme: theme,
             ),
             const SizedBox(width: 8),
@@ -539,7 +604,7 @@ class _KF2MacroInlineEdit extends StatelessWidget {
               label: l10n.macro_carbs.toUpperCase(),
               ctrl: carbsCtrl,
               focus: carbsFocus,
-              onChanged: (_) => onChanged(),
+              onChanged: (_) => onMacrosChanged(),
               theme: theme,
             ),
           ],

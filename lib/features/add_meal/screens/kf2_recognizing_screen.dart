@@ -165,17 +165,13 @@ class _Kf2RecognizingScreenState extends ConsumerState<Kf2RecognizingScreen>
       MaterialPageRoute<bool>(
         fullscreenDialog: true,
         builder: (_) => Scaffold(
-          backgroundColor: Colors.transparent,
-          body: DraggableScrollableSheet(
-            expand: false,
-            initialChildSize: 1.0,
-            builder: (context, scrollController) => RecognitionResultSheetKF2(
-              dishName: dishName,
-              ingredients: items,
-              mealDate: null,
-              originalText: null,
-              onSaved: widget.onSaved,
-            ),
+          backgroundColor: K2Colors.darkBg,
+          body: RecognitionResultSheetKF2(
+            dishName: dishName,
+            ingredients: items,
+            mealDate: null,
+            originalText: null,
+            onSaved: widget.onSaved,
           ),
         ),
       ),
