@@ -62,78 +62,41 @@ class AuthNotifier extends _$AuthNotifier {
     final storage = ref.read(secureStorageProvider);
 
     try {
-      // Load the full token pair so we can inspect expiresAt locally and
-      // avoid one unnecessary round-trip (EC3 / UC2 optimisation).
       final pair = await storage.loadTokens();
 
       if (pair == null) {
-        // No tokens at all → not logged in. Unconditionally set data(null)
-        // so the router redirects to /login regardless of backgroundRefresh.
         await _clearCache();
         state = const AsyncValue.data(null);
         return;
       }
 
-      // If token not yet expired, try /me with it.
-      if (!pair.isExpired) {
-        final user = await _fetchMe(pair.accessToken);
-        if (user != null) {
-          await _saveCache(user);
-          state = AsyncValue.data(user);
-          _postLoginSideEffects();
-          return;
-        }
-        // /me returned 401 despite non-expired token (clock skew, early revoke)
-        // → fall through to refresh.
+      // Route /me through apiDio so _AuthInterceptor owns ALL token refreshes.
+      // Previously checkSession used a plain Dio and called /refresh directly,
+      // racing with the interceptor when the access token expired — both would
+      // send the same refresh token simultaneously. The backend's token-reuse
+      // detector treats that as theft and revokes every session for the user.
+      // Using apiDio serialises the refresh via _refreshCompleter, eliminating
+      // the race entirely.
+      final user = await _fetchMeViaInterceptor();
+      if (user != null) {
+        await _saveCache(user);
+        state = AsyncValue.data(user);
+        _postLoginSideEffects();
+        return;
       }
-
-      // Token is expired (or /me returned 401) → attempt silent refresh.
-      try {
-        final plain = Dio(BaseOptions(baseUrl: baseUrl));
-        final resp = await plain.post(
-          '/api/v1/auth/refresh',
-          data: {'refresh_token': pair.refreshToken},
-        );
-        final data = resp.data as Map<String, dynamic>;
-        final newPair = TokenPair.fromApiResponse(data);
-        await storage.saveTokens(newPair);
-
-        final refreshedUser = await _fetchMe(newPair.accessToken);
-        if (refreshedUser != null) {
-          await _saveCache(refreshedUser);
-          state = AsyncValue.data(refreshedUser);
-          _postLoginSideEffects();
-          return;
-        }
-      } on DioException catch (e) {
-        final isNetworkError =
-            e.type == DioExceptionType.connectionTimeout ||
-            e.type == DioExceptionType.receiveTimeout ||
-            e.type == DioExceptionType.sendTimeout ||
-            e.type == DioExceptionType.connectionError;
-        if (isNetworkError) {
-          rethrow; // caught by outer DioException handler → tokens stay intact
-        }
-        debugPrint('[auth] refresh failed: $e');
-      }
-
-      // Refresh failed or /me still returned null → clear and log out.
-      // Unconditionally set data(null): tokens are dead, there is no point
-      // keeping the UI in a logged-in state even during a background refresh.
-      await storage.clearTokens();
-      await _clearCache();
+      // user == null → /me returned 401 and _AuthInterceptor already fired
+      // sessionExpiredStream (tokens cleared). Set the terminal logged-out
+      // state explicitly rather than relying on the async _sessionExpiredSub,
+      // so we never return with `state` still in loading().
       state = const AsyncValue.data(null);
     } on DioException catch (e) {
-      // H3: network errors — tokens are not compromised, do not log out.
+      // Network errors — tokens are not compromised, do not log out.
       debugPrint('[auth] checkSession DioException: $e');
-      // state is intentionally not modified for any DioException.
     } on KeychainUnavailableException catch (e) {
-      // H5: Keychain locked after reboot — tokens exist but cannot be read yet.
-      // Do not log out; the user will unlock the device and try again.
+      // Keychain locked after reboot — tokens exist but cannot be read yet.
       debugPrint('[auth] Keychain unavailable: $e — not logging out');
     } catch (e) {
-      // Unexpected error — fail-safe: do not log the user out for unknown
-      // exceptions to avoid spurious logouts on transient issues.
+      // Unexpected error — fail-safe: do not log the user out.
       debugPrint('[auth] unexpected checkSession error: $e');
     }
   }
@@ -187,13 +150,25 @@ class AuthNotifier extends _$AuthNotifier {
     } catch (_) {}
   }
 
-  Future<UserProfile?> _fetchMe(String token) async {
+  /// Reads the last cached [UserProfile] (mirror of [_saveCache] and the
+  /// cold-start decode in main.dart). Used by checkSession's loading() safety
+  /// net to keep a known user logged in across a transient refresh error.
+  static Future<UserProfile?> _loadCachedUser() async {
     try {
-      final plain = Dio(BaseOptions(
-        baseUrl: baseUrl,
-        headers: {'Authorization': 'Bearer $token'},
-      ));
-      final resp = await plain.get('/api/v1/auth/me');
+      final prefs = await SharedPreferences.getInstance();
+      final cachedJson = prefs.getString(_kCachedUserKey);
+      if (cachedJson == null) return null;
+      return UserProfile.fromJson(
+        jsonDecode(cachedJson) as Map<String, dynamic>,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<UserProfile?> _fetchMeViaInterceptor() async {
+    try {
+      final resp = await apiDio.get('/api/v1/auth/me');
       return UserProfile.fromJson(resp.data as Map<String, dynamic>);
     } on DioException catch (e) {
       if (e.response?.statusCode == 401) return null;
@@ -221,6 +196,15 @@ class AuthNotifier extends _$AuthNotifier {
 
   Future<void> refreshUser() async {
     await checkSession();
+    // refreshUser is the post-login foreground refresh. checkSession leaves
+    // `state` in loading() on a transient network error (H3 contract — it must
+    // not log a returning user out). But the GoRouter redirect freezes on
+    // authNotifier.isLoading, so a stuck loading() here = infinite spinner with
+    // no recovery. Resolve to the cached user (stay logged in) or logged-out so
+    // navigation always proceeds.
+    if (state.isLoading) {
+      state = AsyncValue.data(await _loadCachedUser());
+    }
   }
 
   Future<void> logout() async {

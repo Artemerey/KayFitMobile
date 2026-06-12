@@ -184,6 +184,12 @@ class AnalyticsService {
   static void aiConsentDeclined() => _event('ai_consent_declined');
   static void aiConsentDeclineConfirmed() => _event('ai_consent_decline_confirmed');
 
+  // ─── Review Prompt ────────────────────────────────────────────────────────
+
+  static void reviewPromptShown() => _event('review_prompt_shown');
+  static void reviewPromptStarsSelected(int stars) =>
+      _event('review_prompt_stars_selected', {'stars': stars});
+
   // ─── Notifications ────────────────────────────────────────────────────────
 
   static void notificationPromoShown() => _event('notification_promo_shown');

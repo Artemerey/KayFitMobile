@@ -19,6 +19,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/api/api_client.dart';
 import '../../../core/i18n/generated/app_localizations.dart';
+import '../../../core/paywall/paywall_flags.dart';
 import '../../../features/dashboard/providers/dashboard_provider.dart';
 import '../../tariffs/screens/tariffs_screen.dart';
 import '../../../features/journal/screens/journal_screen.dart'
@@ -503,7 +504,7 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
 
   @override
   Widget build(BuildContext context) {
-    if (!_paywallCheckDone) {
+    if (!_paywallCheckDone && !kBypassPaywall) {
       _paywallCheckDone = true;
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         if (!mounted) return;

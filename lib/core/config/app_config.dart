@@ -5,4 +5,11 @@ class AppConfig {
   static const telegramBotUrl = 'https://t.me/kayfit_bot?start=1';
   static const baseUrl = 'https://app.carbcounter.online';
   static const deepLinkScheme = 'kayfit';
+
+  /// Numeric Apple App Store ID for Carb Counter · Kayfit.
+  static const appStoreId = '6761225873';
+
+  /// Deep-link that opens the App Store write-review compose page directly.
+  static const appStoreReviewUrl =
+      'https://apps.apple.com/app/id$appStoreId?action=write-review';
 }

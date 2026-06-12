@@ -10,6 +10,7 @@ import '../../../core/analytics/analytics_service.dart';
 import '../../../core/auth/auth_provider.dart';
 import '../../../core/auth/onboarding_sync.dart';
 import '../../../core/auth/social_auth_service.dart';
+import 'package:kayfit/router.dart';
 import '../../../core/i18n/generated/app_localizations.dart';
 import '../../../core/locale/locale_provider.dart';
 import '../../../shared/theme/app_theme.dart';
@@ -55,9 +56,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           tokens['access_token'] as String,
           tokens['refresh_token'] as String,
         );
-    if (mounted) {
-      await syncOnboardingPending();
-    }
+    if (!mounted) return;
+    await syncOnboardingPending();
+    // The Apple sign-in path used to stop here — so it never marked onboarding
+    // done (risking the Keychain-survives-reinstall redirect loop) and never
+    // showed the one-time "month free for a review" prompt. The email path in
+    // EmailAuthScreen already does both; mirror it so every auth method lands
+    // the same way.
+    final showReview = await markOnboardingDone(ref);
+    if (!mounted) return;
+    await ref.read(authNotifierProvider.notifier).refreshUser();
+    // Navigate directly — the ai-consent gate can race with
+    // showReviewPromptProvider and intercept the router redirect first.
+    if (showReview && mounted) context.go('/review-prompt');
   }
 
   Future<void> _signInApple() async {

@@ -443,6 +443,17 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       gender: _gender.isNotEmpty ? _gender : null,
       age: _age,
     );
+    // iOS keeps the Keychain auth token across app reinstalls while
+    // SharedPreferences (onboarding_done) is wiped. Without clearing auth
+    // state first, the router sees isLoggedIn=true + onboarding_done=false and
+    // bounces /login → /journal-v2 → /onboarding, re-rendering THIS step's
+    // spinner — an infinite redirect loop (the "eternal loading" after the plan
+    // screen). Logging out first makes the redirect chain land cleanly on
+    // /login. Mirrors the landing "I already have an account" path, which
+    // already documents and fixes this exact bounce.
+    if (mounted) {
+      await ref.read(authNotifierProvider.notifier).logout();
+    }
     if (mounted) context.go('/login');
   }
 
@@ -980,7 +991,7 @@ class _LandingStep extends StatelessWidget {
   Widget build(BuildContext context) {
     final isRu = locale.languageCode == 'ru';
 
-    final heroHeight = MediaQuery.of(context).size.height * 0.5;
+    final heroHeight = MediaQuery.of(context).size.height * 0.44;
 
     return Column(
       children: [
@@ -1088,10 +1099,12 @@ class _LandingStep extends StatelessWidget {
             ),
           ),
         ),
-        // Features
+        // Features — scrollable so the 4th tile is never clipped under the
+        // sticky CTA on shorter devices (hero + CTA can squeeze the middle).
+        // Bottom padding keeps the last tile clear of the button.
         Expanded(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(24, 28, 24, 0),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
             child: Column(
               children: [
                 _FeatureTile(icon: Icons.photo_camera_rounded, text: l10n.ob_demo_perk1),
@@ -1173,9 +1186,12 @@ class _LangToggle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
+      // Dark pill + thin white border so both chips stay legible over the
+      // bright hero photo (the old white@20% pill was nearly invisible).
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.2),
+        color: Colors.black.withValues(alpha: 0.35),
         borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.5)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
