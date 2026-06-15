@@ -26,6 +26,9 @@ import 'features/splash/screens/splash_screen.dart';
 import 'package:image_picker/image_picker.dart';
 import 'features/add_meal/screens/kf2_capture_screen.dart';
 import 'features/add_meal/screens/kf2_recognizing_screen.dart';
+import 'features/add_meal/screens/recognition_result_args.dart';
+import 'features/add_meal/screens/recognition_result_sheet_kf2.dart';
+import 'shared/theme/kayfit2_theme.dart';
 import 'features/chat/screens/chat_v2_screen.dart';
 import 'features/journal/screens/journal_v2_screen.dart';
 import 'features/kayfit2/screens/kayfit2_preview_screen.dart';
@@ -210,12 +213,19 @@ final _routerNotifierProvider = Provider<_RouterNotifier>((ref) {
 /// NEVER reference this from production code paths.
 GoRouter? debugRouter;
 
+/// Observer used by screens that need to know when they regain focus after a
+/// pushed route pops (e.g. the chat screen flushing queued recognition results
+/// once the camera/result route closes). A single shared instance so RouteAware
+/// subscribers receive callbacks.
+final RouteObserver<PageRoute<dynamic>> kf2RouteObserver =
+    RouteObserver<PageRoute<dynamic>>();
+
 final routerProvider = Provider<GoRouter>((ref) {
   final notifier = ref.watch(_routerNotifierProvider);
 
   final router = GoRouter(
     initialLocation: '/splash',
-    observers: [AnalyticsService.routeObserver],
+    observers: [AnalyticsService.routeObserver, kf2RouteObserver],
     refreshListenable: notifier,
     redirect: notifier.redirect,
     routes: [
@@ -294,6 +304,25 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) {
           final photo = state.extra as XFile;
           return Kf2RecognizingScreen(photo: photo);
+        },
+      ),
+      // Recognition result sheet, presented as a real router page so the
+      // sheet's Navigator.pop stays in sync with go_router. Opened by the chat
+      // screen when a background photo recognition completes.
+      GoRoute(
+        path: '/kf2/result',
+        builder: (context, state) {
+          final args = state.extra as RecognitionResultArgs;
+          return Scaffold(
+            backgroundColor: K2Colors.darkBg,
+            body: RecognitionResultSheetKF2(
+              dishName: args.dishName,
+              ingredients: args.items,
+              mealDate: null,
+              originalText: null,
+              onSaved: args.onSaved,
+            ),
+          );
         },
       ),
 

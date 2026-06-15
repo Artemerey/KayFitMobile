@@ -20,58 +20,84 @@ class RecognitionResult {
   final List<IngredientV2> items;
 }
 
-// ── Status enum ───────────────────────────────────────────────────────────────
+// ── Outcome types ─────────────────────────────────────────────────────────────
+//
+// Each queued photo produces exactly one outcome (success / not-food / failure),
+// appended to [PhotoRecognitionState.outcomes] in the order recognition
+// finishes. The chat screen drains this FIFO one sheet at a time. Every outcome
+// carries [photoPath] so the UI can match it to the right analyzing bubble.
 
-enum PhotoRecognitionStatus { idle, analyzing, done, error, notFood }
+@immutable
+sealed class RecogOutcome {
+  const RecogOutcome({required this.photoPath, required this.langCode});
+  final String photoPath;
+  final String langCode;
+}
+
+final class RecogSuccess extends RecogOutcome {
+  const RecogSuccess({
+    required super.photoPath,
+    required super.langCode,
+    required this.result,
+  });
+  final RecognitionResult result;
+}
+
+final class RecogNotFood extends RecogOutcome {
+  const RecogNotFood({required super.photoPath, required super.langCode});
+}
+
+final class RecogFailure extends RecogOutcome {
+  const RecogFailure({
+    required super.photoPath,
+    required super.langCode,
+    required this.message,
+  });
+  final String message;
+}
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
 @immutable
 class PhotoRecognitionState {
   const PhotoRecognitionState({
-    this.status = PhotoRecognitionStatus.idle,
-    this.photoPath,
+    this.analyzingPath,
     this.stageIndex = 0,
-    this.result,
-    this.errorMessage,
     this.langCode = 'en',
+    this.queuedCount = 0,
+    this.outcomes = const [],
   });
 
-  final PhotoRecognitionStatus status;
-  final String? photoPath;
+  /// Path of the photo currently being recognized, or null when idle.
+  final String? analyzingPath;
   final int stageIndex;
-  final RecognitionResult? result;
-  final String? errorMessage;
   final String langCode;
 
-  bool get isAnalyzing => status == PhotoRecognitionStatus.analyzing;
-  bool get isDone => status == PhotoRecognitionStatus.done;
-  bool get isError => status == PhotoRecognitionStatus.error;
-  bool get isNotFood => status == PhotoRecognitionStatus.notFood;
+  /// Photos waiting in the queue behind the in-flight one.
+  final int queuedCount;
+
+  /// Completed outcomes awaiting consumption by the UI, oldest first.
+  final List<RecogOutcome> outcomes;
+
+  bool get isAnalyzing => analyzingPath != null;
 
   static const Object _sentinel = Object();
 
   PhotoRecognitionState copyWith({
-    PhotoRecognitionStatus? status,
-    Object? photoPath = _sentinel,
+    Object? analyzingPath = _sentinel,
     int? stageIndex,
-    Object? result = _sentinel,
-    Object? errorMessage = _sentinel,
     String? langCode,
+    int? queuedCount,
+    List<RecogOutcome>? outcomes,
   }) {
     return PhotoRecognitionState(
-      status: status ?? this.status,
-      photoPath: identical(photoPath, _sentinel)
-          ? this.photoPath
-          : photoPath as String?,
+      analyzingPath: identical(analyzingPath, _sentinel)
+          ? this.analyzingPath
+          : analyzingPath as String?,
       stageIndex: stageIndex ?? this.stageIndex,
-      result: identical(result, _sentinel)
-          ? this.result
-          : result as RecognitionResult?,
-      errorMessage: identical(errorMessage, _sentinel)
-          ? this.errorMessage
-          : errorMessage as String?,
       langCode: langCode ?? this.langCode,
+      queuedCount: queuedCount ?? this.queuedCount,
+      outcomes: outcomes ?? this.outcomes,
     );
   }
 }
@@ -98,74 +124,128 @@ const _kStagesEn = [
 List<String> photoRecognitionStages(String langCode) =>
     langCode == 'ru' ? _kStagesRu : _kStagesEn;
 
+// ── Queued photo ──────────────────────────────────────────────────────────────
+
+class _QueuedPhoto {
+  const _QueuedPhoto(this.photo, this.lang);
+  final XFile photo;
+  final String lang;
+}
+
 // ── Notifier ──────────────────────────────────────────────────────────────────
 
 class PhotoRecognitionNotifier extends Notifier<PhotoRecognitionState> {
   Timer? _stageTimer;
 
-  // Generation counter — incremented on each startRecognition call so that
-  // a superseded in-flight _doRecognize never writes back to state.
+  // Photos waiting to be recognized (excludes the in-flight one).
+  final List<_QueuedPhoto> _pending = [];
+
+  // True while a recognition HTTP call is in flight.
+  bool _busy = false;
+
+  // Generation counter — bumped by [clear] so an in-flight recognition that
+  // resolves after a clear() never writes its outcome back to fresh state.
   int _gen = 0;
 
   @override
   PhotoRecognitionState build() => const PhotoRecognitionState();
 
-  Future<void> startRecognition(XFile photo, String lang) async {
-    _stageTimer?.cancel();
-    _gen++;
-    final gen = _gen;
+  /// Adds a photo to the recognition queue and kicks the processor.
+  /// Photos are recognized strictly one at a time, in FIFO order.
+  void enqueue(XFile photo, String lang) {
+    _pending.add(_QueuedPhoto(photo, lang));
+    state = state.copyWith(queuedCount: _pending.length);
+    unawaited(_kick());
+  }
 
-    state = PhotoRecognitionState(
-      status: PhotoRecognitionStatus.analyzing,
-      photoPath: photo.path,
+  /// Removes the first (oldest) outcome — called by the UI once it has been
+  /// shown to the user (sheet dismissed, or error message injected).
+  void consumeFirstOutcome() {
+    if (state.outcomes.isEmpty) return;
+    state = state.copyWith(outcomes: state.outcomes.sublist(1));
+  }
+
+  /// Resets everything: cancels timers, drops the queue and outcomes, and
+  /// invalidates any in-flight recognition via the generation counter.
+  void clear() {
+    _gen++;
+    _stageTimer?.cancel();
+    _pending.clear();
+    _busy = false;
+    state = const PhotoRecognitionState();
+  }
+
+  // ── Queue processor ──────────────────────────────────────────────────────────
+
+  Future<void> _kick() async {
+    if (_busy) return;
+    if (_pending.isEmpty) {
+      _stageTimer?.cancel();
+      if (state.analyzingPath != null || state.queuedCount != 0) {
+        state = state.copyWith(analyzingPath: null, queuedCount: 0);
+      }
+      return;
+    }
+
+    _busy = true;
+    final gen = _gen;
+    final item = _pending.removeAt(0);
+
+    state = state.copyWith(
+      analyzingPath: item.photo.path,
       stageIndex: 0,
-      langCode: lang,
+      langCode: item.lang,
+      queuedCount: _pending.length,
     );
 
-    final stages = photoRecognitionStages(lang);
-
-    // Advance stage every 4 s, capped at the last stage index.
+    final stages = photoRecognitionStages(item.lang);
+    _stageTimer?.cancel();
     _stageTimer = Timer.periodic(const Duration(seconds: 4), (_) {
-      if (state.status != PhotoRecognitionStatus.analyzing) return;
+      if (gen != _gen || state.analyzingPath != item.photo.path) return;
       state = state.copyWith(
         stageIndex: math.min(state.stageIndex + 1, stages.length - 1),
       );
     });
 
+    RecogOutcome outcome;
     try {
-      final result = await _doRecognize(photo, lang);
-      _stageTimer?.cancel();
-      if (gen != _gen) return; // superseded by a newer call
-
-      state = state.copyWith(
-        status: PhotoRecognitionStatus.done,
+      final result = await _doRecognize(item.photo, item.lang);
+      outcome = RecogSuccess(
+        photoPath: item.photo.path,
+        langCode: item.lang,
         result: result,
       );
-
-      final kcal = result.items
-          .fold<double>(0, (s, i) => s + i.nutrientsTotal.calories);
+      final kcal =
+          result.items.fold<double>(0, (s, i) => s + i.nutrientsTotal.calories);
       await NotificationService.showMealRecognized(
         dishName: result.dishName,
         kcal: kcal,
-        isRu: lang == 'ru',
+        isRu: item.lang == 'ru',
       );
     } on _NotFoodException {
-      _stageTimer?.cancel();
-      if (gen != _gen) return;
-      state = state.copyWith(status: PhotoRecognitionStatus.notFood);
+      outcome = RecogNotFood(photoPath: item.photo.path, langCode: item.lang);
     } on Exception catch (e) {
-      _stageTimer?.cancel();
-      if (gen != _gen) return;
-      state = state.copyWith(
-        status: PhotoRecognitionStatus.error,
-        errorMessage: e.toString(),
+      outcome = RecogFailure(
+        photoPath: item.photo.path,
+        langCode: item.lang,
+        message: e.toString(),
       );
     }
-  }
 
-  void clear() {
     _stageTimer?.cancel();
-    state = const PhotoRecognitionState();
+
+    // Superseded by clear() while in flight — drop the outcome silently.
+    if (gen != _gen) {
+      _busy = false;
+      return;
+    }
+
+    state = state.copyWith(
+      analyzingPath: null,
+      outcomes: [...state.outcomes, outcome],
+    );
+    _busy = false;
+    unawaited(_kick());
   }
 
   // ── Private recognition logic ────────────────────────────────────────────────

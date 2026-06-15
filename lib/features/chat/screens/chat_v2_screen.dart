@@ -37,7 +37,8 @@ import '../../../core/ai_consent/ai_consent_provider.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/subscription/require_subscription.dart';
 import '../../../features/add_meal/screens/barcode_scanner_screen_v2.dart';
-import '../../../features/add_meal/screens/recognition_result_sheet_kf2.dart';
+import '../../../features/add_meal/screens/recognition_result_args.dart';
+import '../../../router.dart' show kf2RouteObserver;
 import '../providers/photo_recognition_provider.dart';
 import '../../../features/dashboard/providers/dashboard_provider.dart';
 import '../../../features/journal/screens/journal_screen.dart'
@@ -93,7 +94,7 @@ class ChatV2Screen extends ConsumerStatefulWidget {
 }
 
 class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, RouteAware {
   final _scrollController = ScrollController();
   final _textController = TextEditingController();
 
@@ -128,9 +129,10 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
   bool _isLoading = false;
   bool _isSending = false;
 
-  // Guard against _onPhotoRecognitionDone being called twice — once via
-  // ref.listen and once via the initState post-frame check.
-  bool _photoResultConsumed = false;
+  // True while a recognition result sheet (/kf2/result) is open. Guards against
+  // pushing a second result sheet on top of the first — outcomes are drained
+  // one at a time.
+  bool _resultSheetOpen = false;
 
   // Voice (on-device speech recognition)
   final _speech = SpeechToText();
@@ -177,10 +179,9 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final recog = ref.read(photoRecognitionProvider);
-      if (recog.isDone && recog.result != null) {
-        _onPhotoRecognitionDone(recog.result!);
-      }
+      // A recognition may have completed while the user was on another screen —
+      // flush any queued outcomes now that the chat is mounted and current.
+      _drainOutcomes();
       // If a voice transcription completed while the user was away, restore it.
       final pending = ref.read(transcriptionPendingProvider);
       if (pending != null && pending.isNotEmpty) {
@@ -208,7 +209,25 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Subscribe to route changes so we can flush queued recognition results
+    // when the chat regains focus after the camera or result route pops.
+    final route = ModalRoute.of(context);
+    if (route is PageRoute) {
+      kf2RouteObserver.subscribe(this, route);
+    }
+  }
+
+  // RouteAware — the chat became top-most again after a pushed route popped.
+  @override
+  void didPopNext() {
+    _drainOutcomes();
+  }
+
+  @override
   void dispose() {
+    kf2RouteObserver.unsubscribe(this);
     WidgetsBinding.instance.removeObserver(this);
     _scrollController.dispose();
     _textController.dispose();
@@ -230,6 +249,11 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
           if (mounted) setState(() => _voiceState = _VoiceState.idle);
         }).ignore();
       }
+    }
+    // Returning to the foreground (e.g. after tapping the "meal recognized"
+    // notification) — show any recognition results that completed while away.
+    if (state == AppLifecycleState.resumed) {
+      _drainOutcomes();
     }
   }
 
@@ -1058,125 +1082,129 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
 
   // ── Attach toolbar handlers ─────────────────────────────────────────────────
 
-  /// Opens the KF2 capture screen, adds a photo bubble to chat, and starts
-  /// recognition in the background. The user can freely navigate the app while
-  /// recognition runs. Result is delivered via [ref.listen] on
-  /// [photoRecognitionProvider] and a push notification when done.
+  /// Opens the KF2 capture screen, adds a photo bubble to chat, and enqueues
+  /// the photo for background recognition. The user can take several photos in
+  /// a row — each is queued and recognized in order. Results are surfaced one
+  /// sheet at a time by [_drainOutcomes], driven by [ref.listen] on
+  /// [photoRecognitionProvider], RouteAware focus changes, and app resume.
   Future<void> _handleCamera() async {
     debugPrint('KF2-CHAT: _handleCamera start');
     final photo = await context.push<XFile>('/kf2/capture');
-    if (!mounted || photo == null) return;
-
-    final lang = Localizations.localeOf(context).languageCode;
-
-    // Ensure clean state before starting a new recognition. Even though
-    // clear() is called when the result sheet is dismissed, call it again
-    // here as a defensive measure — prevents stale results if the sheet was
-    // dismissed without triggering the .then() callback.
-    ref.read(photoRecognitionProvider.notifier).clear();
-    _photoResultConsumed = false;
-
-    // Remove any previous orphaned analyzing bubble (happens when the user
-    // takes a second photo while the first is still being recognized).
-    ref.read(chatHistoryProvider.notifier).removeWhere(
-      (m) => m.role == _kPhotoAnalyzingRole,
-    );
-
-    // Immediately show the photo in chat with a loading indicator.
-    final photoMsg = ChatMessage(
-      role: _kPhotoAnalyzingRole,
-      content: photo.path,
-      createdAt: DateTime.now(),
-    );
-    ref.read(chatHistoryProvider.notifier).add(photoMsg);
-    _scrollToBottom();
-
-    // Fire recognition in the background — outcome handled by ref.listen.
-    unawaited(
-      ref.read(photoRecognitionProvider.notifier).startRecognition(photo, lang),
-    );
-  }
-
-  // ── Photo recognition result handlers ────────────────────────────────────────
-
-  void _onPhotoRecognitionDone(RecognitionResult result) {
-    if (!mounted || _photoResultConsumed) return;
-    _photoResultConsumed = true;
-
-    ref
-        .read(chatHistoryProvider.notifier)
-        .removeWhere((m) => m.role == _kPhotoAnalyzingRole);
-    _pushPhotoResult(result.dishName, result.items);
-  }
-
-  void _onPhotoRecognitionFailed(PhotoRecognitionState state) {
     if (!mounted) return;
-    ref
-        .read(chatHistoryProvider.notifier)
-        .removeWhere((m) => m.role == _kPhotoAnalyzingRole);
-    ref.read(photoRecognitionProvider.notifier).clear();
-    _photoResultConsumed = false;
 
-    final isRu = state.langCode == 'ru';
-    String details = (state.errorMessage ?? '').trim();
-    if (details.startsWith('Exception:')) {
-      details = details.substring('Exception:'.length).trim();
+    if (photo != null) {
+      final lang = Localizations.localeOf(context).languageCode;
+
+      // Show the photo in chat with a per-photo loading bubble (keyed by path).
+      final photoMsg = ChatMessage(
+        role: _kPhotoAnalyzingRole,
+        content: photo.path,
+        createdAt: DateTime.now(),
+      );
+      ref.read(chatHistoryProvider.notifier).add(photoMsg);
+      _scrollToBottom();
+
+      // Queue recognition — the provider processes photos one at a time.
+      ref.read(photoRecognitionProvider.notifier).enqueue(photo, lang);
     }
-    final msg = state.isNotFood
+
+    // Back in the chat now — flush any result that finished while we were on
+    // the capture screen (deferred so a sheet never pops over the camera).
+    _drainOutcomes();
+  }
+
+  // ── Photo recognition outcome draining ───────────────────────────────────────
+
+  /// Shows recognition outcomes one at a time. Success outcomes open the result
+  /// sheet (as a go_router page); not-food / error outcomes inject a chat
+  /// message. Only runs when the chat is the top-most route, so result sheets
+  /// never stack on top of the camera screen. Re-entrancy is guarded by
+  /// [_resultSheetOpen].
+  void _drainOutcomes() {
+    if (!mounted || _resultSheetOpen) return;
+    final isCurrent = ModalRoute.of(context)?.isCurrent ?? false;
+    if (!isCurrent) return;
+
+    final outcomes = ref.read(photoRecognitionProvider).outcomes;
+    if (outcomes.isEmpty) return;
+    final outcome = outcomes.first;
+
+    // Remove the analyzing bubble for this specific photo.
+    ref.read(chatHistoryProvider.notifier).removeWhere(
+          (m) => m.role == _kPhotoAnalyzingRole && m.content == outcome.photoPath,
+        );
+
+    switch (outcome) {
+      case RecogSuccess(:final result):
+        _resultSheetOpen = true;
+        HapticFeedback.mediumImpact();
+        context
+            .push(
+              '/kf2/result',
+              extra: RecognitionResultArgs(
+                dishName: result.dishName,
+                items: result.items,
+                onSaved: (name) => unawaited(_onPhotoSaved(name)),
+              ),
+            )
+            .then((_) {
+              _resultSheetOpen = false;
+              if (!mounted) return;
+              ref.read(photoRecognitionProvider.notifier).consumeFirstOutcome();
+              setState(() {
+                _thinking = null;
+                _isSending = false;
+              });
+              // Show the next queued result, if any.
+              _drainOutcomes();
+            });
+      case RecogNotFood():
+        ref.read(photoRecognitionProvider.notifier).consumeFirstOutcome();
+        _addRecogErrorMessage(
+          langCode: outcome.langCode,
+          isNotFood: true,
+          details: '',
+        );
+        _drainOutcomes();
+      case RecogFailure(:final message):
+        ref.read(photoRecognitionProvider.notifier).consumeFirstOutcome();
+        var details = message.trim();
+        if (details.startsWith('Exception:')) {
+          details = details.substring('Exception:'.length).trim();
+        }
+        _addRecogErrorMessage(
+          langCode: outcome.langCode,
+          isNotFood: false,
+          details: details,
+        );
+        _drainOutcomes();
+    }
+  }
+
+  void _addRecogErrorMessage({
+    required String langCode,
+    required bool isNotFood,
+    required String details,
+  }) {
+    final isRu = langCode == 'ru';
+    final msg = isNotFood
         ? (isRu
-              ? 'Не похоже на еду 🍽 Попробуйте сфотографировать ближе.'
-              : "Doesn't look like food 🍽 Try taking a closer photo.")
+            ? 'Не похоже на еду 🍽 Попробуйте сфотографировать ближе.'
+            : "Doesn't look like food 🍽 Try taking a closer photo.")
         : (isRu
-              ? 'Не удалось распознать еду${details.isEmpty ? "" : ": $details"}. '
-                    'Попробуйте ещё раз.'
-              : 'Could not recognize food${details.isEmpty ? "" : ": $details"}. '
-                    'Please try again.');
+            ? 'Не удалось распознать еду${details.isEmpty ? "" : ": $details"}. '
+                'Попробуйте ещё раз.'
+            : 'Could not recognize food${details.isEmpty ? "" : ": $details"}. '
+                'Please try again.');
 
     ref.read(chatHistoryProvider.notifier).add(
-      ChatMessage(
-        role: 'assistant',
-        content: msg,
-        createdAt: DateTime.now(),
-      ),
-    );
-    _scrollToBottom();
-  }
-
-  void _pushPhotoResult(String dishName, List<IngredientV2> items) {
-    if (!mounted) return;
-    HapticFeedback.mediumImpact();
-
-    Navigator.of(context)
-        .push<bool>(
-          MaterialPageRoute<bool>(
-            fullscreenDialog: true,
-            builder: (_) => Scaffold(
-              backgroundColor: K2Colors.darkBg,
-              body: RecognitionResultSheetKF2(
-                dishName: dishName,
-                ingredients: items,
-                mealDate: null,
-                originalText: null,
-                onSaved: (name) {
-                  ref.read(photoRecognitionProvider.notifier).clear();
-                  unawaited(_onPhotoSaved(name));
-                },
-              ),
-            ),
+          ChatMessage(
+            role: 'assistant',
+            content: msg,
+            createdAt: DateTime.now(),
           ),
-        )
-        .then((_) {
-          // User dismissed the sheet without saving — clear recognition state
-          // and any stuck thinking overlay (same as _handleBarcode does).
-          ref.read(photoRecognitionProvider.notifier).clear();
-          _photoResultConsumed = false;
-          if (mounted) {
-            setState(() {
-              _thinking = null;
-              _isSending = false;
-            });
-          }
-        });
+        );
+    _scrollToBottom();
   }
 
   Future<void> _onPhotoSaved(String dishName) async {
@@ -1369,16 +1397,15 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
       }
     });
 
-    // Auto-show result sheet when background photo recognition completes.
-    ref.listen<PhotoRecognitionState>(photoRecognitionProvider, (prev, next) {
-      final wasAnalyzing = prev?.isAnalyzing ?? false;
-      if (next.isDone && next.result != null && wasAnalyzing) {
-        _onPhotoRecognitionDone(next.result!);
-      }
-      if ((next.isError || next.isNotFood) && wasAnalyzing) {
-        _onPhotoRecognitionFailed(next);
-      }
-    });
+    // Auto-show result sheet when a queued photo recognition produces a new
+    // outcome. _drainOutcomes shows them one at a time and only when the chat
+    // is the current route.
+    ref.listen<int>(
+      photoRecognitionProvider.select((s) => s.outcomes.length),
+      (prev, next) {
+        if (next > (prev ?? 0)) _drainOutcomes();
+      },
+    );
 
     return Scaffold(
       backgroundColor: t.bg,
@@ -3199,11 +3226,16 @@ class _PhotoAnalyzingBubbleState extends ConsumerState<_PhotoAnalyzingBubble>
   Widget build(BuildContext context) {
     final t = widget.theme;
     // Only watch the fields we actually render to minimise rebuilds.
-    final (stageIndex, isDone, langCode) = ref.watch(
+    final (analyzingPath, stageIndex, langCode) = ref.watch(
       photoRecognitionProvider.select(
-        (s) => (s.stageIndex, s.isDone, s.langCode),
+        (s) => (s.analyzingPath, s.stageIndex, s.langCode),
       ),
     );
+    // This bubble is the active one only while its photo is in flight; queued
+    // photos waiting behind it show the first stage. The bubble is removed
+    // entirely once recognition finishes, so it never needs a "done" state.
+    final isActive = analyzingPath == widget.photoPath;
+    final shownStage = isActive ? stageIndex : 0;
     final stages = photoRecognitionStages(langCode);
 
     return Padding(
@@ -3260,13 +3292,13 @@ class _PhotoAnalyzingBubbleState extends ConsumerState<_PhotoAnalyzingBubble>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    for (var i = 0; i <= stageIndex && i < stages.length; i++)
+                    for (var i = 0; i <= shownStage && i < stages.length; i++)
                       Padding(
                         padding: EdgeInsets.only(top: i == 0 ? 0 : 5),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            if (i == stageIndex && !isDone)
+                            if (i == shownStage)
                               _SpinnerDot(
                                 controller: _spinCtrl,
                                 color: K2Colors.accent.withValues(alpha: 0.8),
