@@ -251,7 +251,18 @@ class PhotoRecognitionNotifier extends Notifier<PhotoRecognitionState> {
   // ── Private recognition logic ────────────────────────────────────────────────
 
   Future<RecognitionResult> _doRecognize(XFile photo, String lang) async {
-    final originalBytes = await photo.readAsBytes();
+    // The captured temp file can still be flushing to disk on the first read
+    // right after capture — a first read may come back empty. Retry once after
+    // a short beat before giving up, so the first photo isn't silently dropped.
+    var originalBytes = await photo.readAsBytes();
+    if (originalBytes.isEmpty) {
+      debugPrint('RECOG: first read empty, retrying after 300ms');
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      originalBytes = await photo.readAsBytes();
+    }
+    if (originalBytes.isEmpty) {
+      throw Exception('empty image bytes');
+    }
     debugPrint('RECOG: original ${originalBytes.length ~/ 1024} KB');
 
     final compressed = await FlutterImageCompress.compressWithList(

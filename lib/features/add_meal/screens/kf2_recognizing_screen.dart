@@ -83,8 +83,18 @@ class _Kf2RecognizingScreenState extends ConsumerState<Kf2RecognizingScreen>
     try {
       // Read bytes once for upload. Display uses Image.file directly,
       // with cache eviction in initState ensuring the fresh photo is shown.
-      final originalBytes = await widget.photo.readAsBytes();
+      // The temp file can still be flushing right after capture, so a first
+      // read may be empty — retry once before giving up.
+      var originalBytes = await widget.photo.readAsBytes();
+      if (originalBytes.isEmpty) {
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        originalBytes = await widget.photo.readAsBytes();
+      }
       if (!mounted) return;
+      if (originalBytes.isEmpty) {
+        _handleError('empty image bytes');
+        return;
+      }
       debugPrint('KF2-RECOG: original ${originalBytes.length ~/ 1024} KB  path=${widget.photo.path}');
 
       final compressed = await FlutterImageCompress.compressWithList(

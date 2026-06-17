@@ -136,6 +136,10 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
 
   // Voice (on-device speech recognition)
   final _speech = SpeechToText();
+  // True once the speech engine has been successfully initialized. We init
+  // only once and keep it warm — re-initializing on every tap leaves the
+  // engine cold on the first use, so it lights up but captures nothing.
+  bool _speechReady = false;
   _VoiceState _voiceState = _VoiceState.idle;
   bool _fromVoice = false;
 
@@ -1253,7 +1257,14 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     }
   }
 
-  Future<void> _startListening() async {
+  /// Initializes the speech engine once and keeps it warm. Returns whether
+  /// speech recognition is available. On the very first init the native engine
+  /// needs a moment to spin up — without the warm-up delay the immediately
+  /// following [SpeechToText.listen] captures nothing ("lights up but records
+  /// nothing the first time").
+  Future<bool> _ensureSpeechReady() async {
+    if (_speechReady) return true;
+
     final available = await _speech.initialize(
       onStatus: (status) {
         debugPrint('[mic] speech status=$status');
@@ -1284,6 +1295,18 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
         }
       },
     );
+
+    if (available) {
+      _speechReady = true;
+      // Give the freshly initialized native engine a beat to become live
+      // before the first listen, otherwise the opening of the session is lost.
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    }
+    return available;
+  }
+
+  Future<void> _startListening() async {
+    final available = await _ensureSpeechReady();
 
     if (!mounted) return;
 

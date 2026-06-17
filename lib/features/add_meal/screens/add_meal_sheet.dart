@@ -212,6 +212,11 @@ class _AddMealSheetState extends ConsumerState<AddMealSheet>
       _switchMode(_InputMode.choose);
       return;
     }
+    // Warm up the native recorder before starting. The first start() right
+    // after a fresh mic-permission grant can race the audio-session setup and
+    // capture nothing; hasPermission() forces the platform layer to initialize.
+    await _recorder.hasPermission();
+    if (!mounted) return;
     final dir = await getTemporaryDirectory();
     _recordPath = '${dir.path}/meal_voice.m4a';
     await _recorder.start(

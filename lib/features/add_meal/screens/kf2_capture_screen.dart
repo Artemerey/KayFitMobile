@@ -73,6 +73,13 @@ class _Kf2CaptureScreenState extends State<Kf2CaptureScreen>
         );
         return;
       }
+
+      // Let the permission grant fully settle before presenting the picker.
+      // On the very first capture the camera controller can otherwise fail to
+      // present and pickImage returns null, forcing the user to tap a second
+      // time ("first photo doesn't recognize, second works").
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      if (!mounted) return;
     }
 
     setState(() => _picking = true);
