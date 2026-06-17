@@ -729,6 +729,16 @@ class _TopBar extends StatelessWidget {
               ),
             ),
             const Spacer(),
+            // Recipes — Ишка's RAG recommendation for the day (phase 5).
+            IconButton(
+              icon: Icon(
+                Icons.restaurant_menu_rounded,
+                color: theme.fg,
+                size: 24,
+              ),
+              onPressed: () => context.push('/recipes'),
+              tooltip: 'Recipes',
+            ),
             // Menu icon
             IconButton(
               icon: Icon(

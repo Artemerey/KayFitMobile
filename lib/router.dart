@@ -31,6 +31,8 @@ import 'features/add_meal/screens/recognition_result_sheet_kf2.dart';
 import 'shared/theme/kayfit2_theme.dart';
 import 'features/chat/screens/chat_v2_screen.dart';
 import 'features/journal/screens/journal_v2_screen.dart';
+import 'features/recipes/screens/recipes_screen.dart';
+import 'features/recipes/screens/recipe_detail_screen.dart';
 import 'features/kayfit2/screens/kayfit2_preview_screen.dart';
 import 'shared/widgets/bottom_nav.dart';
 
@@ -272,6 +274,18 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/chat-v2',
         builder: (context, state) => const ChatV2Screen(),
+      ),
+      // Recipes (phase 5): RAG recommendation list + carousel viewer.
+      // Standalone KF2 routes outside the ShellRoute — each owns its own
+      // top bar with a back button (like /journal-v2, /settings-v2).
+      GoRoute(
+        path: '/recipes',
+        builder: (context, state) => const RecipesScreen(),
+      ),
+      GoRoute(
+        path: '/recipes/:slug',
+        builder: (context, state) =>
+            RecipeDetailScreen(slug: state.pathParameters['slug']!),
       ),
       // KF2 Journal: settings without the legacy ShellRoute bottom nav.
       // SettingsV2Screen owns its own KF2-style top bar with an explicit back
