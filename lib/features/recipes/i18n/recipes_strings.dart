@@ -8,7 +8,7 @@ abstract final class RecipesStrings {
   static String title(bool isRu) => isRu ? 'Рецепты' : 'Recipes';
 
   static String ishkaPicksHeader(bool isRu) =>
-      isRu ? 'Подборка Ишки' : "Ishka's picks";
+      isRu ? 'Персональные рекомендации' : 'Personal recommendations';
 
   static String addToDiary(bool isRu) =>
       isRu ? 'Добавить в дневник' : 'Add to diary';
