@@ -13,6 +13,7 @@ import '../i18n/recipes_strings.dart';
 import '../models/recipe_detail.dart';
 import '../providers/recipes_provider.dart';
 import '../widgets/recipe_macro_chips.dart';
+import '../widgets/recipe_slide_carousel.dart';
 
 /// Recipe carousel viewer + "Add to diary" CTA (phase 5).
 ///
@@ -161,6 +162,8 @@ class _DetailBody extends StatelessWidget {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
             children: [
+              RecipeSlideCarousel(slides: detail.slides),
+              const SizedBox(height: 20),
               Text(
                 r.title,
                 style: const TextStyle(
