@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../../core/api/api_client.dart';
+import '../../../core/locale/locale_provider.dart';
 import '../models/recipe_detail.dart';
 import '../models/recipe_recommendation.dart';
 
@@ -12,14 +13,20 @@ part 'recipes_provider.g.dart';
 ///
 /// Endpoint is `/api/recipes/recommend` — the production nginx only proxies
 /// `^/(api|auth)`, so the `/api` prefix is mandatory (a bare `/recipes` would
-/// hit the SPA). All context (goals, today's totals, profile) is assembled
-/// server-side from the JWT; the client sends no query params here.
+/// hit the SPA). Context (goals, today's totals, profile) is assembled
+/// server-side from the JWT; the client only sends the in-app selected locale
+/// (`lang`) so recipe content + Ишка's line come back in the chosen language.
+/// Watching [localeProvider] auto-refetches when the user switches language.
 @riverpod
 Future<RecipeRecommendation> recipeRecommendation(
   RecipeRecommendationRef ref,
 ) async {
-  debugPrint('[recipes] GET /api/recipes/recommend');
-  final resp = await apiDio.get('/api/recipes/recommend');
+  final lang = ref.watch(localeProvider).languageCode;
+  debugPrint('[recipes] GET /api/recipes/recommend?lang=$lang');
+  final resp = await apiDio.get(
+    '/api/recipes/recommend',
+    queryParameters: {'lang': lang},
+  );
   final data = resp.data;
   if (data is! Map<String, dynamic>) {
     throw const FormatException('recommend: unexpected payload');
@@ -37,8 +44,12 @@ Future<RecipeRecommendation> recipeRecommendation(
 /// screen renders as an empty/error state.
 @riverpod
 Future<RecipeDetail> recipeDetail(RecipeDetailRef ref, String slug) async {
-  debugPrint('[recipes] GET /api/recipes/$slug');
-  final resp = await apiDio.get('/api/recipes/$slug');
+  final lang = ref.watch(localeProvider).languageCode;
+  debugPrint('[recipes] GET /api/recipes/$slug?lang=$lang');
+  final resp = await apiDio.get(
+    '/api/recipes/$slug',
+    queryParameters: {'lang': lang},
+  );
   final data = resp.data;
   if (data is! Map<String, dynamic>) {
     throw const FormatException('recipe detail: unexpected payload');
