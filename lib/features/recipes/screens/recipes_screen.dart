@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../shared/theme/kayfit2_theme.dart';
+import '../../../shared/widgets/kayfit2_tab_bar.dart';
 import '../i18n/recipes_strings.dart';
 import '../models/recipe_recommendation.dart';
 import '../providers/recipes_provider.dart';
@@ -23,6 +24,15 @@ class RecipesScreen extends ConsumerWidget {
 
     return Scaffold(
       backgroundColor: t.bg,
+      bottomNavigationBar: Kayfit2TabBar(
+        theme: t,
+        active: 'recipes',
+        onTab: (key) {
+          if (key == 'journal') context.go('/journal-v2');
+          if (key == 'chat') context.go('/chat');
+        },
+        onAdd: () => context.go('/chat'),
+      ),
       body: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -187,33 +197,24 @@ class _TopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Top-level tab destination (reached via Kayfit2TabBar), so no back
+    // button — the title is left-aligned like the other KF2 home screens.
     return SizedBox(
       height: 56,
-      child: Row(
-        children: [
-          IconButton(
-            icon: const Icon(
-              Icons.arrow_back_ios_new_rounded,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            title,
+            style: const TextStyle(
+              fontFamily: K2Fonts.sans,
+              fontSize: 22,
+              fontWeight: FontWeight.w700,
               color: K2Colors.lightFg,
-              size: 20,
-            ),
-            onPressed: () =>
-                context.canPop() ? context.pop() : context.go('/journal-v2'),
-            tooltip: 'Back',
-          ),
-          Expanded(
-            child: Text(
-              title,
-              style: const TextStyle(
-                fontFamily: K2Fonts.sans,
-                fontSize: 17,
-                fontWeight: FontWeight.w600,
-                color: K2Colors.lightFg,
-              ),
             ),
           ),
-          const SizedBox(width: 48),
-        ],
+        ),
       ),
     );
   }

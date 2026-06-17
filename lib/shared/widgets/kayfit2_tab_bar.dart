@@ -1,10 +1,10 @@
 // KF2-FOUND-3 · Tab bar Apple-style
 //
-// Two tabs (Journal | Chat) with a centre gradient "+" button.
+// Three tabs (Journal | Recipes | Chat) with a centre gradient "+" button.
 // Spec: specs/kayfit_2.0/source_handoff/project/kayfit-app.jsx  TabBar 495-543
 //
 // Layout:
-//   [ Journal tab ]  [ + button 88px wide ]  [ Chat tab ]
+//   [ Journal tab ] [ Recipes tab ]  [ + button 88px wide ]  [ Chat tab ]
 //
 // Visual system:
 //   • BackdropFilter  blur(20) for the frosted-glass effect
@@ -36,7 +36,7 @@ class Kayfit2TabBar extends StatelessWidget {
   /// Current Kayfit 2.0 theme bundle (light or dark).
   final K2Theme theme;
 
-  /// Currently active tab key: `'journal'` or `'chat'`.
+  /// Currently active tab key: `'journal'`, `'recipes'`, or `'chat'`.
   final String active;
 
   /// Called when a tab is tapped.  Receives the tab key.
@@ -128,6 +128,17 @@ class Kayfit2TabBar extends StatelessWidget {
                       label: l10n.nav_journal,
                       icon: Icons.menu_book_rounded,
                       active: active == 'journal',
+                      onTap: onTab,
+                    ),
+                  ),
+
+                  // Recipes tab — Ишка's RAG picks for the day.
+                  Expanded(
+                    child: _TabItem(
+                      tabKey: 'recipes',
+                      label: l10n.nav_recipes,
+                      icon: Icons.restaurant_menu_rounded,
+                      active: active == 'recipes',
                       onTap: onTab,
                     ),
                   ),

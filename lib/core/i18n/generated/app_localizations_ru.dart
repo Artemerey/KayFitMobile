@@ -18,6 +18,9 @@ class AppLocalizationsRu extends AppLocalizations {
   String get nav_journal => 'Журнал';
 
   @override
+  String get nav_recipes => 'Рецепты';
+
+  @override
   String get nav_settings => 'Настройки';
 
   @override

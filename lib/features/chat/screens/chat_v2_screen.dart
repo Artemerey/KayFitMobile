@@ -1414,6 +1414,7 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
         active: 'chat',
         onTab: (key) {
           if (key == 'journal') context.go('/journal-v2');
+          if (key == 'recipes') context.go('/recipes');
         },
         onAdd: () {
           // "+" from chat tab — focus the input field so the user can type.

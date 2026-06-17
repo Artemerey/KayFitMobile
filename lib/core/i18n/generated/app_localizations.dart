@@ -116,6 +116,12 @@ abstract class AppLocalizations {
   /// **'Журнал'**
   String get nav_journal;
 
+  /// No description provided for @nav_recipes.
+  ///
+  /// In ru, this message translates to:
+  /// **'Рецепты'**
+  String get nav_recipes;
+
   /// No description provided for @nav_settings.
   ///
   /// In ru, this message translates to:

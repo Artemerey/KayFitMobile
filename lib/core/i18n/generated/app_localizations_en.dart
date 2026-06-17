@@ -18,6 +18,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get nav_journal => 'Journal';
 
   @override
+  String get nav_recipes => 'Recipes';
+
+  @override
   String get nav_settings => 'Settings';
 
   @override
