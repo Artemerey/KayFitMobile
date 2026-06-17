@@ -26,13 +26,13 @@ GoRoutes ВНЕ legacy `ShellRoute`. Реальный тулбар — `Kayfit2T
 
 ## Фазы
 
-- [ ] **Фаза 1 — Тулбар (Flutter).** `Kayfit2TabBar` + 3 экрана-потребителя
+- [x] **Фаза 1 — Тулбар (Flutter).** `Kayfit2TabBar` + 3 экрана-потребителя
   (journal_v2, chat_v2, kayfit2_preview) + `RecipesScreen` как таб-назначение +
-  ключ `nav_recipes` в ARB. Сборка + установка на iPhone. — commit:
-- [ ] **Фаза 2 — Бэкенд двуязычность.** Миграция `title_ru`/`name_ru`/
+  ключ `nav_recipes` в ARB. Сборка + установка на iPhone. — commit: `ea82e4a`
+- [x] **Фаза 2 — Бэкенд двуязычность.** Миграция `title_ru`/`name_ru`/
   `caption_ru`, `ingest_recipe` принимает/пишет RU, read-эндпоинты локализуют по
-  `lang`, перевод сида 25 рецептов, юнит-тесты. — commit:
-- [ ] **Фаза 3 — Frontend шлёт локаль.** `recipes_provider` добавляет `?lang=` в
-  recommend/feed/detail. — commit:
+  `lang`, перевод сида 25 рецептов, юнит-тесты. — commit: `c577776` (CaloriesApp)
+- [x] **Фаза 3 — Frontend шлёт локаль.** `recipes_provider` добавляет `?lang=` в
+  recommend/detail. — commit: `8c59eee`
 - [ ] **Фаза 4 — Деплой.** Бэкап прод-БД → миграция → пересев двуязычных
   рецептов → пересборка backend; проверка на iPhone. — commit:
