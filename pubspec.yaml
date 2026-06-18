@@ -39,7 +39,7 @@ dependencies:
   image_picker: ^1.1.0
   flutter_image_compress: ^2.3.0
   record: ^6.0.0
-  speech_to_text: ^6.6.0
+  speech_to_text: ^7.0.0
   permission_handler: ^11.3.0
 
   # Barcode scanning
@@ -72,6 +72,12 @@ dependencies:
   # In-App Purchases (RevenueCat)
   purchases_flutter: ^8.0.0
 
+  # Native launch screen generator. Kept as a runtime dependency (not
+  # dev_dependency) so its Android plugin module is included in release
+  # builds — Flutter excludes dev_dependency native modules from release,
+  # which otherwise breaks GeneratedPluginRegistrant on Android.
+  flutter_native_splash: ^2.4.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -81,7 +87,6 @@ dev_dependencies:
   json_serializable: ^6.8.0
   riverpod_generator: ^2.4.0
   flutter_launcher_icons: ^0.14.0
-  flutter_native_splash: ^2.4.0
 
 flutter_launcher_icons:
   android: true
