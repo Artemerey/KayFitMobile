@@ -17,7 +17,6 @@ import '../../body_form/body_form_prefs.dart';
 import '../../body_form/i18n/body_form_strings.dart';
 import '../../body_form/screens/body_form_screen.dart';
 import 'document_screen.dart';
-import '../../../core/paywall/paywall_flags.dart';
 
 // Provider that surfaces the singleton Dio instance to the settings screen
 // for fire-and-forget profile language sync. Avoids direct global access.
@@ -202,36 +201,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
             );
           },
         ),
-        if (!kBypassPaywall) ...[
-          _ItemDivider(),
-          _NavItem(
-            icon: Icons.receipt_long_rounded,
-            iconColor: AppColors.warm,
-            iconBg: AppColors.warmSoft,
-            label: l10n.settings_subscription_terms,
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) =>
-                    const DocumentScreen(type: DocumentType.subscriptionTerms),
-              ),
-            ),
-          ),
-          _ItemDivider(),
-          _NavItem(
-            icon: Icons.payment_rounded,
-            iconColor: AppColors.support,
-            iconBg: AppColors.supportSoft,
-            label: l10n.settings_subscription_privacy,
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) =>
-                    const DocumentScreen(type: DocumentType.subscriptionPrivacy),
-              ),
-            ),
-          ),
-        ],
       ]),
       const SizedBox(height: 8),
       _LogoutCard(

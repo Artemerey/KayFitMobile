@@ -11,8 +11,3 @@ final showWayToGoalProvider = StateProvider<bool>((ref) => false);
 /// Set to true when AI consent is triggered from onboarding demo.
 /// AiConsentScreen uses this to navigate back to /onboarding after consent.
 final consentFromOnboardingProvider = StateProvider<bool>((ref) => false);
-
-/// Set to true once, right after onboarding completes, when
-/// 'review_prompt_shown' has never been persisted.  ReviewPromptScreen
-/// clears this provider and persists the flag so the screen shows exactly once.
-final showReviewPromptProvider = StateProvider<bool>((ref) => false);

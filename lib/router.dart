@@ -1,10 +1,8 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'core/analytics/analytics_service.dart';
-import 'core/paywall/paywall_flags.dart';
 import 'core/auth/auth_provider.dart';
 import 'core/ai_consent/ai_consent_provider.dart';
 import 'core/navigation/navigation_providers.dart';
@@ -21,7 +19,6 @@ import 'features/onboarding/screens/onboarding_screen.dart';
 import 'features/way_to_goal/screens/way_to_goal_screen.dart';
 import 'features/chat/screens/chat_screen.dart';
 import 'features/ai_consent/screens/ai_consent_screen.dart';
-import 'features/review_prompt/screens/review_prompt_screen.dart';
 import 'features/splash/screens/splash_screen.dart';
 import 'package:image_picker/image_picker.dart';
 import 'features/add_meal/screens/kf2_capture_screen.dart';
@@ -56,32 +53,10 @@ const _kfRecog = bool.fromEnvironment('KF2_RECOG', defaultValue: true);
 const _kOnboardingDoneKey = 'onboarding_done';
 
 /// Call after successful onboarding completion to mark it done.
-/// Returns true when the post-onboarding App Store rating prompt should be shown —
-/// callers must then explicitly navigate to /review-prompt rather than relying
-/// on the router redirect, because the ai-consent gate has higher priority and
-/// can race with showReviewPromptProvider becoming true.
-Future<bool> markOnboardingDone(WidgetRef ref) async {
+Future<void> markOnboardingDone(WidgetRef ref) async {
   final prefs = await SharedPreferences.getInstance();
   await prefs.setBool(_kOnboardingDoneKey, true);
-  // Read locale from SharedPreferences directly to avoid async race with
-  // LocaleNotifier._load() — the notifier initialises from deviceLocale
-  // synchronously and only applies the explicit user override asynchronously.
-  // Falling back to PlatformDispatcher ensures correctness before _load completes.
-  final savedLocale = prefs.getString('app_locale');
-  final langCode = savedLocale ?? PlatformDispatcher.instance.locale.languageCode;
-  if (langCode == 'ru' && !kBypassPaywall) {
-    await prefs.setBool('paywall_show_pending', true);
-  }
-  // onboardingDoneProvider must be set BEFORE showReviewPromptProvider so the
-  // router never sees (onboardingDone=false, showReviewPrompt=true) — that
-  // combination would trigger the reinstall-guard redirect back to /onboarding.
   ref.read(onboardingDoneProvider.notifier).state = true;
-  // Show the App Store rating prompt once, right after the first onboarding.
-  final reviewShown = prefs.getBool('review_prompt_shown') ?? false;
-  if (!reviewShown) {
-    ref.read(showReviewPromptProvider.notifier).state = true;
-  }
-  return !reviewShown;
 }
 
 // ---------------------------------------------------------------------------
@@ -97,7 +72,6 @@ class _RouterNotifier extends ChangeNotifier {
     _ref.listen(showWayToGoalProvider, (_, __) => notifyListeners());
     _ref.listen(aiConsentProvider, (_, __) => notifyListeners());
     _ref.listen(aiConsentReadyProvider, (_, __) => notifyListeners());
-    _ref.listen(showReviewPromptProvider, (_, __) => notifyListeners());
   }
 
   final Ref _ref;
@@ -108,7 +82,6 @@ class _RouterNotifier extends ChangeNotifier {
     final showWayToGoal = _ref.read(showWayToGoalProvider);
     final aiConsent = _ref.read(aiConsentProvider);
     final consentReady = _ref.read(aiConsentReadyProvider);
-    final showReviewPrompt = _ref.read(showReviewPromptProvider);
 
     final loc = state.matchedLocation;
 
@@ -191,14 +164,8 @@ class _RouterNotifier extends ChangeNotifier {
     // async check completes to avoid showing the screen to returning users.
     if (consentReady && isLoggedIn && aiConsent == null && !showWayToGoal &&
         loc != '/ai-consent' && loc != '/way-to-goal' &&
-        loc != '/kayfit2/preview' && loc != '/review-prompt') {
+        loc != '/kayfit2/preview') {
       return '/ai-consent';
-    }
-
-    // Post-onboarding App Store rating prompt — shown exactly once.
-    // Runs after way-to-goal and ai-consent so functional gates have priority.
-    if (isLoggedIn && showReviewPrompt && loc != '/review-prompt') {
-      return '/review-prompt';
     }
 
     return null;
@@ -254,10 +221,6 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/ai-consent',
         builder: (context, state) => const AiConsentScreen(),
-      ),
-      GoRoute(
-        path: '/review-prompt',
-        builder: (context, state) => const ReviewPromptScreen(),
       ),
       GoRoute(
         path: '/settings/goals',

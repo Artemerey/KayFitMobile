@@ -1,7 +1,7 @@
 name: kayfit
 description: "Kayfit — calorie and nutrition tracker"
 publish_to: 'none'
-version: 1.2.2+6
+version: 1.2.2+7
 
 environment:
   sdk: ^3.11.1

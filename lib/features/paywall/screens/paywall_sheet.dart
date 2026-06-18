@@ -414,10 +414,6 @@ class _PaywallSheetContentState extends ConsumerState<_PaywallSheetContent> {
                       _FooterLink('Восстановить', onTap: _loading ? null : _onRestore),
                       const Text(' · ',
                           style: TextStyle(fontSize: 11, color: _kDimText)),
-                      _FooterLink('Условия подписки',
-                          onTap: () => _openDoc(context, _DocType.subscriptionTerms)),
-                      const Text(' · ',
-                          style: TextStyle(fontSize: 11, color: _kDimText)),
                       _FooterLink('Условия',
                           onTap: () => _openDoc(context, _DocType.terms)),
                       const Text(' · ',
@@ -439,7 +435,6 @@ class _PaywallSheetContentState extends ConsumerState<_PaywallSheetContent> {
     final docType = switch (type) {
       _DocType.terms => DocumentType.termsOfService,
       _DocType.privacy => DocumentType.privacyPolicy,
-      _DocType.subscriptionTerms => DocumentType.subscriptionTerms,
     };
     Navigator.of(context, rootNavigator: true).push<void>(
       MaterialPageRoute<void>(
@@ -449,7 +444,7 @@ class _PaywallSheetContentState extends ConsumerState<_PaywallSheetContent> {
   }
 }
 
-enum _DocType { terms, privacy, subscriptionTerms }
+enum _DocType { terms, privacy }
 
 class _DiscountTimerBanner extends StatefulWidget {
   const _DiscountTimerBanner({required this.discountActive});

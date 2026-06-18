@@ -59,16 +59,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     if (!mounted) return;
     await syncOnboardingPending();
     // The Apple sign-in path used to stop here — so it never marked onboarding
-    // done (risking the Keychain-survives-reinstall redirect loop) and never
-    // showed the one-time "month free for a review" prompt. The email path in
-    // EmailAuthScreen already does both; mirror it so every auth method lands
-    // the same way.
-    final showReview = await markOnboardingDone(ref);
+    // done (risking the Keychain-survives-reinstall redirect loop). The email
+    // path in EmailAuthScreen already marks it; mirror it so every auth method
+    // lands the same way.
+    await markOnboardingDone(ref);
     if (!mounted) return;
     await ref.read(authNotifierProvider.notifier).refreshUser();
-    // Navigate directly — the ai-consent gate can race with
-    // showReviewPromptProvider and intercept the router redirect first.
-    if (showReview && mounted) context.go('/review-prompt');
   }
 
   Future<void> _signInApple() async {

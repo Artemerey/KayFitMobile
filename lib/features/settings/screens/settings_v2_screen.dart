@@ -15,9 +15,6 @@ import 'package:kayfit/features/body_form/body_form_prefs.dart';
 import 'package:kayfit/features/body_form/i18n/body_form_strings.dart';
 import 'package:kayfit/features/body_form/screens/body_form_screen.dart';
 import 'package:kayfit/features/settings/screens/document_screen.dart';
-import 'package:kayfit/core/paywall/paywall_flags.dart';
-import 'package:kayfit/core/subscription/subscription_provider.dart';
-import 'package:kayfit/features/tariffs/screens/tariffs_screen.dart';
 import 'package:kayfit/shared/theme/kayfit2_theme.dart';
 
 // Provider that surfaces the singleton Dio instance for fire-and-forget
@@ -90,24 +87,6 @@ class _SettingsV2ScreenState extends ConsumerState<SettingsV2Screen> {
     final user = ref.watch(authNotifierProvider).value;
     final currentLocale = ref.watch(localeProvider);
     final isRu = currentLocale.languageCode == 'ru';
-    final backendSub = ref.watch(backendSubscriptionProvider);
-    final isSubActive = backendSub.maybeWhen(
-      data: (s) {
-        if (s == null) return false;
-        final expiresAt = DateTime.tryParse(s['expires_at'] as String? ?? '');
-        return expiresAt != null && expiresAt.isAfter(DateTime.now());
-      },
-      orElse: () => false,
-    );
-    final subExpiresText = backendSub.maybeWhen(
-      data: (s) {
-        if (s == null) return null;
-        final expiresAt = DateTime.tryParse(s['expires_at'] as String? ?? '');
-        if (expiresAt == null) return null;
-        return 'до ${expiresAt.day}.${expiresAt.month.toString().padLeft(2, '0')}.${expiresAt.year}';
-      },
-      orElse: () => null,
-    );
 
     // Resolve K2 theme from system brightness.
     final brightness = MediaQuery.platformBrightnessOf(context);
@@ -192,48 +171,6 @@ class _SettingsV2ScreenState extends ConsumerState<SettingsV2Screen> {
                     ],
                   ),
 
-                  // ── Subscription ─────────────────────────────────────────
-                  if (!kBypassPaywall) ...[
-                    const SizedBox(height: 20),
-                    _SectionHeader(t: t, label: 'Subscription'),
-                    const SizedBox(height: 4),
-                    _SectionGroup(
-                      t: t,
-                      children: [
-                        if (isSubActive)
-                          _Row(
-                            t: t,
-                            icon: Icons.verified_rounded,
-                            label: 'Подписка активна',
-                            trailing: Text(
-                              subExpiresText ?? '',
-                              style: const TextStyle(
-                                fontSize: 13,
-                                color: K2Colors.accent,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                            showChevron: false,
-                            onTap: null,
-                          )
-                        else
-                          _Row(
-                            t: t,
-                            icon: Icons.star_outline_rounded,
-                            label: l10n.subscription_view_tariffs,
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute<void>(
-                                  builder: (_) => const TariffsScreen(),
-                                ),
-                              );
-                            },
-                          ),
-                      ],
-                    ),
-                  ],
-
                   // ── About ────────────────────────────────────────────────
                   const SizedBox(height: 20),
                   _SectionHeader(t: t, label: 'About'),
@@ -272,34 +209,6 @@ class _SettingsV2ScreenState extends ConsumerState<SettingsV2Screen> {
                           );
                         },
                       ),
-                      if (!kBypassPaywall) ...[
-                        _HairlineDivider(t: t),
-                        _Row(
-                          t: t,
-                          icon: Icons.receipt_long_outlined,
-                          label: l10n.settings_subscription_terms,
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const DocumentScreen(
-                                  type: DocumentType.subscriptionTerms),
-                            ),
-                          ),
-                        ),
-                        _HairlineDivider(t: t),
-                        _Row(
-                          t: t,
-                          icon: Icons.payment_outlined,
-                          label: l10n.settings_subscription_privacy,
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const DocumentScreen(
-                                  type: DocumentType.subscriptionPrivacy),
-                            ),
-                          ),
-                        ),
-                      ],
                       _HairlineDivider(t: t),
                       _Row(
                         t: t,

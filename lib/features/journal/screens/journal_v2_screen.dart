@@ -9,19 +9,15 @@
 
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart' as intl;
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/api/api_client.dart';
 import '../../../core/i18n/generated/app_localizations.dart';
-import '../../../core/paywall/paywall_flags.dart';
 import '../../../features/dashboard/providers/dashboard_provider.dart';
-import '../../tariffs/screens/tariffs_screen.dart';
 import '../../../features/journal/screens/journal_screen.dart'
     show journalDayMealsProvider;
 import '../../../shared/models/k2_meal_row_data.dart';
@@ -146,7 +142,6 @@ class JournalV2Screen extends ConsumerStatefulWidget {
 class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
   bool _calExpanded = false;
   String _calSelected = 'today';
-  bool _paywallCheckDone = false;
 
   // The date key that drives provider lookups.
   String get _dateKey =>
@@ -504,27 +499,6 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
 
   @override
   Widget build(BuildContext context) {
-    if (!_paywallCheckDone && !kBypassPaywall) {
-      _paywallCheckDone = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) async {
-        if (!mounted) return;
-        // Safety net: users who had paywall_show_pending=true cached from an
-        // older app version (before locale check in markOnboardingDone) are
-        // guarded here. EN-users are silently skipped.
-        final locale = Localizations.localeOf(context);
-        if (locale.languageCode != 'ru') return;
-        final nav = Navigator.of(context, rootNavigator: true);
-        final prefs = await SharedPreferences.getInstance();
-        if (!mounted) return;
-        final pending = prefs.getBool('paywall_show_pending') ?? false;
-        if (!pending) return;
-        await prefs.remove('paywall_show_pending');
-        await nav.push<void>(
-          MaterialPageRoute<void>(builder: (_) => const TariffsScreen()),
-        );
-      });
-    }
-
     const t = K2Theme.light;
 
     final goalsAsync = ref.watch(userGoalsProvider);

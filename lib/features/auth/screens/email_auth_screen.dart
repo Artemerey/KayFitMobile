@@ -1,7 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:kayfit/core/analytics/analytics_service.dart';
 import 'package:kayfit/core/api/api_client.dart';
 import 'package:kayfit/core/auth/auth_provider.dart';
@@ -440,7 +439,7 @@ class _LoginFormState extends ConsumerState<_LoginForm> {
     final token = await secureTokenStorage.loadAccessToken();
     if (token == null || !mounted) return;
     final hadPending = await syncOnboardingPending();
-    final showReview = await markOnboardingDone(ref);
+    await markOnboardingDone(ref);
     if (!mounted) return;
     if (hadPending) {
       // User just finished onboarding and saw the plan there — do NOT redirect
@@ -452,9 +451,6 @@ class _LoginFormState extends ConsumerState<_LoginForm> {
     await ref.read(authNotifierProvider.notifier).refreshUser();
     AnalyticsService.setUserId(_emailCtrl.text.trim());
     AnalyticsService.setUserProfile(email: _emailCtrl.text.trim());
-    // Navigate directly — ai-consent gate can race with showReviewPromptProvider
-    // and intercept the router redirect before review-prompt fires.
-    if (showReview && mounted) context.go('/review-prompt');
   }
 
   void _showError(String msg) {
@@ -578,7 +574,7 @@ class _RegisterFormState extends ConsumerState<_RegisterForm> {
     final token = await secureTokenStorage.loadAccessToken();
     if (token == null || !mounted) return;
     final hadPending = await syncOnboardingPending();
-    final showReview = await markOnboardingDone(ref);
+    await markOnboardingDone(ref);
     if (!mounted) return;
     if (hadPending) {
       // User just finished onboarding and saw the plan there — do NOT redirect
@@ -593,9 +589,6 @@ class _RegisterFormState extends ConsumerState<_RegisterForm> {
       email: _emailCtrl.text.trim(),
       name: _usernameCtrl.text.trim().isNotEmpty ? _usernameCtrl.text.trim() : null,
     );
-    // Navigate directly — ai-consent gate can race with showReviewPromptProvider
-    // and intercept the router redirect before review-prompt fires.
-    if (showReview && mounted) context.go('/review-prompt');
   }
 
   void _showError(String msg) {

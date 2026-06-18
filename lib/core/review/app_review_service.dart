@@ -3,8 +3,6 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:in_app_review/in_app_review.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
-import '../config/app_config.dart';
 
 /// Service for in-app review requests.
 ///
@@ -57,22 +55,6 @@ class AppReviewService {
   /// Call this at positive moments in the user journey.
   /// Internally delegates to [tryRequest].
   static Future<void> markPositiveMoment() => tryRequest();
-
-  /// Opens the App Store write-review compose page directly.
-  ///
-  /// Used by the post-onboarding rating gate when the user taps 4–5★.
-  /// This is separate from the throttled native [InAppReview.requestReview]
-  /// flow: the deep-link approach is explicitly permitted by Apple guidelines
-  /// and always navigates the user to the compose form regardless of iOS
-  /// request-rate limits.
-  static Future<void> openStoreReview() async {
-    try {
-      final uri = Uri.parse(AppConfig.appStoreReviewUrl);
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } catch (e) {
-      debugPrint('[AppReview] openStoreReview error (ignored): $e');
-    }
-  }
 
   /// Returns the date of first app launch, or null if not yet recorded.
   static Future<DateTime?> firstLaunchDate() async {
