@@ -158,9 +158,6 @@ class AppLocalizationsRu extends AppLocalizations {
   String get settings_language => 'Язык';
 
   @override
-  String get settings_subscription => 'Подписка';
-
-  @override
   String get settings_logout => 'Выйти';
 
   @override
@@ -514,36 +511,11 @@ class AppLocalizationsRu extends AppLocalizations {
   String get auth_apple => 'Войти через Apple';
 
   @override
-  String get auth_telegram => 'Войти через Telegram';
-
-  @override
   String get auth_email => 'Войти по email';
 
   @override
   String get auth_terms =>
       'Продолжая, вы соглашаетесь с условиями использования';
-
-  @override
-  String get tariffs_title => 'Тарифы';
-
-  @override
-  String get tariffs_subscribe => 'Оформить подписку';
-
-  @override
-  String get tariffs_current => 'Текущий тариф';
-
-  @override
-  String get tariffs_free => 'Бесплатно';
-
-  @override
-  String get tariffs_perMonth => '/ месяц';
-
-  @override
-  String get tariffs_cancel => 'Отменить автопродление';
-
-  @override
-  String get tariffs_cancelConfirm =>
-      'Вы уверены, что хотите отменить автопродление?';
 
   @override
   String get wg_title => 'Рассчитаем ваш путь к цели';
@@ -619,49 +591,6 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get error_unknown => 'Что-то пошло не так';
-
-  @override
-  String get subscription_title => 'Подписка';
-
-  @override
-  String get subscription_none => 'У вас нет активной подписки';
-
-  @override
-  String get subscription_view_tariffs => 'Посмотреть тарифы';
-
-  @override
-  String get subscription_active => 'Активная подписка';
-
-  @override
-  String get subscription_expires => 'Действует до';
-
-  @override
-  String get subscription_amount => 'Стоимость';
-
-  @override
-  String get subscription_auto_renew => 'Автопродление';
-
-  @override
-  String get subscription_auto_renew_on => 'Включено';
-
-  @override
-  String get subscription_auto_renew_off => 'Отключено';
-
-  @override
-  String get subscription_cancel_auto_renew => 'Отменить автопродление';
-
-  @override
-  String get subscription_cancel_auto_renew_title => 'Отмена автопродления';
-
-  @override
-  String get subscription_cancel_auto_renew_confirm =>
-      'Вы уверены, что хотите отменить автопродление подписки?';
-
-  @override
-  String get subscription_cancel_auto_renew_action => 'Отменить';
-
-  @override
-  String get subscription_auto_renew_cancelled => 'Автопродление отменено';
 
   @override
   String get wg_plan_ready => 'Ваш план готов!';
@@ -841,13 +770,6 @@ class AppLocalizationsRu extends AppLocalizations {
   String get edit_meal_section_nutrition => 'Питательная ценность';
 
   @override
-  String get addMeal_subscription_needed => 'Нужна подписка';
-
-  @override
-  String get addMeal_subscription_desc =>
-      'Распознавание еды доступно на платном тарифе. Оформите подписку чтобы пользоваться ИИ-функциями.';
-
-  @override
   String get addMeal_choose_tariff => 'Выбрать тариф';
 
   @override
@@ -857,9 +779,6 @@ class AppLocalizationsRu extends AppLocalizations {
   String addMeal_kcal(String cal) {
     return '$cal ккал';
   }
-
-  @override
-  String get addMeal_subscription_snack => 'Для этой функции нужна подписка';
 
   @override
   String get addMeal_weight_hint => 'Вес (г)';
@@ -973,120 +892,6 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get settings_terms => 'Пользовательское соглашение';
-
-  @override
-  String get settings_subscription_terms => 'Условия подписки';
-
-  @override
-  String get settings_subscription_privacy => 'Обработка данных подписки';
-
-  @override
-  String get settings_sub_promo =>
-      'Оформите подписку чтобы разблокировать ИИ-распознавание, голос и фото.';
-
-  @override
-  String get settings_sale_ends => 'Скидка заканчивается через:';
-
-  @override
-  String get settings_sub_active_badge => '✓ Активна';
-
-  @override
-  String get tariffs_title_full => 'Подпишись и открой\nполный доступ';
-
-  @override
-  String get tariffs_tag1 => '🥕 Рекомендации по питанию';
-
-  @override
-  String get tariffs_tag2 => '📋 Сканер калорий';
-
-  @override
-  String get tariffs_tag3 => '📋 Расчет нормы';
-
-  @override
-  String get tariffs_tag4 => '😀 Трекер эмоций';
-
-  @override
-  String get tariffs_trial => 'Пробный период';
-
-  @override
-  String get tariffs_monthly => 'Месяц';
-
-  @override
-  String get tariffs_yearly => 'Год';
-
-  @override
-  String get tariffs_quarterly => '3 месяца';
-
-  @override
-  String get tariffs_per_3days => '/ 3 дня';
-
-  @override
-  String get tariffs_per_day => '/ день';
-
-  @override
-  String get tariffs_per_3mo => '/ 3 мес';
-
-  @override
-  String get tariffs_trial_then => 'Затем 2 990 за год';
-
-  @override
-  String get tariffs_monthly_billing => 'Ежемесячная оплата';
-
-  @override
-  String get tariffs_yearly_save => '2 990 ₽ / Экономия 8 890 ₽';
-
-  @override
-  String get tariffs_best_value => 'Оптимальный выбор';
-
-  @override
-  String tariffs_no_discount(String price) {
-    return 'Без скидки $price';
-  }
-
-  @override
-  String get tariffs_no_plans => 'Тарифы пока не настроены';
-
-  @override
-  String get tariffs_cancel_anytime =>
-      'Подписку можно отменить в любой удобный момент в Личном кабинете';
-
-  @override
-  String get tariffs_optimal_months =>
-      'Оптимальный результат достигается через 3 месяца';
-
-  @override
-  String get tariffs_email_hint => 'Email для чека';
-
-  @override
-  String get tariffs_email_error => 'Введите корректный email';
-
-  @override
-  String get tariffs_pay_error =>
-      'Не удалось создать платёж. Попробуйте ещё раз.';
-
-  @override
-  String get tariffs_get_plan => 'Получить мой план';
-
-  @override
-  String get tariffs_load_error => 'Не удалось загрузить тарифы';
-
-  @override
-  String get tariffs_sale_ends => 'СКИДКА ЗАКАНЧИВАЕТСЯ ЧЕРЕЗ';
-
-  @override
-  String get tariffs_benefit1 => '🥗 Консультация с нутрициологом';
-
-  @override
-  String get tariffs_benefit2 => '🎥 Видео рецепты';
-
-  @override
-  String get tariffs_benefit3 => '🍽️ План питания';
-
-  @override
-  String get tariffs_benefit4 => '📋 Гайд по питанию';
-
-  @override
-  String get tariffs_payment_title => 'Оплата';
 
   @override
   String get nav_chat => 'ИИ Чат';
@@ -1386,90 +1191,6 @@ class AppLocalizationsRu extends AppLocalizations {
   String mealGroup_itemsCount(int count) {
     return '$count блюд';
   }
-
-  @override
-  String get paywall_headline => 'ИИ считает калории.\nТы просто ешь.';
-
-  @override
-  String get paywall_subtitle =>
-      'Сфотографируй тарелку, скажи голосом или спроси нутрициолога — KayFit запишет всё сам.';
-
-  @override
-  String get paywall_feature_photo_title => 'Фото → КБЖУ за секунды';
-
-  @override
-  String get paywall_feature_photo_sub =>
-      'ИИ определяет ингредиенты и вес порции';
-
-  @override
-  String get paywall_feature_voice_title => 'Скажи вслух';
-
-  @override
-  String get paywall_feature_voice_sub =>
-      '«Съел куриный плов» → залогировано сразу';
-
-  @override
-  String get paywall_feature_chat_title => 'Нутрициолог в кармане';
-
-  @override
-  String get paywall_feature_chat_sub => 'Спроси о питании — ответит и запишет';
-
-  @override
-  String get paywall_plan_trial_title => 'СТАРТ\n7 дней 🆓';
-
-  @override
-  String get paywall_plan_monthly_title => 'Месяц';
-
-  @override
-  String get paywall_plan_quarterly_title => '3 месяца';
-
-  @override
-  String get paywall_plan_quarterly_badge => '★ ЛУЧШИЙ';
-
-  @override
-  String get paywall_plan_yearly_title => 'Год';
-
-  @override
-  String get paywall_plan_yearly_badge => '🔥 −40%';
-
-  @override
-  String get paywall_cta_trial => 'Начать 7 дней бесплатно';
-
-  @override
-  String get paywall_cta_buy => 'Подписаться';
-
-  @override
-  String get paywall_trial_note =>
-      'Отменить до конца 7 дней — ничего не спишется';
-
-  @override
-  String get paywall_dismiss => 'Нет, буду вводить руками';
-
-  @override
-  String get paywall_restore => 'Восстановить';
-
-  @override
-  String get paywall_terms => 'Условия';
-
-  @override
-  String get paywall_privacy => 'Политика';
-
-  @override
-  String get paywall_pending_snack =>
-      'Платёж обрабатывается. Попробуйте позже.';
-
-  @override
-  String get paywall_error_snack => 'Ошибка покупки. Попробуйте ещё раз.';
-
-  @override
-  String get paywall_restored_snack => 'Подписка восстановлена';
-
-  @override
-  String get paywall_no_restore_snack => 'Активная подписка не найдена';
-
-  @override
-  String get paywall_restore_error_snack =>
-      'Ошибка восстановления. Попробуйте ещё раз.';
 
   @override
   String get item_enter_nutrition_manually => 'Введите КБЖУ вручную';

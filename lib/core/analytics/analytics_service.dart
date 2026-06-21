@@ -28,14 +28,10 @@ class AnalyticsService {
     String? language,
     int? age,
     String? gender,
-    bool? hasSubscription,
   }) async {
     if (language != null) await _fa.setUserProperty(name: 'language', value: language);
     if (gender != null) await _fa.setUserProperty(name: 'gender', value: gender.toLowerCase());
     if (age != null) await _fa.setUserProperty(name: 'age_group', value: _ageGroup(age));
-    if (hasSubscription != null) {
-      await _fa.setUserProperty(name: 'has_subscription', value: hasSubscription ? 'true' : 'false');
-    }
   }
 
   // ─── Generic tap tracker ──────────────────────────────────────────────────
@@ -189,20 +185,6 @@ class AnalyticsService {
   static void notificationPromoShown() => _event('notification_promo_shown');
   static void notificationPromoAccepted() => _event('notification_promo_accepted');
   static void notificationPromoDismissed() => _event('notification_promo_dismissed');
-
-  // ─── Tariffs / Payments ───────────────────────────────────────────────────
-
-  static void tariffsViewed() => _event('tariffs_viewed');
-  static void tariffSelected(String tariffCode, double price) =>
-      _event('tariff_selected', {'tariff_code': tariffCode, 'price': price});
-  static void subscriptionPurchaseStarted(String tariffCode, double price) {
-    _fa.logPurchase(
-      currency: 'USD',
-      value: price,
-      transactionId: '${tariffCode}_${DateTime.now().millisecondsSinceEpoch}',
-      items: [AnalyticsEventItem(itemId: tariffCode, itemName: tariffCode, price: price, quantity: 1)],
-    );
-  }
 
   // ─── Legacy compat aliases ────────────────────────────────────────────────
 

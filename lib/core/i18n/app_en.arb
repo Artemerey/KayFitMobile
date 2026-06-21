@@ -1,13 +1,10 @@
 {
   "@@locale": "en",
-
   "appName": "Kayfit",
-
   "nav_today": "Today",
   "nav_journal": "Journal",
   "nav_recipes": "Recipes",
   "nav_settings": "Settings",
-
   "common_save": "Save",
   "common_cancel": "Cancel",
   "common_delete": "Delete",
@@ -21,7 +18,6 @@
   "common_done": "Done",
   "common_skip": "Skip",
   "common_stop": "Stop",
-
   "macro_calories": "Calories",
   "macro_protein": "Protein",
   "macro_fat": "Fat",
@@ -36,7 +32,6 @@
   "macro_eaten": "eaten",
   "macro_remaining": "remaining",
   "macro_goal": "goal",
-
   "dashboard_title": "Today",
   "dashboard_addMeal": "Add meal",
   "dashboard_noMeals": "No entries for today",
@@ -44,16 +39,19 @@
   "dashboard_personal_plan_sub": "Goal: {kcal} kcal/day · Tap to view",
   "@dashboard_personal_plan_sub": {
     "placeholders": {
-      "kcal": {"type": "int"}
+      "kcal": {
+        "type": "int"
+      }
     }
   },
   "dashboard_compulsive": "Compulsive meals: {count}",
   "@dashboard_compulsive": {
     "placeholders": {
-      "count": {"type": "int"}
+      "count": {
+        "type": "int"
+      }
     }
   },
-
   "journal_title": "Journal",
   "journal_empty": "History is empty",
   "journal_no_meals_today": "No meals today",
@@ -61,16 +59,13 @@
   "journal_ai_banner_title": "AI Nutritionist",
   "journal_ai_banner_sub": "Will help choose meals and calculate daily macros",
   "journal_ai_banner_btn": "Ask",
-
   "settings_title": "Settings",
   "settings_profile": "Profile",
   "settings_language": "Language",
-  "settings_subscription": "Subscription",
   "settings_logout": "Log out",
   "settings_langRu": "Russian",
   "settings_langEn": "English",
   "settings_goals": "Macro goals",
-
   "addMeal_title": "Add meal",
   "addMeal_text": "Text",
   "addMeal_voice": "Voice",
@@ -87,22 +82,29 @@
   "addMeal_takePhoto": "Take photo",
   "addMeal_choosePhoto": "Choose from gallery",
   "addMeal_recognizing": "Recognizing...",
-
   "meal_calories": "{cal} kcal",
   "@meal_calories": {
     "placeholders": {
-      "cal": {"type": "double", "format": "decimalPattern"}
+      "cal": {
+        "type": "double",
+        "format": "decimalPattern"
+      }
     }
   },
   "meal_macros": "P: {p}g  F: {f}g  C: {c}g",
   "@meal_macros": {
     "placeholders": {
-      "p": {"type": "double"},
-      "f": {"type": "double"},
-      "c": {"type": "double"}
+      "p": {
+        "type": "double"
+      },
+      "f": {
+        "type": "double"
+      },
+      "c": {
+        "type": "double"
+      }
     }
   },
-
   "emotion_happy": "Happy",
   "emotion_calm": "Calm",
   "emotion_sad": "Sad",
@@ -114,44 +116,36 @@
   "emotion_worried": "Worried",
   "emotion_neutral": "Neutral",
   "emotion_other": "Other",
-
   "ob_landing_title1": "Lose weight",
   "ob_landing_title2": "easily",
   "ob_landing_sub": "Photo or voice — AI counts your calories",
   "ob_landing_cta": "Try now",
   "ob_landing_cta_sub1": "Personal plan",
   "ob_landing_cta_sub2": "in under a minute",
-
   "ob_skip_btn": "Skip",
   "ob_skip_title": "Skip this step?",
   "ob_skip_sub": "Without this data the calculation will be less precise.",
   "ob_skip_continue": "Continue without data",
   "ob_skip_back": "Go back",
-
   "ob_step_age_title": "Your age?",
   "ob_step_age_hint": "Age affects your basal metabolic rate calculation",
-
   "ob_step_height_title": "Your height?",
   "ob_step_height_hint": "Height helps calculate your basal metabolic rate",
   "ob_step_height_unit": "centimeters",
-
   "ob_step_gender_title": "Your gender?",
   "ob_step_gender_hint": "Used in the Mifflin calorie formula",
   "ob_step_gender_female": "Female",
   "ob_step_gender_male": "Male",
-
   "ob_step_weight_title": "Your weight?",
   "ob_step_weight_hint": "Current and target weight for calorie deficit calculation",
   "ob_step_weight_now": "Current",
   "ob_step_weight_goal": "Goal",
-
   "ob_step_training_title": "How many days a week do you train?",
   "ob_step_training_sub": "This helps calculate your daily activity more precisely",
   "ob_training_0": "I don't train",
   "ob_training_1_2": "1–2 days",
   "ob_training_3_4": "3–4 days",
   "ob_training_daily": "Every day",
-
   "ob_method_title": "How to add food?",
   "ob_method_sub": "Choose your preferred way — AI recognizes macros",
   "ob_method_photo_title": "Food photo",
@@ -161,30 +155,25 @@
   "ob_method_text_title": "Text",
   "ob_method_text_desc": "Write what you ate — AI calculates calories",
   "ob_method_note": "All methods work fast and accurately",
-
   "ob_demo_perks_title": "What you get with Kayfit:",
   "ob_demo_perk1": "Food photo → AI recognizes macros",
   "ob_demo_perk2": "Voice: 'Ate soup' — that's it",
   "ob_demo_perk3": "Nutrition history and progress",
   "ob_demo_perk4": "AI nutrition recommendations",
-
   "ob_result_title": "Your personal plan",
   "ob_result_sub": "Calculated based on your profile",
   "ob_result_kcalday": "kcal/day",
   "ob_result_accuracy": "AI-assisted estimation",
   "ob_result_next_title": "Next step",
   "ob_result_next_text": "Sign in to save your plan and start tracking nutrition.",
-
   "ob_err_height": "Enter a valid height (100–250 cm)",
   "ob_err_weight": "Enter a valid weight (30–300 kg)",
   "ob_err_target_weight": "Enter target weight (30–300 kg)",
   "ob_err_training": "Select at least one option",
-
   "ob_footer_saving": "Saving...",
   "ob_footer_calc": "Calculate plan",
   "ob_footer_great": "Great!",
   "ob_footer_login": "Sign in and save plan",
-
   "ob_continue": "Continue",
   "ob_getStarted": "Get started",
   "ob_already_account": "Already have an account? Sign in",
@@ -199,36 +188,33 @@
   "ob_method_kcal": "{cal} kcal",
   "@ob_method_kcal": {
     "placeholders": {
-      "cal": {"type": "String"}
+      "cal": {
+        "type": "String"
+      }
     }
   },
   "ob_method_macros": "P{p} F{f} C{c}",
   "@ob_method_macros": {
     "placeholders": {
-      "p": {"type": "String"},
-      "f": {"type": "String"},
-      "c": {"type": "String"}
+      "p": {
+        "type": "String"
+      },
+      "f": {
+        "type": "String"
+      },
+      "c": {
+        "type": "String"
+      }
     }
   },
   "ob_recognizing_voice": "Recognizing voice…",
   "ob_recognizing_photo": "Analyzing photo…",
-
   "auth_title": "Sign in to Kayfit",
   "auth_subtitle": "Choose a sign-in method",
   "auth_google": "Sign in with Google",
   "auth_apple": "Sign in with Apple",
-  "auth_telegram": "Sign in with Telegram",
   "auth_email": "Sign in with Email",
   "auth_terms": "By continuing you agree to the terms of service",
-
-  "tariffs_title": "Plans",
-  "tariffs_subscribe": "Subscribe",
-  "tariffs_current": "Current plan",
-  "tariffs_free": "Free",
-  "tariffs_perMonth": "/ month",
-  "tariffs_cancel": "Cancel auto-renewal",
-  "tariffs_cancelConfirm": "Are you sure you want to cancel auto-renewal?",
-
   "wg_title": "Calculate your path to goal",
   "wg_sub": "Enter your data to calculate calories and macros",
   "wg_age": "Age (years)",
@@ -251,26 +237,9 @@
   "wg_result_days": "Days to goal:",
   "wg_result_kcal_day": "kcal/day",
   "wg_btn_start": "Start tracking",
-
   "error_network": "No server connection",
   "error_auth": "Authentication error",
   "error_unknown": "Something went wrong",
-
-  "subscription_title": "Subscription",
-  "subscription_none": "You have no active subscription",
-  "subscription_view_tariffs": "View plans",
-  "subscription_active": "Active subscription",
-  "subscription_expires": "Valid until",
-  "subscription_amount": "Amount",
-  "subscription_auto_renew": "Auto-renewal",
-  "subscription_auto_renew_on": "Enabled",
-  "subscription_auto_renew_off": "Disabled",
-  "subscription_cancel_auto_renew": "Cancel auto-renewal",
-  "subscription_cancel_auto_renew_title": "Cancel auto-renewal",
-  "subscription_cancel_auto_renew_confirm": "Are you sure you want to cancel subscription auto-renewal?",
-  "subscription_cancel_auto_renew_action": "Cancel",
-  "subscription_auto_renew_cancelled": "Auto-renewal cancelled",
-
   "wg_plan_ready": "Your plan is ready!",
   "wg_personal_calc": "Personal calculation based on your data",
   "wg_kcal_day": "kcal / day",
@@ -278,13 +247,17 @@
   "wg_days_to_goal": "Days to goal: {days}",
   "@wg_days_to_goal": {
     "placeholders": {
-      "days": {"type": "int"}
+      "days": {
+        "type": "int"
+      }
     }
   },
   "wg_target_weight_val": "Target weight: {kg} kg",
   "@wg_target_weight_val": {
     "placeholders": {
-      "kg": {"type": "String"}
+      "kg": {
+        "type": "String"
+      }
     }
   },
   "wg_weight_forecast": "Weight forecast",
@@ -297,7 +270,6 @@
   "wg_feature_track_desc": "Track your macros and see results every day",
   "wg_start_diary": "Start your food diary",
   "wg_now": "now",
-
   "auth_email_login_title": "Email login",
   "auth_register_title": "Registration",
   "auth_login_subtitle": "Sign in to your Kayfit account",
@@ -316,25 +288,23 @@
   "auth_err_enter_email": "Enter email",
   "auth_err_invalid_email": "Invalid email",
   "auth_err_enter_value": "Enter a value",
-
   "goals_title": "Macro goals",
   "goals_saved": "Saved",
   "goals_error": "Error: {msg}",
   "@goals_error": {
     "placeholders": {
-      "msg": {"type": "String"}
+      "msg": {
+        "type": "String"
+      }
     }
   },
   "goals_err_enter_value": "Enter a value",
   "goals_err_enter_int": "Enter a whole number",
-
   "dashboard_details": "Details",
-
   "dashboard_no_goals_title": "Goals not set",
   "dashboard_no_goals_sub": "Complete \"Path to Goal\" to get a personalized nutrition plan",
   "dashboard_remaining_title": "Remaining today",
   "dashboard_remaining_over": "Over limit",
-
   "edit_meal_title": "Edit meal",
   "edit_meal_name_label": "Name",
   "edit_meal_name_error": "Enter a name",
@@ -342,7 +312,9 @@
   "edit_meal_error": "Error: {msg}",
   "@edit_meal_error": {
     "placeholders": {
-      "msg": {"type": "String"}
+      "msg": {
+        "type": "String"
+      }
     }
   },
   "edit_meal_err_enter_value": "Enter a value",
@@ -351,18 +323,16 @@
   "edit_meal_section_details": "Details",
   "edit_meal_section_portion": "Portion",
   "edit_meal_section_nutrition": "Nutrition",
-
-  "addMeal_subscription_needed": "Subscription required",
-  "addMeal_subscription_desc": "Food recognition is available on a paid plan. Subscribe to use AI features.",
   "addMeal_choose_tariff": "Choose a plan",
   "addMeal_close": "Close",
   "addMeal_kcal": "{cal} kcal",
   "@addMeal_kcal": {
     "placeholders": {
-      "cal": {"type": "String"}
+      "cal": {
+        "type": "String"
+      }
     }
   },
-  "addMeal_subscription_snack": "A subscription is required for this feature",
   "addMeal_weight_hint": "Weight (g)",
   "addMeal_recognizing_voice": "Recognizing voice...",
   "addMeal_recognizing_photo": "Analyzing photo...",
@@ -389,65 +359,18 @@
   "barcode_manual_title": "Enter barcode",
   "barcode_search_btn": "Search",
   "barcode_not_found": "Product not found",
-
   "addMeal_barcode_scanning": "Barcode scanning",
   "addMeal_barcode_torch_off": "Turn off flashlight",
   "addMeal_barcode_torch_on": "Turn on flashlight",
   "addMeal_barcode_detected": "Barcode detected",
   "addMeal_barcode_confirm": "Add to journal",
-
   "settings_delete_account_title": "Delete account?",
   "settings_delete_account_body": "All your data will be permanently deleted. This action cannot be undone.",
   "settings_delete_account_btn": "Delete account",
-
   "settings_ai_consent": "AI Data Processing",
   "settings_privacy_policy": "Privacy Policy",
   "settings_terms": "Terms of Service",
-  "settings_subscription_terms": "Subscription Terms",
-  "settings_subscription_privacy": "Subscription Data Policy",
-  "settings_sub_promo": "Subscribe to unlock AI recognition, voice and photo.",
-  "settings_sale_ends": "Sale ends in:",
-  "settings_sub_active_badge": "✓ Active",
-
-  "tariffs_title_full": "Subscribe and unlock\nfull access",
-  "tariffs_tag1": "🥕 Nutrition recommendations",
-  "tariffs_tag2": "📋 Calorie scanner",
-  "tariffs_tag3": "📋 Macro calculation",
-  "tariffs_tag4": "😀 Emotion tracker",
-  "tariffs_trial": "Free trial",
-  "tariffs_monthly": "Monthly",
-  "tariffs_yearly": "Yearly",
-  "tariffs_quarterly": "3 months",
-  "tariffs_per_3days": "/ 3 days",
-  "tariffs_per_day": "/ day",
-  "tariffs_per_3mo": "/ 3 mo",
-  "tariffs_trial_then": "Then 2,990 ₽/year",
-  "tariffs_monthly_billing": "Monthly billing",
-  "tariffs_yearly_save": "2,990 ₽ / Save 8,890 ₽",
-  "tariffs_best_value": "Best value",
-  "tariffs_no_discount": "Without discount {price}",
-  "@tariffs_no_discount": {
-    "placeholders": {
-      "price": {"type": "String"}
-    }
-  },
-  "tariffs_no_plans": "No plans available",
-  "tariffs_cancel_anytime": "Cancel anytime in your account settings",
-  "tariffs_optimal_months": "Optimal results are achieved after 3 months",
-  "tariffs_email_hint": "Email for receipt",
-  "tariffs_email_error": "Enter a valid email",
-  "tariffs_pay_error": "Payment failed. Please try again.",
-  "tariffs_get_plan": "Get my plan",
-  "tariffs_load_error": "Failed to load tariffs",
-  "tariffs_sale_ends": "SALE ENDS IN",
-  "tariffs_benefit1": "🥗 Nutritionist consultation",
-  "tariffs_benefit2": "🎥 Video recipes",
-  "tariffs_benefit3": "🍽️ Meal plan",
-  "tariffs_benefit4": "📋 Nutrition guide",
-  "tariffs_payment_title": "Payment",
-
   "nav_chat": "AI Chat",
-  
   "chat_title": "AI Nutritionist",
   "chat_input_hint": "Ask about nutrition...",
   "chat_clear": "Clear chat",
@@ -457,7 +380,6 @@
   "chat_suggestion_1": "🥗 What to eat for lunch on a deficit?",
   "chat_suggestion_2": "💪 Daily protein norm for weight loss",
   "chat_suggestion_3": "🌙 Is it okay to eat after 6 PM?",
-
   "recogV2_composition": "COMPOSITION",
   "recogV2_meal_type": "MEAL TYPE",
   "recogV2_saving": "Saving...",
@@ -491,7 +413,6 @@
   "recogV2_correct_title": "Correction",
   "recogV2_correct_send": "Apply",
   "recogV2_correct_loading": "Updating...",
-
   "nds_section_basic": "Basic",
   "nds_section_carbs_detail": "Carbs detail",
   "nds_section_fats_detail": "Fats detail",
@@ -528,10 +449,11 @@
   "nds_weight_g": "{w} g",
   "@nds_weight_g": {
     "placeholders": {
-      "w": {"type": "String"}
+      "w": {
+        "type": "String"
+      }
     }
   },
-
   "nutrient_details_title": "DETAILS",
   "nutrient_weight": "Weight",
   "nutrient_net_carbs": "Net Carbs",
@@ -552,56 +474,26 @@
   "nutrient_vitamin_b12": "Vitamin B12",
   "nutrient_mg": "mg",
   "nutrient_mcg": "mcg",
-
   "mealGroup_itemsCount": "{count} items",
   "@mealGroup_itemsCount": {
     "placeholders": {
-      "count": {"type": "int"}
+      "count": {
+        "type": "int"
+      }
     }
   },
-
-  "paywall_headline": "AI counts calories.\nYou just eat.",
-  "paywall_subtitle": "Take a photo, say it aloud, or ask the nutritionist — KayFit logs it all.",
-  "paywall_feature_photo_title": "Photo → macros in seconds",
-  "paywall_feature_photo_sub": "AI identifies ingredients and portion weight",
-  "paywall_feature_voice_title": "Just say it",
-  "paywall_feature_voice_sub": "\"Had chicken pilaf\" → logged instantly",
-  "paywall_feature_chat_title": "Nutritionist in your pocket",
-  "paywall_feature_chat_sub": "Ask about nutrition — it answers and logs",
-  "paywall_plan_trial_title": "START\n7 days 🆓",
-  "paywall_plan_monthly_title": "Monthly",
-  "paywall_plan_quarterly_title": "3 months",
-  "paywall_plan_quarterly_badge": "★ BEST",
-  "paywall_plan_yearly_title": "Yearly",
-  "paywall_plan_yearly_badge": "🔥 −40%",
-  "paywall_cta_trial": "Start 7 days free",
-  "paywall_cta_buy": "Subscribe",
-  "paywall_trial_note": "Cancel before 7 days — you won't be charged",
-  "paywall_dismiss": "No, I'll enter manually",
-  "paywall_restore": "Restore",
-  "paywall_terms": "Terms",
-  "paywall_privacy": "Privacy",
-  "paywall_pending_snack": "Payment is processing. Try again later.",
-  "paywall_error_snack": "Purchase failed. Please try again.",
-  "paywall_restored_snack": "Subscription restored",
-  "paywall_no_restore_snack": "No active subscription found",
-  "paywall_restore_error_snack": "Restore failed. Please try again.",
   "item_enter_nutrition_manually": "Enter nutrition manually",
-
   "mealType_breakfast": "Breakfast",
   "mealType_lunch": "Lunch",
   "mealType_dinner": "Dinner",
   "mealType_snack": "Snack",
   "mealType_other": "Other",
-
   "macro_net_carbs_abbr": "Net C",
   "macro_sat_fat_short": "Sat fat",
   "macro_good_fat_short": "Good fat",
-
   "gi_low_badge": "Low GI",
   "gi_medium_badge": "Med GI",
   "gi_high_badge": "High GI",
-
   "journal_day_total": "DAY TOTAL",
   "journal_more_nutrients": "More nutrients",
   "journal_hide_nutrients": "Hide",
@@ -617,7 +509,6 @@
   "edit_meal_weight_short": "Weight",
   "nds_nutrient_vit_c_short": "Vit. C",
   "nds_nutrient_vit_d_short": "Vit. D",
-
   "journal_meal_deleted": "Meal deleted",
   "journal_could_not_delete": "Could not delete",
   "journal_could_not_update_weight": "Could not update weight",
@@ -627,7 +518,9 @@
   "journal_copied_to": "Copied to {date}",
   "@journal_copied_to": {
     "placeholders": {
-      "date": {"type": "String"}
+      "date": {
+        "type": "String"
+      }
     }
   },
   "journal_open_btn": "Open",
@@ -637,17 +530,18 @@
   "journal_copied_n_dates": "Copied to {n} {noun}",
   "@journal_copied_n_dates": {
     "placeholders": {
-      "n": {"type": "int"},
-      "noun": {"type": "String"}
+      "n": {
+        "type": "int"
+      },
+      "noun": {
+        "type": "String"
+      }
     }
   },
-
   "journal_disclaimer": "Calorie estimates are approximate. Not a substitute for medical advice.",
-
   "nav_add": "Add",
   "cal_on_track": "on track",
   "cal_over_goal": "over goal",
   "cal_empty": "empty",
-
   "session_expired": "Session expired. Please sign in again."
 }

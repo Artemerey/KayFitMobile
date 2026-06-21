@@ -35,7 +35,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/analytics/analytics_service.dart';
 import '../../../core/ai_consent/ai_consent_provider.dart';
 import '../../../core/api/api_client.dart';
-import '../../../core/subscription/require_subscription.dart';
 import '../../../features/add_meal/screens/barcode_scanner_screen_v2.dart';
 import '../../../features/add_meal/screens/recognition_result_args.dart';
 import '../../../router.dart' show kf2RouteObserver;
@@ -372,10 +371,6 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     // Pre-capture before any await — WidgetRef throws after widget disposal.
     final historyNotifier = ref.read(chatHistoryProvider.notifier);
     final processingNotifier = ref.read(chatProcessingProvider.notifier);
-
-    // Subscription gate — block AI chat for free users.
-    final ok = await requireSubscription(context, ref);
-    if (!ok || !mounted) return;
 
     // Consent gate — block if consent declined.
     final consent = ref.read(aiConsentProvider);

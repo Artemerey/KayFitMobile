@@ -1,13 +1,10 @@
 {
   "@@locale": "ru",
-
   "appName": "Kayfit",
-
   "nav_today": "Сегодня",
   "nav_journal": "Журнал",
   "nav_recipes": "Рецепты",
   "nav_settings": "Настройки",
-
   "common_save": "Сохранить",
   "common_cancel": "Отмена",
   "common_delete": "Удалить",
@@ -21,7 +18,6 @@
   "common_done": "Готово",
   "common_skip": "Пропустить",
   "common_stop": "Стоп",
-
   "macro_calories": "Калории",
   "macro_protein": "Белки",
   "macro_fat": "Жиры",
@@ -36,7 +32,6 @@
   "macro_eaten": "съедено",
   "macro_remaining": "осталось",
   "macro_goal": "цель",
-
   "dashboard_title": "Сегодня",
   "dashboard_addMeal": "Добавить приём пищи",
   "dashboard_noMeals": "Нет записей за сегодня",
@@ -44,16 +39,19 @@
   "dashboard_personal_plan_sub": "Цель: {kcal} ккал/день · Нажмите для просмотра",
   "@dashboard_personal_plan_sub": {
     "placeholders": {
-      "kcal": {"type": "int"}
+      "kcal": {
+        "type": "int"
+      }
     }
   },
   "dashboard_compulsive": "Компульсивных приёмов: {count}",
   "@dashboard_compulsive": {
     "placeholders": {
-      "count": {"type": "int"}
+      "count": {
+        "type": "int"
+      }
     }
   },
-
   "journal_title": "Журнал",
   "journal_empty": "История пуста",
   "journal_no_meals_today": "Блюд за сегодня нет",
@@ -61,16 +59,13 @@
   "journal_ai_banner_title": "ИИ-нутрициолог",
   "journal_ai_banner_sub": "Поможет с выбором блюд и расчётом КБЖУ на день",
   "journal_ai_banner_btn": "Спросить",
-
   "settings_title": "Настройки",
   "settings_profile": "Профиль",
   "settings_language": "Язык",
-  "settings_subscription": "Подписка",
   "settings_logout": "Выйти",
   "settings_langRu": "Русский",
   "settings_langEn": "English",
   "settings_goals": "Цели КБЖУ",
-
   "addMeal_title": "Добавить блюдо",
   "addMeal_text": "Текстом",
   "addMeal_voice": "Голосом",
@@ -87,22 +82,29 @@
   "addMeal_takePhoto": "Сделать фото",
   "addMeal_choosePhoto": "Выбрать из галереи",
   "addMeal_recognizing": "Распознаём...",
-
   "meal_calories": "{cal} ккал",
   "@meal_calories": {
     "placeholders": {
-      "cal": {"type": "double", "format": "decimalPattern"}
+      "cal": {
+        "type": "double",
+        "format": "decimalPattern"
+      }
     }
   },
   "meal_macros": "Б: {p}г  Ж: {f}г  У: {c}г",
   "@meal_macros": {
     "placeholders": {
-      "p": {"type": "double"},
-      "f": {"type": "double"},
-      "c": {"type": "double"}
+      "p": {
+        "type": "double"
+      },
+      "f": {
+        "type": "double"
+      },
+      "c": {
+        "type": "double"
+      }
     }
   },
-
   "emotion_happy": "Радость",
   "emotion_calm": "Спокойствие",
   "emotion_sad": "Грусть",
@@ -114,44 +116,36 @@
   "emotion_worried": "Беспокойство",
   "emotion_neutral": "Нейтральность",
   "emotion_other": "Другое",
-
   "ob_landing_title1": "Худей",
   "ob_landing_title2": "просто",
   "ob_landing_sub": "Сфотографируй или опиши голосом еду — AI посчитает калории",
   "ob_landing_cta": "Попробовать сейчас",
   "ob_landing_cta_sub1": "Персональный план",
   "ob_landing_cta_sub2": "меньше минуты",
-
   "ob_skip_btn": "Пропустить",
   "ob_skip_title": "Пропустить шаг?",
   "ob_skip_sub": "Без этих данных расчёт будет менее точным.",
   "ob_skip_continue": "Продолжить без данных",
   "ob_skip_back": "Вернуться",
-
   "ob_step_age_title": "Ваш возраст?",
   "ob_step_age_hint": "Возраст влияет на расчёт базового обмена веществ",
-
   "ob_step_height_title": "Ваш рост?",
   "ob_step_height_hint": "Рост помогает рассчитать базовый обмен веществ",
   "ob_step_height_unit": "сантиметры",
-
   "ob_step_gender_title": "Ваш пол?",
   "ob_step_gender_hint": "Пол учитывается в формуле Миффлина",
   "ob_step_gender_female": "Женщина",
   "ob_step_gender_male": "Мужчина",
-
   "ob_step_weight_title": "Ваш вес?",
   "ob_step_weight_hint": "Текущий и желаемый вес для расчёта дефицита калорий",
   "ob_step_weight_now": "Сейчас",
   "ob_step_weight_goal": "Цель",
-
   "ob_step_training_title": "Сколько дней в неделю вы тренируетесь?",
   "ob_step_training_sub": "Это поможет точнее рассчитать суточную активность",
   "ob_training_0": "Не тренируюсь",
   "ob_training_1_2": "1–2 дня",
   "ob_training_3_4": "3–4 дня",
   "ob_training_daily": "Каждый день",
-
   "ob_method_title": "Как добавить еду?",
   "ob_method_sub": "Выбери удобный способ — AI распознает КБЖУ",
   "ob_method_photo_title": "Фото еды",
@@ -161,30 +155,25 @@
   "ob_method_text_title": "Текстом",
   "ob_method_text_desc": "Напиши что съел — AI посчитает калории",
   "ob_method_note": "Все способы работают быстро и точно",
-
   "ob_demo_perks_title": "Что ты получишь в Kayfit:",
   "ob_demo_perk1": "Фото еды → AI распознает КБЖУ",
   "ob_demo_perk2": "Голосом: «Съел борщ» — и готово",
   "ob_demo_perk3": "История питания и прогресс",
   "ob_demo_perk4": "Рекомендации по питанию от ИИ",
-
   "ob_result_title": "Ваш персональный план",
   "ob_result_sub": "Расчёт на основе вашего профиля",
   "ob_result_kcalday": "ккал/день",
   "ob_result_accuracy": "Оценка с помощью ИИ",
   "ob_result_next_title": "Следующий шаг",
   "ob_result_next_text": "Войдите, чтобы сохранить план и начать отслеживать питание.",
-
   "ob_err_height": "Введите корректный рост (100–250 см)",
   "ob_err_weight": "Введите корректный вес (30–300 кг)",
   "ob_err_target_weight": "Введите целевой вес (30–300 кг)",
   "ob_err_training": "Выберите хотя бы один вариант",
-
   "ob_footer_saving": "Сохранение...",
   "ob_footer_calc": "Рассчитать план",
   "ob_footer_great": "Отлично!",
   "ob_footer_login": "Войти и сохранить план",
-
   "ob_continue": "Продолжить",
   "ob_getStarted": "Начать",
   "ob_already_account": "Уже есть аккаунт? Войти",
@@ -199,36 +188,33 @@
   "ob_method_kcal": "{cal} ккал",
   "@ob_method_kcal": {
     "placeholders": {
-      "cal": {"type": "String"}
+      "cal": {
+        "type": "String"
+      }
     }
   },
   "ob_method_macros": "Б{p} Ж{f} У{c}",
   "@ob_method_macros": {
     "placeholders": {
-      "p": {"type": "String"},
-      "f": {"type": "String"},
-      "c": {"type": "String"}
+      "p": {
+        "type": "String"
+      },
+      "f": {
+        "type": "String"
+      },
+      "c": {
+        "type": "String"
+      }
     }
   },
   "ob_recognizing_voice": "Распознаём голос…",
   "ob_recognizing_photo": "Анализируем фото…",
-
   "auth_title": "Войти в Kayfit",
   "auth_subtitle": "Выберите способ входа",
   "auth_google": "Войти через Google",
   "auth_apple": "Войти через Apple",
-  "auth_telegram": "Войти через Telegram",
   "auth_email": "Войти по email",
   "auth_terms": "Продолжая, вы соглашаетесь с условиями использования",
-
-  "tariffs_title": "Тарифы",
-  "tariffs_subscribe": "Оформить подписку",
-  "tariffs_current": "Текущий тариф",
-  "tariffs_free": "Бесплатно",
-  "tariffs_perMonth": "/ месяц",
-  "tariffs_cancel": "Отменить автопродление",
-  "tariffs_cancelConfirm": "Вы уверены, что хотите отменить автопродление?",
-
   "wg_title": "Рассчитаем ваш путь к цели",
   "wg_sub": "Введите данные для расчёта калорий и БЖУ",
   "wg_age": "Возраст (лет)",
@@ -251,26 +237,9 @@
   "wg_result_days": "Дней до цели:",
   "wg_result_kcal_day": "ккал/день",
   "wg_btn_start": "Начать отслеживать",
-
   "error_network": "Нет соединения с сервером",
   "error_auth": "Ошибка авторизации",
   "error_unknown": "Что-то пошло не так",
-
-  "subscription_title": "Подписка",
-  "subscription_none": "У вас нет активной подписки",
-  "subscription_view_tariffs": "Посмотреть тарифы",
-  "subscription_active": "Активная подписка",
-  "subscription_expires": "Действует до",
-  "subscription_amount": "Стоимость",
-  "subscription_auto_renew": "Автопродление",
-  "subscription_auto_renew_on": "Включено",
-  "subscription_auto_renew_off": "Отключено",
-  "subscription_cancel_auto_renew": "Отменить автопродление",
-  "subscription_cancel_auto_renew_title": "Отмена автопродления",
-  "subscription_cancel_auto_renew_confirm": "Вы уверены, что хотите отменить автопродление подписки?",
-  "subscription_cancel_auto_renew_action": "Отменить",
-  "subscription_auto_renew_cancelled": "Автопродление отменено",
-
   "wg_plan_ready": "Ваш план готов!",
   "wg_personal_calc": "Персональный расчёт на основе ваших данных",
   "wg_kcal_day": "ккал / день",
@@ -278,13 +247,17 @@
   "wg_days_to_goal": "До цели: {days} дней",
   "@wg_days_to_goal": {
     "placeholders": {
-      "days": {"type": "int"}
+      "days": {
+        "type": "int"
+      }
     }
   },
   "wg_target_weight_val": "Целевой вес: {kg} кг",
   "@wg_target_weight_val": {
     "placeholders": {
-      "kg": {"type": "String"}
+      "kg": {
+        "type": "String"
+      }
     }
   },
   "wg_weight_forecast": "Прогноз веса",
@@ -297,7 +270,6 @@
   "wg_feature_track_desc": "Следите за КБЖУ и видьте результат каждый день",
   "wg_start_diary": "Начать вести дневник",
   "wg_now": "сейчас",
-
   "auth_email_login_title": "Вход по email",
   "auth_register_title": "Регистрация",
   "auth_login_subtitle": "Войдите в свой аккаунт Kayfit",
@@ -316,25 +288,23 @@
   "auth_err_enter_email": "Введите email",
   "auth_err_invalid_email": "Некорректный email",
   "auth_err_enter_value": "Введите значение",
-
   "goals_title": "Цели КБЖУ",
   "goals_saved": "Сохранено",
   "goals_error": "Ошибка: {msg}",
   "@goals_error": {
     "placeholders": {
-      "msg": {"type": "String"}
+      "msg": {
+        "type": "String"
+      }
     }
   },
   "goals_err_enter_value": "Введите значение",
   "goals_err_enter_int": "Введите целое число",
-
   "dashboard_details": "Подробнее",
-
   "dashboard_no_goals_title": "Цели не настроены",
   "dashboard_no_goals_sub": "Пройдите «Путь к цели» чтобы получить персональный план питания",
   "dashboard_remaining_title": "Осталось на сегодня",
   "dashboard_remaining_over": "Превышение",
-
   "edit_meal_title": "Редактировать блюдо",
   "edit_meal_name_label": "Название",
   "edit_meal_name_error": "Введите название",
@@ -342,7 +312,9 @@
   "edit_meal_error": "Ошибка: {msg}",
   "@edit_meal_error": {
     "placeholders": {
-      "msg": {"type": "String"}
+      "msg": {
+        "type": "String"
+      }
     }
   },
   "edit_meal_err_enter_value": "Введите значение",
@@ -351,18 +323,16 @@
   "edit_meal_section_details": "Детали",
   "edit_meal_section_portion": "Порция",
   "edit_meal_section_nutrition": "Питательная ценность",
-
-  "addMeal_subscription_needed": "Нужна подписка",
-  "addMeal_subscription_desc": "Распознавание еды доступно на платном тарифе. Оформите подписку чтобы пользоваться ИИ-функциями.",
   "addMeal_choose_tariff": "Выбрать тариф",
   "addMeal_close": "Закрыть",
   "addMeal_kcal": "{cal} ккал",
   "@addMeal_kcal": {
     "placeholders": {
-      "cal": {"type": "String"}
+      "cal": {
+        "type": "String"
+      }
     }
   },
-  "addMeal_subscription_snack": "Для этой функции нужна подписка",
   "addMeal_weight_hint": "Вес (г)",
   "addMeal_recognizing_voice": "Распознаём голос...",
   "addMeal_recognizing_photo": "Анализируем фото...",
@@ -389,65 +359,18 @@
   "barcode_manual_title": "Введите штрихкод",
   "barcode_search_btn": "Найти",
   "barcode_not_found": "Продукт не найден",
-
   "addMeal_barcode_scanning": "Сканирование штрихкода",
   "addMeal_barcode_torch_off": "Выключить фонарик",
   "addMeal_barcode_torch_on": "Включить фонарик",
   "addMeal_barcode_detected": "Штрихкод найден",
   "addMeal_barcode_confirm": "Добавить в журнал",
-
   "settings_delete_account_title": "Удалить аккаунт?",
   "settings_delete_account_body": "Все ваши данные будут удалены без возможности восстановления. Это действие необратимо.",
   "settings_delete_account_btn": "Удалить аккаунт",
-
   "settings_ai_consent": "Обработка данных ИИ",
   "settings_privacy_policy": "Политика конфиденциальности",
   "settings_terms": "Пользовательское соглашение",
-  "settings_subscription_terms": "Условия подписки",
-  "settings_subscription_privacy": "Обработка данных подписки",
-  "settings_sub_promo": "Оформите подписку чтобы разблокировать ИИ-распознавание, голос и фото.",
-  "settings_sale_ends": "Скидка заканчивается через:",
-  "settings_sub_active_badge": "✓ Активна",
-
-  "tariffs_title_full": "Подпишись и открой\nполный доступ",
-  "tariffs_tag1": "🥕 Рекомендации по питанию",
-  "tariffs_tag2": "📋 Сканер калорий",
-  "tariffs_tag3": "📋 Расчет нормы",
-  "tariffs_tag4": "😀 Трекер эмоций",
-  "tariffs_trial": "Пробный период",
-  "tariffs_monthly": "Месяц",
-  "tariffs_yearly": "Год",
-  "tariffs_quarterly": "3 месяца",
-  "tariffs_per_3days": "/ 3 дня",
-  "tariffs_per_day": "/ день",
-  "tariffs_per_3mo": "/ 3 мес",
-  "tariffs_trial_then": "Затем 2 990 за год",
-  "tariffs_monthly_billing": "Ежемесячная оплата",
-  "tariffs_yearly_save": "2 990 ₽ / Экономия 8 890 ₽",
-  "tariffs_best_value": "Оптимальный выбор",
-  "tariffs_no_discount": "Без скидки {price}",
-  "@tariffs_no_discount": {
-    "placeholders": {
-      "price": {"type": "String"}
-    }
-  },
-  "tariffs_no_plans": "Тарифы пока не настроены",
-  "tariffs_cancel_anytime": "Подписку можно отменить в любой удобный момент в Личном кабинете",
-  "tariffs_optimal_months": "Оптимальный результат достигается через 3 месяца",
-  "tariffs_email_hint": "Email для чека",
-  "tariffs_email_error": "Введите корректный email",
-  "tariffs_pay_error": "Не удалось создать платёж. Попробуйте ещё раз.",
-  "tariffs_get_plan": "Получить мой план",
-  "tariffs_load_error": "Не удалось загрузить тарифы",
-  "tariffs_sale_ends": "СКИДКА ЗАКАНЧИВАЕТСЯ ЧЕРЕЗ",
-  "tariffs_benefit1": "🥗 Консультация с нутрициологом",
-  "tariffs_benefit2": "🎥 Видео рецепты",
-  "tariffs_benefit3": "🍽️ План питания",
-  "tariffs_benefit4": "📋 Гайд по питанию",
-  "tariffs_payment_title": "Оплата",
-
   "nav_chat": "ИИ Чат",
-  
   "chat_title": "ИИ Нутрициолог",
   "chat_input_hint": "Спросите о питании...",
   "chat_clear": "Очистить чат",
@@ -457,7 +380,6 @@
   "chat_suggestion_1": "🥗 Что съесть на обед при дефиците?",
   "chat_suggestion_2": "💪 Норма белка для похудения",
   "chat_suggestion_3": "🌙 Можно ли есть после 18:00?",
-
   "recogV2_composition": "СОСТАВ",
   "recogV2_meal_type": "ТИП ПРИЁМА ПИЩИ",
   "recogV2_saving": "Сохранение...",
@@ -491,7 +413,6 @@
   "recogV2_correct_title": "Корректировка",
   "recogV2_correct_send": "Применить",
   "recogV2_correct_loading": "Обновляем состав...",
-
   "nds_section_basic": "Основные",
   "nds_section_carbs_detail": "Углеводы детально",
   "nds_section_fats_detail": "Жиры детально",
@@ -528,10 +449,11 @@
   "nds_weight_g": "{w} г",
   "@nds_weight_g": {
     "placeholders": {
-      "w": {"type": "String"}
+      "w": {
+        "type": "String"
+      }
     }
   },
-
   "nutrient_details_title": "ПОДРОБНОСТИ",
   "nutrient_weight": "Вес",
   "nutrient_net_carbs": "Чистые углеводы",
@@ -552,56 +474,26 @@
   "nutrient_vitamin_b12": "Витамин B12",
   "nutrient_mg": "мг",
   "nutrient_mcg": "мкг",
-
   "mealGroup_itemsCount": "{count} блюд",
   "@mealGroup_itemsCount": {
     "placeholders": {
-      "count": {"type": "int"}
+      "count": {
+        "type": "int"
+      }
     }
   },
-
-  "paywall_headline": "ИИ считает калории.\nТы просто ешь.",
-  "paywall_subtitle": "Сфотографируй тарелку, скажи голосом или спроси нутрициолога — KayFit запишет всё сам.",
-  "paywall_feature_photo_title": "Фото → КБЖУ за секунды",
-  "paywall_feature_photo_sub": "ИИ определяет ингредиенты и вес порции",
-  "paywall_feature_voice_title": "Скажи вслух",
-  "paywall_feature_voice_sub": "«Съел куриный плов» → залогировано сразу",
-  "paywall_feature_chat_title": "Нутрициолог в кармане",
-  "paywall_feature_chat_sub": "Спроси о питании — ответит и запишет",
-  "paywall_plan_trial_title": "СТАРТ\n7 дней 🆓",
-  "paywall_plan_monthly_title": "Месяц",
-  "paywall_plan_quarterly_title": "3 месяца",
-  "paywall_plan_quarterly_badge": "★ ЛУЧШИЙ",
-  "paywall_plan_yearly_title": "Год",
-  "paywall_plan_yearly_badge": "🔥 −40%",
-  "paywall_cta_trial": "Начать 7 дней бесплатно",
-  "paywall_cta_buy": "Подписаться",
-  "paywall_trial_note": "Отменить до конца 7 дней — ничего не спишется",
-  "paywall_dismiss": "Нет, буду вводить руками",
-  "paywall_restore": "Восстановить",
-  "paywall_terms": "Условия",
-  "paywall_privacy": "Политика",
-  "paywall_pending_snack": "Платёж обрабатывается. Попробуйте позже.",
-  "paywall_error_snack": "Ошибка покупки. Попробуйте ещё раз.",
-  "paywall_restored_snack": "Подписка восстановлена",
-  "paywall_no_restore_snack": "Активная подписка не найдена",
-  "paywall_restore_error_snack": "Ошибка восстановления. Попробуйте ещё раз.",
   "item_enter_nutrition_manually": "Введите КБЖУ вручную",
-
   "mealType_breakfast": "Завтрак",
   "mealType_lunch": "Обед",
   "mealType_dinner": "Ужин",
   "mealType_snack": "Перекус",
   "mealType_other": "Другое",
-
   "macro_net_carbs_abbr": "Чист.У",
   "macro_sat_fat_short": "Нас.ж",
   "macro_good_fat_short": "Ненас.ж",
-
   "gi_low_badge": "Низк. ГИ",
   "gi_medium_badge": "Сред. ГИ",
   "gi_high_badge": "Выс. ГИ",
-
   "journal_day_total": "ИТОГО",
   "journal_more_nutrients": "Ещё нутриенты",
   "journal_hide_nutrients": "Скрыть",
@@ -617,7 +509,6 @@
   "edit_meal_weight_short": "Вес",
   "nds_nutrient_vit_c_short": "Вит. C",
   "nds_nutrient_vit_d_short": "Вит. D",
-
   "journal_meal_deleted": "Приём пищи удалён",
   "journal_could_not_delete": "Не удалось удалить",
   "journal_could_not_update_weight": "Не удалось обновить вес",
@@ -627,7 +518,9 @@
   "journal_copied_to": "Скопировано на {date}",
   "@journal_copied_to": {
     "placeholders": {
-      "date": {"type": "String"}
+      "date": {
+        "type": "String"
+      }
     }
   },
   "journal_open_btn": "Перейти",
@@ -637,17 +530,18 @@
   "journal_copied_n_dates": "{n} {noun} — скопировано",
   "@journal_copied_n_dates": {
     "placeholders": {
-      "n": {"type": "int"},
-      "noun": {"type": "String"}
+      "n": {
+        "type": "int"
+      },
+      "noun": {
+        "type": "String"
+      }
     }
   },
-
   "journal_disclaimer": "Расчёты КБЖУ — ориентировочные. Не заменяют консультацию врача.",
-
   "nav_add": "Добавить",
   "cal_on_track": "в норме",
   "cal_over_goal": "превышение",
   "cal_empty": "нет данных",
-
   "session_expired": "Сессия истекла. Войдите снова."
 }

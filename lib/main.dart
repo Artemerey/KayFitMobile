@@ -4,7 +4,6 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/date_symbol_data_local.dart';
-import 'package:purchases_flutter/purchases_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app.dart';
@@ -25,12 +24,6 @@ void main() async {
 
   // ── 1. Firebase first (Analytics + FCM both depend on it) ─────────────────
   await Firebase.initializeApp();
-
-  // ── 1b. RevenueCat — configure before any purchase calls ─────────────────
-  const rcApiKey = String.fromEnvironment('RC_IOS_KEY');
-  if (rcApiKey.isNotEmpty) {
-    await Purchases.configure(PurchasesConfiguration(rcApiKey));
-  }
 
   // ── 2. Parallel: Dio setup + prefs + Analytics + FCM setup ───────────────
   final results = await Future.wait([

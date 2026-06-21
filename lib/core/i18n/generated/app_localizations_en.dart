@@ -158,9 +158,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settings_language => 'Language';
 
   @override
-  String get settings_subscription => 'Subscription';
-
-  @override
   String get settings_logout => 'Log out';
 
   @override
@@ -514,35 +511,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get auth_apple => 'Sign in with Apple';
 
   @override
-  String get auth_telegram => 'Sign in with Telegram';
-
-  @override
   String get auth_email => 'Sign in with Email';
 
   @override
   String get auth_terms => 'By continuing you agree to the terms of service';
-
-  @override
-  String get tariffs_title => 'Plans';
-
-  @override
-  String get tariffs_subscribe => 'Subscribe';
-
-  @override
-  String get tariffs_current => 'Current plan';
-
-  @override
-  String get tariffs_free => 'Free';
-
-  @override
-  String get tariffs_perMonth => '/ month';
-
-  @override
-  String get tariffs_cancel => 'Cancel auto-renewal';
-
-  @override
-  String get tariffs_cancelConfirm =>
-      'Are you sure you want to cancel auto-renewal?';
 
   @override
   String get wg_title => 'Calculate your path to goal';
@@ -618,49 +590,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get error_unknown => 'Something went wrong';
-
-  @override
-  String get subscription_title => 'Subscription';
-
-  @override
-  String get subscription_none => 'You have no active subscription';
-
-  @override
-  String get subscription_view_tariffs => 'View plans';
-
-  @override
-  String get subscription_active => 'Active subscription';
-
-  @override
-  String get subscription_expires => 'Valid until';
-
-  @override
-  String get subscription_amount => 'Amount';
-
-  @override
-  String get subscription_auto_renew => 'Auto-renewal';
-
-  @override
-  String get subscription_auto_renew_on => 'Enabled';
-
-  @override
-  String get subscription_auto_renew_off => 'Disabled';
-
-  @override
-  String get subscription_cancel_auto_renew => 'Cancel auto-renewal';
-
-  @override
-  String get subscription_cancel_auto_renew_title => 'Cancel auto-renewal';
-
-  @override
-  String get subscription_cancel_auto_renew_confirm =>
-      'Are you sure you want to cancel subscription auto-renewal?';
-
-  @override
-  String get subscription_cancel_auto_renew_action => 'Cancel';
-
-  @override
-  String get subscription_auto_renew_cancelled => 'Auto-renewal cancelled';
 
   @override
   String get wg_plan_ready => 'Your plan is ready!';
@@ -840,13 +769,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get edit_meal_section_nutrition => 'Nutrition';
 
   @override
-  String get addMeal_subscription_needed => 'Subscription required';
-
-  @override
-  String get addMeal_subscription_desc =>
-      'Food recognition is available on a paid plan. Subscribe to use AI features.';
-
-  @override
   String get addMeal_choose_tariff => 'Choose a plan';
 
   @override
@@ -856,10 +778,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String addMeal_kcal(String cal) {
     return '$cal kcal';
   }
-
-  @override
-  String get addMeal_subscription_snack =>
-      'A subscription is required for this feature';
 
   @override
   String get addMeal_weight_hint => 'Weight (g)';
@@ -973,119 +891,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settings_terms => 'Terms of Service';
-
-  @override
-  String get settings_subscription_terms => 'Subscription Terms';
-
-  @override
-  String get settings_subscription_privacy => 'Subscription Data Policy';
-
-  @override
-  String get settings_sub_promo =>
-      'Subscribe to unlock AI recognition, voice and photo.';
-
-  @override
-  String get settings_sale_ends => 'Sale ends in:';
-
-  @override
-  String get settings_sub_active_badge => '✓ Active';
-
-  @override
-  String get tariffs_title_full => 'Subscribe and unlock\nfull access';
-
-  @override
-  String get tariffs_tag1 => '🥕 Nutrition recommendations';
-
-  @override
-  String get tariffs_tag2 => '📋 Calorie scanner';
-
-  @override
-  String get tariffs_tag3 => '📋 Macro calculation';
-
-  @override
-  String get tariffs_tag4 => '😀 Emotion tracker';
-
-  @override
-  String get tariffs_trial => 'Free trial';
-
-  @override
-  String get tariffs_monthly => 'Monthly';
-
-  @override
-  String get tariffs_yearly => 'Yearly';
-
-  @override
-  String get tariffs_quarterly => '3 months';
-
-  @override
-  String get tariffs_per_3days => '/ 3 days';
-
-  @override
-  String get tariffs_per_day => '/ day';
-
-  @override
-  String get tariffs_per_3mo => '/ 3 mo';
-
-  @override
-  String get tariffs_trial_then => 'Then 2,990 ₽/year';
-
-  @override
-  String get tariffs_monthly_billing => 'Monthly billing';
-
-  @override
-  String get tariffs_yearly_save => '2,990 ₽ / Save 8,890 ₽';
-
-  @override
-  String get tariffs_best_value => 'Best value';
-
-  @override
-  String tariffs_no_discount(String price) {
-    return 'Without discount $price';
-  }
-
-  @override
-  String get tariffs_no_plans => 'No plans available';
-
-  @override
-  String get tariffs_cancel_anytime =>
-      'Cancel anytime in your account settings';
-
-  @override
-  String get tariffs_optimal_months =>
-      'Optimal results are achieved after 3 months';
-
-  @override
-  String get tariffs_email_hint => 'Email for receipt';
-
-  @override
-  String get tariffs_email_error => 'Enter a valid email';
-
-  @override
-  String get tariffs_pay_error => 'Payment failed. Please try again.';
-
-  @override
-  String get tariffs_get_plan => 'Get my plan';
-
-  @override
-  String get tariffs_load_error => 'Failed to load tariffs';
-
-  @override
-  String get tariffs_sale_ends => 'SALE ENDS IN';
-
-  @override
-  String get tariffs_benefit1 => '🥗 Nutritionist consultation';
-
-  @override
-  String get tariffs_benefit2 => '🎥 Video recipes';
-
-  @override
-  String get tariffs_benefit3 => '🍽️ Meal plan';
-
-  @override
-  String get tariffs_benefit4 => '📋 Nutrition guide';
-
-  @override
-  String get tariffs_payment_title => 'Payment';
 
   @override
   String get nav_chat => 'AI Chat';
@@ -1386,89 +1191,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String mealGroup_itemsCount(int count) {
     return '$count items';
   }
-
-  @override
-  String get paywall_headline => 'AI counts calories.\nYou just eat.';
-
-  @override
-  String get paywall_subtitle =>
-      'Take a photo, say it aloud, or ask the nutritionist — KayFit logs it all.';
-
-  @override
-  String get paywall_feature_photo_title => 'Photo → macros in seconds';
-
-  @override
-  String get paywall_feature_photo_sub =>
-      'AI identifies ingredients and portion weight';
-
-  @override
-  String get paywall_feature_voice_title => 'Just say it';
-
-  @override
-  String get paywall_feature_voice_sub =>
-      '\"Had chicken pilaf\" → logged instantly';
-
-  @override
-  String get paywall_feature_chat_title => 'Nutritionist in your pocket';
-
-  @override
-  String get paywall_feature_chat_sub =>
-      'Ask about nutrition — it answers and logs';
-
-  @override
-  String get paywall_plan_trial_title => 'START\n7 days 🆓';
-
-  @override
-  String get paywall_plan_monthly_title => 'Monthly';
-
-  @override
-  String get paywall_plan_quarterly_title => '3 months';
-
-  @override
-  String get paywall_plan_quarterly_badge => '★ BEST';
-
-  @override
-  String get paywall_plan_yearly_title => 'Yearly';
-
-  @override
-  String get paywall_plan_yearly_badge => '🔥 −40%';
-
-  @override
-  String get paywall_cta_trial => 'Start 7 days free';
-
-  @override
-  String get paywall_cta_buy => 'Subscribe';
-
-  @override
-  String get paywall_trial_note =>
-      'Cancel before 7 days — you won\'t be charged';
-
-  @override
-  String get paywall_dismiss => 'No, I\'ll enter manually';
-
-  @override
-  String get paywall_restore => 'Restore';
-
-  @override
-  String get paywall_terms => 'Terms';
-
-  @override
-  String get paywall_privacy => 'Privacy';
-
-  @override
-  String get paywall_pending_snack => 'Payment is processing. Try again later.';
-
-  @override
-  String get paywall_error_snack => 'Purchase failed. Please try again.';
-
-  @override
-  String get paywall_restored_snack => 'Subscription restored';
-
-  @override
-  String get paywall_no_restore_snack => 'No active subscription found';
-
-  @override
-  String get paywall_restore_error_snack => 'Restore failed. Please try again.';
 
   @override
   String get item_enter_nutrition_manually => 'Enter nutrition manually';

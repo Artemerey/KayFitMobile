@@ -3,14 +3,12 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
-import 'package:purchases_flutter/purchases_flutter.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../shared/models/user_profile.dart';
 import '../api/api_client.dart';
 import '../notifications/notification_service.dart';
 import '../ai_consent/ai_consent_provider.dart';
-import '../subscription/subscription_provider.dart';
 import 'onboarding_sync.dart';
 
 part 'auth_provider.g.dart';
@@ -110,30 +108,6 @@ class AuthNotifier extends _$AuthNotifier {
     );
     NotificationService.registerTokenAfterLogin();
     ref.read(aiConsentProvider.notifier).load();
-    _syncRevenueCat();
-  }
-
-  void _syncRevenueCat() {
-    final user = state.valueOrNull;
-    if (user == null) return;
-    // Guard against builds where `RC_IOS_KEY`/`RC_ANDROID_KEY` were not
-    // provided via --dart-define. Without those, `Purchases.configure` is
-    // never called in main(), and calling `logIn` then hits a Swift
-    // assertionFailure in PurchasesHybridCommon which crashes the whole
-    // app (EXC_BREAKPOINT). Skip silently in dev / Profile builds.
-    () async {
-      try {
-        final configured = await Purchases.isConfigured;
-        if (!configured) {
-          debugPrint('[rc] skip logIn — Purchases.configure not called');
-          return;
-        }
-        await Purchases.logIn(user.id.toString());
-        ref.read(subscriptionNotifierProvider.notifier).refresh();
-      } on Exception catch (e) {
-        debugPrint('[rc] logIn error: $e');
-      }
-    }();
   }
 
   static Future<void> _saveCache(UserProfile user) async {

@@ -1,7 +1,7 @@
 name: kayfit
 description: "Kayfit — calorie and nutrition tracker"
 publish_to: 'none'
-version: 1.2.2+7
+version: 1.2.2+8
 
 environment:
   sdk: ^3.11.1
@@ -68,9 +68,6 @@ dependencies:
 
   # App Review
   in_app_review: ^2.0.9
-
-  # In-App Purchases (RevenueCat)
-  purchases_flutter: ^8.0.0
 
   # Native launch screen generator. Kept as a runtime dependency (not
   # dev_dependency) so its Android plugin module is included in release

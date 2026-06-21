@@ -497,7 +497,8 @@ class SourceBadge extends StatelessWidget {
           label: 'Nutrition DB',
           color: const Color(0xFF15803D),
           bg: const Color(0xFFDCFCE7),
-          url: sourceUrl,
+          // No FatSecret license — never expose a clickable brand link.
+          url: null,
         ),
       'claude' => _SourceConfig(
           icon: Icons.auto_awesome_rounded,
