@@ -59,6 +59,16 @@ import '../models/chat_message.dart';
 
 enum _VoiceState { idle, recording, transcribing }
 
+// Voice input tuning. One native session is kept as long as possible; true
+// "no time limit" comes from auto-restarting, not from these durations.
+const _kVoiceSessionMax = Duration(seconds: 60);
+const _kVoicePauseFor = Duration(seconds: 60);
+// Small gap before restarting so the native engine fully releases first.
+const _kVoiceRestartDelay = Duration(milliseconds: 150);
+// Soft cap on consecutive empty sessions (silence / instant errors) to keep
+// the restart loop from spinning forever. ~6 minutes of pure silence.
+const _kMaxEmptyVoiceSessions = 6;
+
 // Role string for the in-chat photo-analyzing bubble. Used in multiple places;
 // keeping it as a constant avoids silent typo bugs.
 const _kPhotoAnalyzingRole = 'photo_analyzing';
@@ -142,6 +152,33 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
   _VoiceState _voiceState = _VoiceState.idle;
   bool _fromVoice = false;
 
+  // --- Continuous voice input (restart + accumulate) ---------------------
+  // The native SFSpeechRecognizer (iOS) ends a session on silence and has its
+  // own ~60s ceiling. To let the user dictate freely with pauses and stop only
+  // by tapping, we treat one logical recording as a chain of native sessions
+  // that we restart ourselves, accumulating finalized text in a buffer.
+  //
+  // True only when the user (tap / dispose / background) intentionally ended
+  // the recording. A native session ending on silence does NOT set this, so it
+  // triggers a restart instead of going idle.
+  bool _userStoppedVoice = false;
+  // Text finalized from previous sessions in the current recording. New
+  // partial results are appended to this rather than overwriting the field.
+  String _committedTranscript = '';
+  // Words recognized in the currently running native session (not yet
+  // committed). Reset to '' each time a session ends.
+  String _currentWords = '';
+  // Guards against handling the same session end twice (status `done` and
+  // `notListening` both fire) and against acting on stray callbacks.
+  bool _voiceSessionActive = false;
+  // True while a restart is already queued, to avoid double restarts.
+  bool _voiceRestartScheduled = false;
+  // Consecutive native sessions that produced no speech. Bounds the restart
+  // loop so a broken mic / endless silence eventually soft-stops.
+  int _emptyVoiceSessions = 0;
+  // Locale captured at recording start, reused for every restarted session.
+  String _voiceLocaleId = 'en-US';
+
   // Thinking step labels — locale-aware, mirrors the JSX prototype sequence.
   List<String> get _kThinkingSteps {
     final isRu = Localizations.localeOf(context).languageCode == 'ru';
@@ -203,10 +240,12 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
       // If an AI chat call is still in flight, restore the thinking bubble
       // so the user knows the response is coming.
       if (ref.read(chatProcessingProvider) && _thinking == null) {
-        setState(() => _thinking = _ThinkingState(
-          steps: [_kThinkingSteps[0]],
-          done: false,
-        ));
+        setState(
+          () => _thinking = _ThinkingState(
+            steps: [_kThinkingSteps[0]],
+            done: false,
+          ),
+        );
       }
     });
   }
@@ -235,6 +274,9 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     _scrollController.dispose();
     _textController.dispose();
     // Stop any in-progress speech session — keeps the mic from running silently.
+    // Mark intent so the restart loop doesn't fire after the widget is gone.
+    _userStoppedVoice = true;
+    _voiceSessionActive = false;
     if (_voiceState == _VoiceState.recording) {
       _speech.cancel().ignore();
     }
@@ -248,6 +290,11 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive) {
       if (_voiceState == _VoiceState.recording) {
+        // Mark intent so the auto-restart loop doesn't re-arm the mic while the
+        // app is backgrounded.
+        _userStoppedVoice = true;
+        _voiceRestartScheduled = false;
+        _voiceSessionActive = false;
         _speech.stop().then((_) {
           if (mounted) setState(() => _voiceState = _VoiceState.idle);
         }).ignore();
@@ -553,11 +600,7 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     try {
       final resp = await apiDio.post(
         '/api/v2/parse_meal_suggestions',
-        data: {
-          'text': text,
-          'language': lang,
-          if (isVoice) 'is_voice': true,
-        },
+        data: {'text': text, 'language': lang, if (isVoice) 'is_voice': true},
         // Claude + FatSecret round-trip can take 40-60 s; global 30 s
         // receiveTimeout aborts too early on slow runs.
         options: Options(
@@ -1120,8 +1163,16 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
   /// never stack on top of the camera screen. Re-entrancy is guarded by
   /// [_resultSheetOpen].
   void _drainOutcomes() {
-    if (!mounted || _resultSheetOpen) return;
+    if (!mounted) return;
     final isCurrent = ModalRoute.of(context)?.isCurrent ?? false;
+    // Self-heal: if we still think a result sheet is open but the chat is the
+    // top-most route, the sheet was torn down without our .then() firing (e.g.
+    // an OS route refresh after resume). Unjam draining so future results show.
+    if (_resultSheetOpen && isCurrent) {
+      _resultSheetOpen = false;
+      ref.read(activeRecognitionResultProvider.notifier).state = null;
+    }
+    if (_resultSheetOpen) return;
     if (!isCurrent) return;
 
     final outcomes = ref.read(photoRecognitionProvider).outcomes;
@@ -1129,34 +1180,38 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     final outcome = outcomes.first;
 
     // Remove the analyzing bubble for this specific photo.
-    ref.read(chatHistoryProvider.notifier).removeWhere(
-          (m) => m.role == _kPhotoAnalyzingRole && m.content == outcome.photoPath,
+    ref
+        .read(chatHistoryProvider.notifier)
+        .removeWhere(
+          (m) =>
+              m.role == _kPhotoAnalyzingRole && m.content == outcome.photoPath,
         );
 
     switch (outcome) {
       case RecogSuccess(:final result):
         _resultSheetOpen = true;
         HapticFeedback.mediumImpact();
-        context
-            .push(
-              '/kf2/result',
-              extra: RecognitionResultArgs(
-                dishName: result.dishName,
-                items: result.items,
-                onSaved: (name) => unawaited(_onPhotoSaved(name)),
-              ),
-            )
-            .then((_) {
-              _resultSheetOpen = false;
-              if (!mounted) return;
-              ref.read(photoRecognitionProvider.notifier).consumeFirstOutcome();
-              setState(() {
-                _thinking = null;
-                _isSending = false;
-              });
-              // Show the next queued result, if any.
-              _drainOutcomes();
-            });
+        final args = RecognitionResultArgs(
+          dishName: result.dishName,
+          items: result.items,
+          onSaved: (name) => unawaited(_onPhotoSaved(name)),
+        );
+        // Stash the payload in a provider so the result route survives an
+        // OS-driven refresh (app backgrounded + resumed) instead of crashing
+        // on a null `extra`. `extra` is kept only as a fallback.
+        ref.read(activeRecognitionResultProvider.notifier).state = args;
+        context.push('/kf2/result', extra: args).then((_) {
+          ref.read(activeRecognitionResultProvider.notifier).state = null;
+          _resultSheetOpen = false;
+          if (!mounted) return;
+          ref.read(photoRecognitionProvider.notifier).consumeFirstOutcome();
+          setState(() {
+            _thinking = null;
+            _isSending = false;
+          });
+          // Show the next queued result, if any.
+          _drainOutcomes();
+        });
       case RecogNotFood():
         ref.read(photoRecognitionProvider.notifier).consumeFirstOutcome();
         _addRecogErrorMessage(
@@ -1188,15 +1243,17 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     final isRu = langCode == 'ru';
     final msg = isNotFood
         ? (isRu
-            ? 'Не похоже на еду 🍽 Попробуйте сфотографировать ближе.'
-            : "Doesn't look like food 🍽 Try taking a closer photo.")
+              ? 'Не похоже на еду 🍽 Попробуйте сфотографировать ближе.'
+              : "Doesn't look like food 🍽 Try taking a closer photo.")
         : (isRu
-            ? 'Не удалось распознать еду${details.isEmpty ? "" : ": $details"}. '
-                'Попробуйте ещё раз.'
-            : 'Could not recognize food${details.isEmpty ? "" : ": $details"}. '
-                'Please try again.');
+              ? 'Не удалось распознать еду${details.isEmpty ? "" : ": $details"}. '
+                    'Попробуйте ещё раз.'
+              : 'Could not recognize food${details.isEmpty ? "" : ": $details"}. '
+                    'Please try again.');
 
-    ref.read(chatHistoryProvider.notifier).add(
+    ref
+        .read(chatHistoryProvider.notifier)
+        .add(
           ChatMessage(
             role: 'assistant',
             content: msg,
@@ -1263,31 +1320,41 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     final available = await _speech.initialize(
       onStatus: (status) {
         debugPrint('[mic] speech status=$status');
-        if ((status == SpeechToText.doneStatus ||
-                status == SpeechToText.notListeningStatus) &&
-            mounted) {
-          setState(() => _voiceState = _VoiceState.idle);
+        // A session ending (done / notListening) is not necessarily the end of
+        // the recording — it may just be a pause or the native session limit.
+        // Let _onVoiceSessionEnded decide whether to restart or go idle.
+        if (status == SpeechToText.doneStatus ||
+            status == SpeechToText.notListeningStatus) {
+          _onVoiceSessionEnded();
         }
       },
       onError: (error) {
         debugPrint('[mic] speech error=${error.errorMsg}');
         if (!mounted) return;
-        setState(() => _voiceState = _VoiceState.idle);
-        // Silence-timeout is expected; don't show error for it.
-        if (error.errorMsg != 'error_speech_timeout' &&
-            error.errorMsg != 'error_no_match') {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text('Не удалось распознать речь. Попробуйте ещё раз.'),
-              backgroundColor: K2Colors.error,
-              behavior: SnackBarBehavior.floating,
-              duration: const Duration(seconds: 3),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-            ),
-          );
+        // Silence / no-match are the expected ways a dictation session ends on
+        // a pause. Treat them as a normal session end → restart unless the user
+        // stopped. Everything else is a real failure → stop and report.
+        if (error.errorMsg == 'error_speech_timeout' ||
+            error.errorMsg == 'error_no_match') {
+          _onVoiceSessionEnded();
+          return;
         }
+        _userStoppedVoice = true;
+        _voiceSessionActive = false;
+        setState(() => _voiceState = _VoiceState.idle);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+              'Не удалось распознать речь. Попробуйте ещё раз.',
+            ),
+            backgroundColor: K2Colors.error,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 3),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+        );
       },
     );
 
@@ -1328,34 +1395,116 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     }
 
     final lang = Localizations.localeOf(context).languageCode;
-    final localeId = lang == 'ru' ? 'ru-RU' : 'en-US';
+    _voiceLocaleId = lang == 'ru' ? 'ru-RU' : 'en-US';
+
+    // Fresh recording: clear the accumulation buffer and restart bookkeeping.
+    _userStoppedVoice = false;
+    _committedTranscript = '';
+    _currentWords = '';
+    _emptyVoiceSessions = 0;
+    _voiceRestartScheduled = false;
 
     HapticFeedback.lightImpact();
     setState(() => _voiceState = _VoiceState.recording);
 
-    await _speech.listen(
-      onResult: (result) {
-        if (!mounted) return;
-        final words = result.recognizedWords;
-        setState(() {
-          _textController.text = words;
-          _textController.selection = TextSelection.fromPosition(
-            TextPosition(offset: words.length),
-          );
-          if (result.finalResult) _fromVoice = true;
-        });
-      },
-      localeId: localeId,
-      listenOptions: SpeechListenOptions(
-        partialResults: true,
-        listenMode: ListenMode.dictation,
-        listenFor: const Duration(seconds: 30),
-        pauseFor: const Duration(seconds: 3),
-      ),
-    );
+    await _beginVoiceSession();
+  }
+
+  /// Starts one native listen session. Reused for every restart in a recording.
+  Future<void> _beginVoiceSession() async {
+    if (!mounted || _userStoppedVoice) return;
+    _voiceSessionActive = true;
+    try {
+      await _speech.listen(
+        onResult: (result) =>
+            _handleVoiceResult(result.recognizedWords, result.finalResult),
+        listenOptions: SpeechListenOptions(
+          localeId: _voiceLocaleId,
+          partialResults: true,
+          listenMode: ListenMode.dictation,
+          // The hard ceilings stay near the native limit; continuity comes from
+          // restarting, so a pause never ends the recording.
+          listenFor: _kVoiceSessionMax,
+          pauseFor: _kVoicePauseFor,
+        ),
+      );
+    } on Exception catch (e) {
+      // Couldn't open a session — treat as an empty session end so the bounded
+      // restart logic can retry or soft-stop instead of tight-looping.
+      debugPrint('[mic] listen failed: $e');
+      _onVoiceSessionEnded();
+    }
+  }
+
+  /// Appends partial results to the committed buffer instead of overwriting,
+  /// so restarted sessions never clobber earlier speech.
+  void _handleVoiceResult(String words, bool isFinal) {
+    if (!mounted) return;
+    _currentWords = words;
+    if (words.isNotEmpty) _emptyVoiceSessions = 0;
+    final combined = '$_committedTranscript $words'.trim();
+    setState(() {
+      _textController.text = combined;
+      _textController.selection = TextSelection.fromPosition(
+        TextPosition(offset: combined.length),
+      );
+      if (isFinal && combined.isNotEmpty) _fromVoice = true;
+    });
+  }
+
+  /// Called when a native session ends (status done/notListening, or a silence
+  /// error). Commits the session's words, then either restarts (pause / native
+  /// limit) or goes idle (user stop / soft cap).
+  void _onVoiceSessionEnded() {
+    // Dedupe: done + notListening (and a trailing error) can all fire once.
+    if (!_voiceSessionActive) return;
+    _voiceSessionActive = false;
+
+    if (_currentWords.isNotEmpty) {
+      _committedTranscript = '$_committedTranscript $_currentWords'.trim();
+      _currentWords = '';
+      _emptyVoiceSessions = 0;
+    } else {
+      _emptyVoiceSessions++;
+    }
+
+    // User intentionally stopped (tap / dispose / background) → idle for real.
+    if (_userStoppedVoice) {
+      if (mounted) setState(() => _voiceState = _VoiceState.idle);
+      return;
+    }
+
+    // Safety net: prolonged silence / repeated instant failures → soft stop.
+    if (_emptyVoiceSessions >= _kMaxEmptyVoiceSessions) {
+      _userStoppedVoice = true;
+      _speech.stop().ignore();
+      if (mounted) setState(() => _voiceState = _VoiceState.idle);
+      return;
+    }
+
+    // Pause or native session limit — keep recording, restart the engine.
+    _scheduleVoiceRestart();
+  }
+
+  void _scheduleVoiceRestart() {
+    if (_voiceRestartScheduled || _userStoppedVoice) return;
+    _voiceRestartScheduled = true;
+    Future<void>.delayed(_kVoiceRestartDelay, () async {
+      _voiceRestartScheduled = false;
+      if (!mounted ||
+          _userStoppedVoice ||
+          _voiceState != _VoiceState.recording) {
+        return;
+      }
+      await _beginVoiceSession();
+    });
   }
 
   Future<void> _stopListening() async {
+    // Mark intent first so any in-flight session end goes idle, not restart.
+    _userStoppedVoice = true;
+    _voiceRestartScheduled = false;
+    _voiceSessionActive = false;
     await _speech.stop();
     if (mounted) setState(() => _voiceState = _VoiceState.idle);
   }
@@ -1379,7 +1528,9 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
       final isRu = Localizations.localeOf(context).languageCode == 'ru';
       final confirmMsg = ChatMessage(
         role: 'assistant',
-        content: isRu ? 'Продукт добавлен в журнал 📖' : 'Product added to your journal 📖',
+        content: isRu
+            ? 'Продукт добавлен в журнал 📖'
+            : 'Product added to your journal 📖',
         createdAt: DateTime.now(),
       );
       ref.read(chatHistoryProvider.notifier).add(confirmMsg);
@@ -1418,12 +1569,12 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     // Auto-show result sheet when a queued photo recognition produces a new
     // outcome. _drainOutcomes shows them one at a time and only when the chat
     // is the current route.
-    ref.listen<int>(
-      photoRecognitionProvider.select((s) => s.outcomes.length),
-      (prev, next) {
-        if (next > (prev ?? 0)) _drainOutcomes();
-      },
-    );
+    ref.listen<int>(photoRecognitionProvider.select((s) => s.outcomes.length), (
+      prev,
+      next,
+    ) {
+      if (next > (prev ?? 0)) _drainOutcomes();
+    });
 
     return Scaffold(
       backgroundColor: t.bg,
