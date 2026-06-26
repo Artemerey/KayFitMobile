@@ -144,6 +144,18 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
   // one at a time.
   bool _resultSheetOpen = false;
 
+  // A recognition can finish right as the app resumes from the background,
+  // while go_router is still rebuilding routes after the OS re-delivers
+  // RouteInformation. In that brief window the chat is not yet the top-most
+  // route, so a drain triggered by the new outcome bails on the `isCurrent`
+  // guard — leaving the photo stuck on "recognizing" until the user re-enters
+  // the chat. These bound a short auto-retry that resolves that window without
+  // touching [_resultSheetOpen] (which would risk the old re-open-on-save loop).
+  bool _drainRetryScheduled = false;
+  int _drainRetries = 0;
+  static const _kMaxDrainRetries = 12;
+  static const _kDrainRetryDelay = Duration(milliseconds: 250);
+
   // Voice (on-device speech recognition)
   final _speech = SpeechToText();
   // True once the speech engine has been successfully initialized. We init
@@ -1157,7 +1169,15 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
   void _drainOutcomes() {
     if (!mounted || _resultSheetOpen) return;
     final isCurrent = ModalRoute.of(context)?.isCurrent ?? false;
-    if (!isCurrent) return;
+    if (!isCurrent) {
+      // Not the top route yet (e.g. mid OS-resume route refresh). If results are
+      // waiting, retry shortly instead of dropping them.
+      _scheduleDrainRetryIfPending();
+      return;
+    }
+    // Chat is current again — clear the resume-window retry backoff so the next
+    // photo gets a fresh budget.
+    _drainRetries = 0;
 
     final outcomes = ref.read(photoRecognitionProvider).outcomes;
     if (outcomes.isEmpty) return;
@@ -1225,6 +1245,22 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
         );
         _drainOutcomes();
     }
+  }
+
+  /// Retries [_drainOutcomes] shortly when results are queued but the chat is
+  /// not the top-most route yet (the brief OS-resume route-refresh window).
+  /// One retry is in flight at a time and the total is bounded, so this can
+  /// never spin forever; explicit triggers (resume, route pop, re-entering the
+  /// chat) still drain normally once the cap is hit.
+  void _scheduleDrainRetryIfPending() {
+    if (_drainRetryScheduled || _drainRetries >= _kMaxDrainRetries) return;
+    if (ref.read(photoRecognitionProvider).outcomes.isEmpty) return;
+    _drainRetryScheduled = true;
+    _drainRetries++;
+    Future<void>.delayed(_kDrainRetryDelay, () {
+      _drainRetryScheduled = false;
+      if (mounted) _drainOutcomes();
+    });
   }
 
   void _addRecogErrorMessage({
