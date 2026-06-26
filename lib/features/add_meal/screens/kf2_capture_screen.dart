@@ -1,3 +1,4 @@
+import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -7,15 +8,16 @@ import 'package:permission_handler/permission_handler.dart';
 
 /// KF2-RECOG: Capture screen.
 ///
-/// Presents a minimal full-screen camera UI following the KF2 design language:
-/// monochrome background, accent #007AFF, hairline borders.
+/// Presents a full-screen camera UI following the KF2 design language:
+/// monochrome chrome, accent #007AFF, hairline viewfinder corners. A **live**
+/// camera preview runs behind the corner guides so it is obvious that the
+/// camera is active and the white shutter just needs a tap.
 ///
-/// Rather than a live camera preview (which would require the `camera` package),
-/// tapping the shutter button triggers [ImagePicker] — the same approach used
-/// by the legacy [AddMealSheet]. This keeps the permission surface small and
-/// avoids adding new dependencies.
-///
-/// Returns an [XFile] via [Navigator.pop] on success, or [null] on cancel.
+/// The shutter captures the frame via [CameraController.takePicture]; the
+/// gallery button still uses [ImagePicker] (source: gallery). Either path
+/// returns an [XFile] via `context.pop(file)` (go_router) — `null` on cancel.
+/// Downstream (`photoRecognitionProvider` → `/kf2/result`) only ever receives
+/// an [XFile], so the contract is unchanged.
 class Kf2CaptureScreen extends StatefulWidget {
   const Kf2CaptureScreen({super.key});
 
@@ -23,146 +25,201 @@ class Kf2CaptureScreen extends StatefulWidget {
   State<Kf2CaptureScreen> createState() => _Kf2CaptureScreenState();
 }
 
+/// Lifecycle of the live preview, driving what the viewfinder area renders.
+enum _CamState { initializing, ready, denied, error }
+
 class _Kf2CaptureScreenState extends State<Kf2CaptureScreen>
-    with SingleTickerProviderStateMixin {
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   static const _theme = K2Theme.dark; // full-screen feels more native dark
 
-  bool _picking = false;
+  CameraController? _controller;
+  _CamState _camState = _CamState.initializing;
+
+  /// True while a capture / gallery pick / pop is in flight — locks the
+  /// controls so a double tap can't fire two captures or two pops.
+  bool _busy = false;
 
   late final AnimationController _pulseCtrl;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _pulseCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1800),
     )..repeat(reverse: true);
 
-    // No auto-trigger — show capture UI with both Shutter and Gallery buttons
-    // so the user can choose either option from the start.
+    _setupCamera();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _pulseCtrl.dispose();
+    // Release the camera so the preview doesn't leak / stay locked for other
+    // screens. `dispose` is sync-safe even if initialize never completed.
+    _controller?.dispose();
     super.dispose();
+  }
+
+  // ── Lifecycle (background / resume) ─────────────────────────────────────────
+
+  /// The platform camera is torn down whenever the app is backgrounded, so the
+  /// controller must be disposed and rebuilt — otherwise the preview comes back
+  /// frozen on resume. We act on `paused`/`resumed` only (not the transient
+  /// `inactive` that fires when the gallery picker or a permission dialog is
+  /// shown), so opening the picker doesn't kill a healthy preview.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      final controller = _controller;
+      _controller = null;
+      controller?.dispose();
+    } else if (state == AppLifecycleState.resumed) {
+      // Only re-acquire if we previously had (or were trying for) the camera.
+      // If the user had denied access, leave the denied UI in place.
+      if (_camState != _CamState.denied && _controller == null) {
+        _setupCamera();
+      }
+    }
+  }
+
+  // ── Camera setup ────────────────────────────────────────────────────────────
+
+  /// Requests camera permission (a single dialog) and brings up the controller.
+  ///
+  /// permission_handler triggers the one iOS prompt; once granted,
+  /// [CameraController.initialize] reuses that grant without a second dialog.
+  Future<void> _setupCamera() async {
+    if (mounted) setState(() => _camState = _CamState.initializing);
+
+    final status = await Permission.camera.request();
+    if (!mounted) return;
+    if (!status.isGranted) {
+      setState(() => _camState = _CamState.denied);
+      return;
+    }
+
+    try {
+      final cameras = await availableCameras();
+      if (!mounted) return;
+      if (cameras.isEmpty) {
+        setState(() => _camState = _CamState.error);
+        return;
+      }
+
+      final back = cameras.firstWhere(
+        (c) => c.lensDirection == CameraLensDirection.back,
+        orElse: () => cameras.first,
+      );
+
+      final controller = CameraController(
+        back,
+        ResolutionPreset.high,
+        enableAudio: false,
+        imageFormatGroup: ImageFormatGroup.jpeg,
+      );
+
+      await controller.initialize();
+      if (!mounted) {
+        await controller.dispose();
+        return;
+      }
+
+      setState(() {
+        _controller = controller;
+        _camState = _CamState.ready;
+      });
+    } on CameraException catch (e) {
+      debugPrint('KF2-CAPTURE: camera init failed ${e.code} ${e.description}');
+      if (mounted) setState(() => _camState = _CamState.error);
+    }
   }
 
   // ── Actions ────────────────────────────────────────────────────────────────
 
-  Future<void> _pick(ImageSource source) async {
-    if (_picking) return;
-    HapticFeedback.mediumImpact();
-
-    // On the very first capture the OS shows the permission dialog and the
-    // camera subsystem needs a beat to come up. If we open the picker before
-    // that settles, pickImage returns null and the tap appears to do nothing
-    // ("first photo doesn't work, second does"). We therefore (a) only prompt
-    // when the OS hasn't decided yet, and (b) remember a *fresh* grant so we
-    // can retry the picker instead of silently giving up.
-    var justGranted = false;
-    if (source == ImageSource.camera) {
-      final current = await Permission.camera.status;
-      if (!mounted) return;
-
-      var status = current;
-      if (!current.isGranted) {
-        status = await Permission.camera.request();
-        if (!mounted) return;
-        // Permission was not granted before this tap but is now — this is the
-        // transition that races the camera controller coming up.
-        justGranted = status.isGranted;
-      }
-
-      if (!status.isGranted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Camera access is required to take photos.'),
-            behavior: SnackBarBehavior.floating,
-            backgroundColor: K2Colors.error,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
-          ),
-        );
-        return;
-      }
+  /// Captures the current frame from the live preview.
+  ///
+  /// The shutter is only enabled once [_camState] is `ready`, so the controller
+  /// is guaranteed initialized — the historical "first photo does nothing,
+  /// second works" race (permission grant vs. picker) cannot happen here: by
+  /// the time the button is tappable the camera is already streaming.
+  Future<void> _shutter() async {
+    final controller = _controller;
+    if (_busy ||
+        _camState != _CamState.ready ||
+        controller == null ||
+        !controller.value.isInitialized ||
+        controller.value.isTakingPicture) {
+      return;
     }
 
-    setState(() => _picking = true);
+    HapticFeedback.mediumImpact();
+    setState(() => _busy = true);
 
     try {
-      // No imageQuality here — compressWithList in Kf2RecognizingScreen is the
-      // single compression step (avoids double-JPEG generation loss).
-      final file = await _pickImageWithRetry(source, retryOnNull: justGranted);
-      debugPrint('KF2-CAPTURE: pickImage returned path=${file?.path}');
+      final file = await controller.takePicture();
+      debugPrint('KF2-CAPTURE: takePicture path=${file.path}');
       if (!mounted) return;
-
-      // User cancelled the picker — stay on screen so they can still tap the
-      // gallery button (or shutter again). Previously we popped with null,
-      // which closed the whole capture screen and prevented gallery access.
-      if (file == null) {
-        setState(() => _picking = false);
-        return;
-      }
-
-      // Use `context.pop` (go_router) instead of `Navigator.of(context).pop`
-      // so the value reliably propagates back to the `Future<XFile>` returned
-      // by `context.push<XFile>('/kf2/capture')`. With go_router 14, mixing
-      // the two `pop` APIs can silently swallow the result.
+      // `context.pop` (go_router), NOT `Navigator.pop` — with go_router 14
+      // mixing the two pop APIs silently swallows the `Future<XFile>` result
+      // awaited by `context.push<XFile>('/kf2/capture')`.
       context.pop(file);
-    } on Exception catch (e) {
-      debugPrint('KF2-CAPTURE: pickImage threw $e');
+    } on CameraException catch (e) {
+      debugPrint('KF2-CAPTURE: takePicture failed ${e.code} ${e.description}');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text(
-              'Could not access the camera. Please check permissions.',
-            ),
-            behavior: SnackBarBehavior.floating,
-            backgroundColor: K2Colors.error,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
-          ),
-        );
-        setState(() => _picking = false);
+        setState(() => _busy = false);
+        _showError('Could not take the photo. Please try again.');
       }
     }
   }
 
-  /// Opens the system picker, retrying on a null result that is *not* a user
-  /// cancel.
-  ///
-  /// Right after the first permission grant the iOS camera controller may not
-  /// have finished presenting, so `pickImage` returns null even though the user
-  /// never saw (let alone cancelled) the picker. When [retryOnNull] is set we
-  /// reopen the picker a couple of times with a growing pause rather than
-  /// dropping the tap. A genuine cancel can't happen on a fresh grant (the
-  /// camera never opened), so this won't fight a deliberate dismissal.
-  Future<XFile?> _pickImageWithRetry(
-    ImageSource source, {
-    required bool retryOnNull,
-  }) async {
-    final picker = ImagePicker();
-    var file = await picker.pickImage(source: source);
-    if (file != null || !retryOnNull) return file;
+  /// Opens the system gallery picker. Independent of the live preview.
+  Future<void> _gallery() async {
+    if (_busy) return;
+    HapticFeedback.selectionClick();
+    setState(() => _busy = true);
 
-    for (final delayMs in const [150, 300]) {
-      await Future<void>.delayed(Duration(milliseconds: delayMs));
-      // Bail if the user left the capture screen during the pause — otherwise
-      // we'd pop the camera back up into a disposed widget tree.
-      if (!mounted) return null;
-      file = await picker.pickImage(source: source);
-      if (file != null) return file;
+    try {
+      // No imageQuality here — compressWithList in Kf2RecognizingScreen is the
+      // single compression step (avoids double-JPEG generation loss).
+      final file = await ImagePicker().pickImage(source: ImageSource.gallery);
+      debugPrint('KF2-CAPTURE: gallery returned path=${file?.path}');
+      if (!mounted) return;
+      if (file == null) {
+        // User backed out of the picker — stay on the capture screen.
+        setState(() => _busy = false);
+        return;
+      }
+      context.pop(file);
+    } on Exception catch (e) {
+      debugPrint('KF2-CAPTURE: gallery threw $e');
+      if (mounted) {
+        setState(() => _busy = false);
+        _showError('Could not open the photo library.');
+      }
     }
-    return file;
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: K2Colors.error,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
   }
 
   void _cancel() {
     HapticFeedback.selectionClick();
     context.pop(null);
+  }
+
+  Future<void> _openSettings() async {
+    await openAppSettings();
   }
 
   // ── Build ──────────────────────────────────────────────────────────────────
@@ -172,6 +229,7 @@ class _Kf2CaptureScreenState extends State<Kf2CaptureScreen>
     final t = _theme;
     final bottomPadding = MediaQuery.of(context).padding.bottom;
     final topPadding = MediaQuery.of(context).padding.top;
+    final ready = _camState == _CamState.ready;
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
@@ -179,12 +237,15 @@ class _Kf2CaptureScreenState extends State<Kf2CaptureScreen>
         backgroundColor: t.bg,
         body: Stack(
           children: [
-            // ── Viewfinder area ──────────────────────────────────────────────
+            // ── Viewfinder: live preview, placeholder, or denied/error ───────
             Positioned.fill(
-              child: _ViewfinderPlaceholder(
+              child: _Viewfinder(
                 theme: t,
+                camState: _camState,
+                controller: _controller,
                 pulseCtrl: _pulseCtrl,
-                picking: _picking,
+                busy: _busy,
+                onOpenSettings: _openSettings,
               ),
             ),
 
@@ -196,16 +257,17 @@ class _Kf2CaptureScreenState extends State<Kf2CaptureScreen>
               child: _TopBar(theme: t, onCancel: _cancel),
             ),
 
-            // ── Bottom controls ───────────────────────────────────────────────
+            // ── Bottom controls ──────────────────────────────────────────────
             Positioned(
               bottom: bottomPadding + 24,
               left: 0,
               right: 0,
               child: _BottomControls(
                 theme: t,
-                picking: _picking,
-                onShutter: () => _pick(ImageSource.camera),
-                onGallery: () => _pick(ImageSource.gallery),
+                busy: _busy,
+                shutterEnabled: ready && !_busy,
+                onShutter: _shutter,
+                onGallery: _gallery,
               ),
             ),
           ],
@@ -215,51 +277,79 @@ class _Kf2CaptureScreenState extends State<Kf2CaptureScreen>
   }
 }
 
-// ── Viewfinder placeholder ────────────────────────────────────────────────────
+// ── Viewfinder ────────────────────────────────────────────────────────────────
 
-class _ViewfinderPlaceholder extends StatelessWidget {
-  const _ViewfinderPlaceholder({
+/// The full-bleed viewfinder. Renders the live [CameraPreview] (cover-fitted)
+/// behind the corner guides when ready; otherwise a placeholder / denied state.
+class _Viewfinder extends StatelessWidget {
+  const _Viewfinder({
     required this.theme,
+    required this.camState,
+    required this.controller,
     required this.pulseCtrl,
-    required this.picking,
+    required this.busy,
+    required this.onOpenSettings,
   });
 
   final K2Theme theme;
+  final _CamState camState;
+  final CameraController? controller;
   final AnimationController pulseCtrl;
-  final bool picking;
+  final bool busy;
+  final Future<void> Function() onOpenSettings;
 
   @override
   Widget build(BuildContext context) {
     final t = theme;
+    final size = MediaQuery.of(context).size;
+
     return Container(
       color: t.bg,
       child: Stack(
         alignment: Alignment.center,
         children: [
-          // Corner frame guides — top-left
+          // Live preview as the background layer.
+          if (camState == _CamState.ready && controller != null)
+            Positioned.fill(child: _CoverPreview(controller: controller!)),
+
+          // Corner frame guides — always visible to anchor the viewfinder.
           Positioned(
-            top: MediaQuery.of(context).size.height * 0.18,
+            top: size.height * 0.18,
             left: 32,
             child: _CornerGuide(theme: t, corner: _Corner.topLeft),
           ),
           Positioned(
-            top: MediaQuery.of(context).size.height * 0.18,
+            top: size.height * 0.18,
             right: 32,
             child: _CornerGuide(theme: t, corner: _Corner.topRight),
           ),
           Positioned(
-            bottom: MediaQuery.of(context).size.height * 0.25,
+            bottom: size.height * 0.25,
             left: 32,
             child: _CornerGuide(theme: t, corner: _Corner.bottomLeft),
           ),
           Positioned(
-            bottom: MediaQuery.of(context).size.height * 0.25,
+            bottom: size.height * 0.25,
             right: 32,
             child: _CornerGuide(theme: t, corner: _Corner.bottomRight),
           ),
 
-          // Center camera icon / loading
-          if (picking)
+          // State-specific center content.
+          switch (camState) {
+            _CamState.ready => const SizedBox.shrink(),
+            _CamState.initializing => _CenterPulse(
+              theme: t,
+              pulseCtrl: pulseCtrl,
+            ),
+            _CamState.denied => _DeniedNotice(
+              theme: t,
+              onOpenSettings: onOpenSettings,
+            ),
+            _CamState.error => _ErrorNotice(theme: t),
+          },
+
+          // Capture-in-flight spinner (over the live preview).
+          if (busy && camState == _CamState.ready)
             const SizedBox(
               width: 32,
               height: 32,
@@ -267,53 +357,208 @@ class _ViewfinderPlaceholder extends StatelessWidget {
                 strokeWidth: 2,
                 color: K2Colors.accent,
               ),
-            )
-          else
-            AnimatedBuilder(
-              animation: pulseCtrl,
-              builder: (context, child) {
-                final alpha = 0.25 + 0.20 * pulseCtrl.value;
-                return Icon(
-                  Icons.camera_alt_outlined,
-                  size: 56,
-                  color: t.fgMute.withValues(alpha: alpha),
-                );
-              },
             ),
 
-          // Hint text
-          Positioned(
-            bottom: MediaQuery.of(context).size.height * 0.25 + 48,
-            left: 0,
-            right: 0,
-            child: AnimatedOpacity(
-              opacity: picking ? 0.0 : 1.0,
-              duration: const Duration(milliseconds: 200),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'aim at your plate',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontFamily: K2Fonts.sans,
-                      fontSize: 15,
-                      color: t.fgDim,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'TAP TO CAPTURE',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontFamily: K2Fonts.mono,
-                      fontSize: 11,
-                      letterSpacing: 1.0,
-                      color: t.fgMute,
-                    ),
-                  ),
-                ],
+          // Hint text — only meaningful while we have a live preview.
+          if (camState == _CamState.ready)
+            Positioned(
+              bottom: size.height * 0.25 + 48,
+              left: 0,
+              right: 0,
+              child: AnimatedOpacity(
+                opacity: busy ? 0.0 : 1.0,
+                duration: const Duration(milliseconds: 200),
+                child: _HintText(theme: t),
               ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Cover-fits the camera preview to fill the screen in portrait. The platform
+/// reports `previewSize` in landscape coordinates, so width/height are swapped.
+class _CoverPreview extends StatelessWidget {
+  const _CoverPreview({required this.controller});
+
+  final CameraController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final preview = controller.value.previewSize;
+    if (preview == null) {
+      return CameraPreview(controller);
+    }
+    return ClipRect(
+      child: FittedBox(
+        fit: BoxFit.cover,
+        child: SizedBox(
+          width: preview.height,
+          height: preview.width,
+          child: CameraPreview(controller),
+        ),
+      ),
+    );
+  }
+}
+
+/// Pulsing camera glyph shown while the controller is coming up.
+class _CenterPulse extends StatelessWidget {
+  const _CenterPulse({required this.theme, required this.pulseCtrl});
+
+  final K2Theme theme;
+  final AnimationController pulseCtrl;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: pulseCtrl,
+      builder: (context, child) {
+        final alpha = 0.25 + 0.20 * pulseCtrl.value;
+        return Icon(
+          Icons.camera_alt_outlined,
+          size: 56,
+          color: theme.fgMute.withValues(alpha: alpha),
+        );
+      },
+    );
+  }
+}
+
+class _HintText extends StatelessWidget {
+  const _HintText({required this.theme});
+
+  final K2Theme theme;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = theme;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          'aim at your plate',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontFamily: K2Fonts.sans,
+            fontSize: 15,
+            color: t.fgDim,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'TAP TO CAPTURE',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontFamily: K2Fonts.mono,
+            fontSize: 11,
+            letterSpacing: 1.0,
+            color: t.fgMute,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Shown when camera permission is denied. Gallery stays available in the
+/// bottom bar, so this is informational + a shortcut into Settings.
+class _DeniedNotice extends StatelessWidget {
+  const _DeniedNotice({required this.theme, required this.onOpenSettings});
+
+  final K2Theme theme;
+  final Future<void> Function() onOpenSettings;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = theme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 40),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.no_photography_outlined, size: 48, color: t.fgMute),
+          const SizedBox(height: 16),
+          Text(
+            'Camera access is off',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontFamily: K2Fonts.sans,
+              fontSize: 17,
+              fontWeight: FontWeight.w600,
+              color: t.fg,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Enable the camera to take a photo, or pick one from your gallery '
+            'below.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontFamily: K2Fonts.sans,
+              fontSize: 14,
+              height: 1.4,
+              color: t.fgDim,
+            ),
+          ),
+          const SizedBox(height: 20),
+          TextButton(
+            onPressed: onOpenSettings,
+            style: TextButton.styleFrom(
+              foregroundColor: K2Colors.accent,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            ),
+            child: const Text(
+              'Open Settings',
+              style: TextStyle(
+                fontFamily: K2Fonts.sans,
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Shown when the camera hardware can't be brought up at all. Gallery remains.
+class _ErrorNotice extends StatelessWidget {
+  const _ErrorNotice({required this.theme});
+
+  final K2Theme theme;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = theme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 40),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.error_outline, size: 48, color: t.fgMute),
+          const SizedBox(height: 16),
+          Text(
+            'Camera unavailable',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontFamily: K2Fonts.sans,
+              fontSize: 17,
+              fontWeight: FontWeight.w600,
+              color: t.fg,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Pick a photo from your gallery below instead.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontFamily: K2Fonts.sans,
+              fontSize: 14,
+              height: 1.4,
+              color: t.fgDim,
             ),
           ),
         ],
@@ -434,13 +679,15 @@ class _TopBar extends StatelessWidget {
 class _BottomControls extends StatelessWidget {
   const _BottomControls({
     required this.theme,
-    required this.picking,
+    required this.busy,
+    required this.shutterEnabled,
     required this.onShutter,
     required this.onGallery,
   });
 
   final K2Theme theme;
-  final bool picking;
+  final bool busy;
+  final bool shutterEnabled;
   final VoidCallback onShutter;
   final VoidCallback onGallery;
 
@@ -456,7 +703,7 @@ class _BottomControls extends StatelessWidget {
           label: 'Choose from gallery',
           button: true,
           child: GestureDetector(
-            onTap: picking ? null : onGallery,
+            onTap: busy ? null : onGallery,
             child: Container(
               width: 44,
               height: 44,
@@ -468,7 +715,7 @@ class _BottomControls extends StatelessWidget {
               child: Icon(
                 Icons.photo_library_outlined,
                 size: 20,
-                color: picking ? t.fgMute : t.fgDim,
+                color: busy ? t.fgMute : t.fgDim,
               ),
             ),
           ),
@@ -479,9 +726,9 @@ class _BottomControls extends StatelessWidget {
           label: 'Take photo',
           button: true,
           child: GestureDetector(
-            onTap: picking ? null : onShutter,
+            onTap: shutterEnabled ? onShutter : null,
             child: AnimatedOpacity(
-              opacity: picking ? 0.4 : 1.0,
+              opacity: shutterEnabled ? 1.0 : 0.4,
               duration: const Duration(milliseconds: 150),
               child: _ShutterButton(theme: t),
             ),
