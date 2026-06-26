@@ -1067,12 +1067,20 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     _scrollToBottom();
   }
 
+  /// Snaps the chat to the newest message.
+  ///
+  /// The list is `reverse: true`, so the visual bottom is offset 0
+  /// ([ScrollPosition.minScrollExtent]) — an exact target that needs no
+  /// `maxScrollExtent` estimation. A single post-frame `animateTo(0)` reliably
+  /// lands on the latest message even while bubbles are still laying out.
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
+      if (!mounted || !_scrollController.hasClients) return;
+      final min = _scrollController.position.minScrollExtent;
+      if ((_scrollController.offset - min).abs() > 2.0) {
         _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 350),
+          min,
+          duration: const Duration(milliseconds: 300),
           curve: Curves.easeOutCubic,
         );
       }
@@ -1696,27 +1704,37 @@ class _MessageList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final itemCount = messages.length + (thinking != null ? 1 : 0);
+    final hasThinking = thinking != null;
+    final itemCount = messages.length + (hasThinking ? 1 : 0);
 
+    // reverse:true puts the newest content at the bottom where index 0 lives,
+    // so the visual bottom is offset 0 (minScrollExtent) — exact, with no
+    // maxScrollExtent estimation. The chat therefore opens on the latest
+    // message, and freshly-added bubbles (incl. the photo/analyzing bubble)
+    // appear at the bottom without any scroll math. Items are addressed back to
+    // front: index 0 is the thinking bubble (if any), then the last message,
+    // and so on toward the oldest.
     return ListView.builder(
       controller: scrollController,
+      reverse: true,
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       itemCount: itemCount,
       itemBuilder: (context, index) {
-        if (index < messages.length) {
-          final msg = messages[index];
-          if (msg.role == _kPhotoAnalyzingRole) {
-            return _PhotoAnalyzingBubble(photoPath: msg.content, theme: theme);
-          }
-          return _MessageBubble(
-            message: msg,
-            theme: theme,
-            isNewest: index == messages.length - 1 && thinking == null,
-          );
+        if (hasThinking && index == 0) {
+          return _ThinkingBubble(state: thinking!, theme: theme);
         }
-        // Thinking bubble appended after all messages.
-        return _ThinkingBubble(state: thinking!, theme: theme);
+        final msgIndex =
+            messages.length - 1 - (hasThinking ? index - 1 : index);
+        final msg = messages[msgIndex];
+        if (msg.role == _kPhotoAnalyzingRole) {
+          return _PhotoAnalyzingBubble(photoPath: msg.content, theme: theme);
+        }
+        return _MessageBubble(
+          message: msg,
+          theme: theme,
+          isNewest: msgIndex == messages.length - 1 && !hasThinking,
+        );
       },
     );
   }
