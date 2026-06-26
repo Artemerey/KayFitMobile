@@ -215,8 +215,10 @@ class PhotoRecognitionNotifier extends Notifier<PhotoRecognitionState> {
         langCode: item.lang,
         result: result,
       );
-      final kcal =
-          result.items.fold<double>(0, (s, i) => s + i.nutrientsTotal.calories);
+      final kcal = result.items.fold<double>(
+        0,
+        (s, i) => s + i.nutrientsTotal.calories,
+      );
       await NotificationService.showMealRecognized(
         dishName: result.dishName,
         kcal: kcal,
@@ -252,13 +254,17 @@ class PhotoRecognitionNotifier extends Notifier<PhotoRecognitionState> {
 
   Future<RecognitionResult> _doRecognize(XFile photo, String lang) async {
     // The captured temp file can still be flushing to disk on the first read
-    // right after capture — a first read may come back empty. Retry once after
-    // a short beat before giving up, so the first photo isn't silently dropped.
+    // right after capture — a first read may come back empty. Retry a few times
+    // with a growing pause before giving up, so the first photo isn't silently
+    // dropped on slower devices where one short beat isn't enough.
     var originalBytes = await photo.readAsBytes();
     if (originalBytes.isEmpty) {
-      debugPrint('RECOG: first read empty, retrying after 300ms');
-      await Future<void>.delayed(const Duration(milliseconds: 300));
-      originalBytes = await photo.readAsBytes();
+      for (final delayMs in const [200, 350, 500]) {
+        debugPrint('RECOG: read empty, retrying after ${delayMs}ms');
+        await Future<void>.delayed(Duration(milliseconds: delayMs));
+        originalBytes = await photo.readAsBytes();
+        if (originalBytes.isNotEmpty) break;
+      }
     }
     if (originalBytes.isEmpty) {
       throw Exception('empty image bytes');
@@ -309,12 +315,10 @@ class PhotoRecognitionNotifier extends Notifier<PhotoRecognitionState> {
         .map((e) => ingredientV2FromJson(e as Map<String, dynamic>))
         .toList();
 
-    final dishName = resp.data['dish_name'] as String? ??
+    final dishName =
+        resp.data['dish_name'] as String? ??
         rawItems
-            .map(
-              (e) =>
-                  (e as Map<String, dynamic>)['name'] as String? ?? '',
-            )
+            .map((e) => (e as Map<String, dynamic>)['name'] as String? ?? '')
             .where((n) => n.isNotEmpty)
             .join(', ');
 
@@ -330,5 +334,5 @@ class _NotFoodException implements Exception {
 
 final photoRecognitionProvider =
     NotifierProvider<PhotoRecognitionNotifier, PhotoRecognitionState>(
-  PhotoRecognitionNotifier.new,
-);
+      PhotoRecognitionNotifier.new,
+    );

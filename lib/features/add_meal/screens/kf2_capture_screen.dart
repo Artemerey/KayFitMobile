@@ -55,31 +55,39 @@ class _Kf2CaptureScreenState extends State<Kf2CaptureScreen>
     if (_picking) return;
     HapticFeedback.mediumImpact();
 
-    // Request camera permission before opening the picker. On first launch iOS
-    // shows the permission dialog concurrently with UIImagePickerController,
-    // which causes pickImage to return null. Requesting upfront ensures the
-    // dialog is resolved before the picker opens.
+    // On the very first capture the OS shows the permission dialog and the
+    // camera subsystem needs a beat to come up. If we open the picker before
+    // that settles, pickImage returns null and the tap appears to do nothing
+    // ("first photo doesn't work, second does"). We therefore (a) only prompt
+    // when the OS hasn't decided yet, and (b) remember a *fresh* grant so we
+    // can retry the picker instead of silently giving up.
+    var justGranted = false;
     if (source == ImageSource.camera) {
-      final status = await Permission.camera.request();
+      final current = await Permission.camera.status;
       if (!mounted) return;
+
+      var status = current;
+      if (!current.isGranted) {
+        status = await Permission.camera.request();
+        if (!mounted) return;
+        // Permission was not granted before this tap but is now — this is the
+        // transition that races the camera controller coming up.
+        justGranted = status.isGranted;
+      }
+
       if (!status.isGranted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: const Text('Camera access is required to take photos.'),
             behavior: SnackBarBehavior.floating,
             backgroundColor: K2Colors.error,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
           ),
         );
         return;
       }
-
-      // Let the permission grant fully settle before presenting the picker.
-      // On the very first capture the camera controller can otherwise fail to
-      // present and pickImage returns null, forcing the user to tap a second
-      // time ("first photo doesn't recognize, second works").
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-      if (!mounted) return;
     }
 
     setState(() => _picking = true);
@@ -87,7 +95,7 @@ class _Kf2CaptureScreenState extends State<Kf2CaptureScreen>
     try {
       // No imageQuality here — compressWithList in Kf2RecognizingScreen is the
       // single compression step (avoids double-JPEG generation loss).
-      final file = await ImagePicker().pickImage(source: source);
+      final file = await _pickImageWithRetry(source, retryOnNull: justGranted);
       debugPrint('KF2-CAPTURE: pickImage returned path=${file?.path}');
       if (!mounted) return;
 
@@ -109,15 +117,47 @@ class _Kf2CaptureScreenState extends State<Kf2CaptureScreen>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('Could not access the camera. Please check permissions.'),
+            content: const Text(
+              'Could not access the camera. Please check permissions.',
+            ),
             behavior: SnackBarBehavior.floating,
             backgroundColor: K2Colors.error,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
           ),
         );
         setState(() => _picking = false);
       }
     }
+  }
+
+  /// Opens the system picker, retrying on a null result that is *not* a user
+  /// cancel.
+  ///
+  /// Right after the first permission grant the iOS camera controller may not
+  /// have finished presenting, so `pickImage` returns null even though the user
+  /// never saw (let alone cancelled) the picker. When [retryOnNull] is set we
+  /// reopen the picker a couple of times with a growing pause rather than
+  /// dropping the tap. A genuine cancel can't happen on a fresh grant (the
+  /// camera never opened), so this won't fight a deliberate dismissal.
+  Future<XFile?> _pickImageWithRetry(
+    ImageSource source, {
+    required bool retryOnNull,
+  }) async {
+    final picker = ImagePicker();
+    var file = await picker.pickImage(source: source);
+    if (file != null || !retryOnNull) return file;
+
+    for (final delayMs in const [150, 300]) {
+      await Future<void>.delayed(Duration(milliseconds: delayMs));
+      // Bail if the user left the capture screen during the pause — otherwise
+      // we'd pop the camera back up into a disposed widget tree.
+      if (!mounted) return null;
+      file = await picker.pickImage(source: source);
+      if (file != null) return file;
+    }
+    return file;
   }
 
   void _cancel() {
