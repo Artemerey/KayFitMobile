@@ -52,6 +52,7 @@ import '../../../shared/utils/nutrient_parser.dart';
 import '../../../shared/widgets/kayfit2_tab_bar.dart';
 import '../../../core/i18n/generated/app_localizations.dart';
 import '../models/chat_message.dart';
+import '../voice/voice_session_machine.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Voice recorder state
@@ -158,24 +159,10 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
   // by tapping, we treat one logical recording as a chain of native sessions
   // that we restart ourselves, accumulating finalized text in a buffer.
   //
-  // True only when the user (tap / dispose / background) intentionally ended
-  // the recording. A native session ending on silence does NOT set this, so it
-  // triggers a restart instead of going idle.
-  bool _userStoppedVoice = false;
-  // Text finalized from previous sessions in the current recording. New
-  // partial results are appended to this rather than overwriting the field.
-  String _committedTranscript = '';
-  // Words recognized in the currently running native session (not yet
-  // committed). Reset to '' each time a session ends.
-  String _currentWords = '';
-  // Guards against handling the same session end twice (status `done` and
-  // `notListening` both fire) and against acting on stray callbacks.
-  bool _voiceSessionActive = false;
-  // True while a restart is already queued, to avoid double restarts.
-  bool _voiceRestartScheduled = false;
-  // Consecutive native sessions that produced no speech. Bounds the restart
-  // loop so a broken mic / endless silence eventually soft-stops.
-  int _emptyVoiceSessions = 0;
+  // The dedup / accumulation / soft-cap decisions live in the pure
+  // [VoiceSessionMachine] so they can be unit-tested without a device; this
+  // screen only drives the side effects (listen / setState / restart delay).
+  final _voice = VoiceSessionMachine(maxEmptySessions: _kMaxEmptyVoiceSessions);
   // Locale captured at recording start, reused for every restarted session.
   String _voiceLocaleId = 'en-US';
 
@@ -275,8 +262,7 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     _textController.dispose();
     // Stop any in-progress speech session — keeps the mic from running silently.
     // Mark intent so the restart loop doesn't fire after the widget is gone.
-    _userStoppedVoice = true;
-    _voiceSessionActive = false;
+    _voice.requestStop();
     if (_voiceState == _VoiceState.recording) {
       _speech.cancel().ignore();
     }
@@ -292,9 +278,7 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
       if (_voiceState == _VoiceState.recording) {
         // Mark intent so the auto-restart loop doesn't re-arm the mic while the
         // app is backgrounded.
-        _userStoppedVoice = true;
-        _voiceRestartScheduled = false;
-        _voiceSessionActive = false;
+        _voice.requestStop();
         _speech.stop().then((_) {
           if (mounted) setState(() => _voiceState = _VoiceState.idle);
         }).ignore();
@@ -1339,8 +1323,7 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
           _onVoiceSessionEnded();
           return;
         }
-        _userStoppedVoice = true;
-        _voiceSessionActive = false;
+        _voice.requestStop();
         setState(() => _voiceState = _VoiceState.idle);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1398,11 +1381,7 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     _voiceLocaleId = lang == 'ru' ? 'ru-RU' : 'en-US';
 
     // Fresh recording: clear the accumulation buffer and restart bookkeeping.
-    _userStoppedVoice = false;
-    _committedTranscript = '';
-    _currentWords = '';
-    _emptyVoiceSessions = 0;
-    _voiceRestartScheduled = false;
+    _voice.start();
 
     HapticFeedback.lightImpact();
     setState(() => _voiceState = _VoiceState.recording);
@@ -1412,8 +1391,8 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
 
   /// Starts one native listen session. Reused for every restart in a recording.
   Future<void> _beginVoiceSession() async {
-    if (!mounted || _userStoppedVoice) return;
-    _voiceSessionActive = true;
+    if (!mounted || _voice.userStopped) return;
+    _voice.beginSession();
     try {
       await _speech.listen(
         onResult: (result) =>
@@ -1440,9 +1419,7 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
   /// so restarted sessions never clobber earlier speech.
   void _handleVoiceResult(String words, bool isFinal) {
     if (!mounted) return;
-    _currentWords = words;
-    if (words.isNotEmpty) _emptyVoiceSessions = 0;
-    final combined = '$_committedTranscript $words'.trim();
+    final combined = _voice.onWords(words);
     setState(() {
       _textController.text = combined;
       _textController.selection = TextSelection.fromPosition(
@@ -1456,43 +1433,29 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
   /// error). Commits the session's words, then either restarts (pause / native
   /// limit) or goes idle (user stop / soft cap).
   void _onVoiceSessionEnded() {
-    // Dedupe: done + notListening (and a trailing error) can all fire once.
-    if (!_voiceSessionActive) return;
-    _voiceSessionActive = false;
+    final action = _voice.onSessionEnded();
+    // Duplicate end (done + notListening both fired) — already handled.
+    if (action == null) return;
 
-    if (_currentWords.isNotEmpty) {
-      _committedTranscript = '$_committedTranscript $_currentWords'.trim();
-      _currentWords = '';
-      _emptyVoiceSessions = 0;
-    } else {
-      _emptyVoiceSessions++;
+    switch (action) {
+      case VoiceEndAction.idle:
+        // User intentionally stopped (tap / dispose / background).
+        if (mounted) setState(() => _voiceState = _VoiceState.idle);
+      case VoiceEndAction.softStop:
+        // Prolonged silence / repeated instant failures → soft stop.
+        _speech.stop().ignore();
+        if (mounted) setState(() => _voiceState = _VoiceState.idle);
+      case VoiceEndAction.restart:
+        // Pause or native session limit — keep recording, restart the engine.
+        _scheduleVoiceRestart();
     }
-
-    // User intentionally stopped (tap / dispose / background) → idle for real.
-    if (_userStoppedVoice) {
-      if (mounted) setState(() => _voiceState = _VoiceState.idle);
-      return;
-    }
-
-    // Safety net: prolonged silence / repeated instant failures → soft stop.
-    if (_emptyVoiceSessions >= _kMaxEmptyVoiceSessions) {
-      _userStoppedVoice = true;
-      _speech.stop().ignore();
-      if (mounted) setState(() => _voiceState = _VoiceState.idle);
-      return;
-    }
-
-    // Pause or native session limit — keep recording, restart the engine.
-    _scheduleVoiceRestart();
   }
 
   void _scheduleVoiceRestart() {
-    if (_voiceRestartScheduled || _userStoppedVoice) return;
-    _voiceRestartScheduled = true;
+    if (!_voice.tryScheduleRestart()) return;
     Future<void>.delayed(_kVoiceRestartDelay, () async {
-      _voiceRestartScheduled = false;
-      if (!mounted ||
-          _userStoppedVoice ||
+      if (!_voice.onRestartFired() ||
+          !mounted ||
           _voiceState != _VoiceState.recording) {
         return;
       }
@@ -1502,9 +1465,7 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
 
   Future<void> _stopListening() async {
     // Mark intent first so any in-flight session end goes idle, not restart.
-    _userStoppedVoice = true;
-    _voiceRestartScheduled = false;
-    _voiceSessionActive = false;
+    _voice.requestStop();
     await _speech.stop();
     if (mounted) setState(() => _voiceState = _VoiceState.idle);
   }
