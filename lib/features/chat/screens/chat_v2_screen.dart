@@ -1163,16 +1163,8 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
   /// never stack on top of the camera screen. Re-entrancy is guarded by
   /// [_resultSheetOpen].
   void _drainOutcomes() {
-    if (!mounted) return;
+    if (!mounted || _resultSheetOpen) return;
     final isCurrent = ModalRoute.of(context)?.isCurrent ?? false;
-    // Self-heal: if we still think a result sheet is open but the chat is the
-    // top-most route, the sheet was torn down without our .then() firing (e.g.
-    // an OS route refresh after resume). Unjam draining so future results show.
-    if (_resultSheetOpen && isCurrent) {
-      _resultSheetOpen = false;
-      ref.read(activeRecognitionResultProvider.notifier).state = null;
-    }
-    if (_resultSheetOpen) return;
     if (!isCurrent) return;
 
     final outcomes = ref.read(photoRecognitionProvider).outcomes;
@@ -1191,6 +1183,15 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
       case RecogSuccess(:final result):
         _resultSheetOpen = true;
         HapticFeedback.mediumImpact();
+        // Consume the outcome NOW, at present-time — not when the sheet closes.
+        // The sheet is presented as its own route and the chat screen can be
+        // disposed/recreated underneath it (tab navigation, OS resume). If we
+        // waited to consume in the push future's `.then()`, a `!mounted` chat or
+        // a `.then()` that never fires would leave the outcome in the queue and
+        // re-present the same result — forcing the user to save the meal twice.
+        // Consuming up front makes presentation exactly-once and independent of
+        // the chat screen's lifecycle.
+        ref.read(photoRecognitionProvider.notifier).consumeFirstOutcome();
         final args = RecognitionResultArgs(
           dishName: result.dishName,
           items: result.items,
@@ -1204,7 +1205,6 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
           ref.read(activeRecognitionResultProvider.notifier).state = null;
           _resultSheetOpen = false;
           if (!mounted) return;
-          ref.read(photoRecognitionProvider.notifier).consumeFirstOutcome();
           setState(() {
             _thinking = null;
             _isSending = false;

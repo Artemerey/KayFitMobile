@@ -23,9 +23,8 @@ import 'features/splash/screens/splash_screen.dart';
 import 'package:image_picker/image_picker.dart';
 import 'features/add_meal/screens/kf2_capture_screen.dart';
 import 'features/add_meal/screens/kf2_recognizing_screen.dart';
+import 'features/add_meal/screens/kf2_result_page.dart';
 import 'features/add_meal/screens/recognition_result_args.dart';
-import 'features/add_meal/screens/recognition_result_sheet_kf2.dart';
-import 'shared/theme/kayfit2_theme.dart';
 import 'features/chat/screens/chat_v2_screen.dart';
 import 'features/journal/screens/journal_v2_screen.dart';
 import 'features/recipes/screens/recipes_screen.dart';
@@ -104,7 +103,8 @@ class _RouterNotifier extends ChangeNotifier {
     }
 
     // Public routes
-    final isPublic = loc == '/login' ||
+    final isPublic =
+        loc == '/login' ||
         loc == '/email-auth' ||
         loc == '/onboarding' ||
         loc == '/way-to-goal' ||
@@ -162,8 +162,12 @@ class _RouterNotifier extends ChangeNotifier {
     // Keychain auth token survives, so aiConsent starts null and the notifier
     // must first verify with the server.  We hold off the redirect until the
     // async check completes to avoid showing the screen to returning users.
-    if (consentReady && isLoggedIn && aiConsent == null && !showWayToGoal &&
-        loc != '/ai-consent' && loc != '/way-to-goal' &&
+    if (consentReady &&
+        isLoggedIn &&
+        aiConsent == null &&
+        !showWayToGoal &&
+        loc != '/ai-consent' &&
+        loc != '/way-to-goal' &&
         loc != '/kayfit2/preview') {
       return '/ai-consent';
     }
@@ -206,10 +210,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/onboarding',
         builder: (context, state) => const OnboardingScreen(),
       ),
-      GoRoute(
-        path: '/login',
-        builder: (context, state) => const LoginScreen(),
-      ),
+      GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
       GoRoute(
         path: '/email-auth',
         builder: (context, state) => const EmailAuthScreen(),
@@ -288,19 +289,11 @@ final routerProvider = Provider<GoRouter>((ref) {
       // screen when a background photo recognition completes.
       GoRoute(
         path: '/kf2/result',
-        builder: (context, state) {
-          final args = state.extra as RecognitionResultArgs;
-          return Scaffold(
-            backgroundColor: K2Colors.darkBg,
-            body: RecognitionResultSheetKF2(
-              dishName: args.dishName,
-              ingredients: args.items,
-              mealDate: null,
-              originalText: null,
-              onSaved: args.onSaved,
-            ),
-          );
-        },
+        builder: (context, state) => Kf2ResultPage(
+          extraArgs: state.extra is RecognitionResultArgs
+              ? state.extra as RecognitionResultArgs
+              : null,
+        ),
       ),
 
       ShellRoute(
