@@ -1,62 +1,20 @@
 === English (≤ 4000 chars) ===
 
-Kayfit 2.0
+Kayfit 1.3.0
 
-Redesigned from scratch:
-• New journal — calendar strip, macro rings, meal rows, swipe to delete
-• New chat — thinking-step bubbles, attach toolbar (camera / voice / barcode), add meal directly from chat
-• New food recognition — full-screen capture, results sheet in the new design
-• New settings screen in the KF2 style
-
-Body shape goal:
-• Pick your current and desired body shape during onboarding
-• App calculates a personalised target weight automatically
-
-Improvements:
-• Voice input wired into the new chat
-• Macro goal changes immediately update the journal rings
-• Stats refresh correctly after saving weight or macro goals
-• Onboarding progress is saved — resume after closing the app
-
-Language & localisation:
-• Russian language fully supported — switch in Settings
-• App opens in English by default regardless of system language
-• All macro labels, consent messages, and errors respect the selected language
-• Privacy Policy and Terms of Service available in Russian
-
-Privacy & security:
-• Auth tokens moved to iOS Keychain
-• AI feature consent gate — review or change in Settings at any time
-• Privacy manifest (PrivacyInfo.xcprivacy) added per Apple requirements
+• Voice input no longer cuts off on pauses — dictate long meals; text now accumulates and recording stops only when you tap stop, background the app, or leave the screen
+• Live camera preview on the food capture screen (was a static placeholder)
+• Photo recognition survives backgrounding — if you switch away while a photo is being recognised, it resumes correctly on return
+• Photo no longer hangs on "recognising" after an immediate background/resume right after capture
+• Chat opens at the newest message; the photo bubble no longer gets lost in the feed
 
 
 === Russian (≤ 4000 chars) ===
 
-Kayfit 2.0
+Kayfit 1.3.0
 
-Полный редизайн:
-• Новый дневник — лента календаря, кольца макронутриентов, карточки приёмов пищи, удаление свайпом
-• Новый чат — пузыри с шагами обработки, панель вложений (камера / голос / штрихкод), добавление еды прямо из чата
-• Новый экран распознавания — полноэкранная камера, карточка результата в новом дизайне
-• Новый экран настроек в стиле KF2
-
-Цель по форме тела:
-• Выбери текущую и желаемую форму тела в онбординге
-• Приложение рассчитывает персональный целевой вес автоматически
-
-Улучшения:
-• Голосовой ввод подключён к новому чату
-• Изменение нормы КБЖУ мгновенно отображается в кольцах дневника
-• Статистика корректно обновляется после сохранения веса или нормы КБЖУ
-• Прогресс онбординга сохраняется — можно вернуться после закрытия приложения
-
-Язык и локализация:
-• Полная поддержка русского языка — переключение в Настройках
-• Приложение открывается на английском по умолчанию, независимо от языка системы
-• Названия макронутриентов, сообщения о согласии и ошибки учитывают выбранный язык
-• Политика конфиденциальности и Условия использования доступны на русском языке
-
-Конфиденциальность и безопасность:
-• Токены авторизации перенесены в iOS Keychain
-• Запрос согласия перед использованием ИИ-функций — можно изменить в Настройках
-• Добавлен манифест конфиденциальности (PrivacyInfo.xcprivacy) по требованию Apple
+• Голосовой ввод больше не обрывается на паузах — можно надиктовывать длинно, текст накапливается, а запись останавливается только когда вы сами нажмёте стоп, свернёте приложение или закроете экран
+• Живой превью камеры на экране съёмки еды (раньше была статичная заглушка)
+• Распознавание фото переживает сворачивание приложения — если переключиться во время обработки, оно корректно возобновляется при возврате
+• Фото больше не зависает на «распознаём» при немедленном сворачивании и возврате сразу после съёмки
+• Чат открывается на самом свежем сообщении, фото в ленте больше не «теряется»
