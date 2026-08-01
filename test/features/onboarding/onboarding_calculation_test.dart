@@ -19,6 +19,7 @@ void main() {
 
       expect(result.targetCalories, greaterThan(result.tdee));
       expect(result.targetCalories, isNot(1200));
+      expect(result.targetCalories, closeTo(3120.15, 0.01));
     });
 
     test('maintain and stay toned use maintenance calories', () {
@@ -33,9 +34,11 @@ void main() {
 
     test('weight-loss speed changes the safe deficit', () {
       final targets = [0.25, 0.5, 1.0]
-          .map((speed) => calculateOnboardingPreview(
-                input({'lose_weight'}, speed: speed),
-              ).targetCalories)
+          .map(
+            (speed) => calculateOnboardingPreview(
+              input({'lose_weight'}, speed: speed),
+            ).targetCalories,
+          )
           .toList();
 
       expect(targets[0], greaterThan(targets[1]));
@@ -47,11 +50,15 @@ void main() {
       expect(result.targetCalories, lessThan(result.tdee));
     });
 
-    test('conflicting primary goals throw instead of silently choosing loss', () {
-      expect(
-        () => calculateOnboardingPreview(input({'lose_weight', 'gain_muscle'})),
-        throwsArgumentError,
-      );
-    });
+    test(
+      'conflicting primary goals throw instead of silently choosing loss',
+      () {
+        expect(
+          () =>
+              calculateOnboardingPreview(input({'lose_weight', 'gain_muscle'})),
+          throwsArgumentError,
+        );
+      },
+    );
   });
 }

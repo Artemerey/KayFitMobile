@@ -17,7 +17,9 @@ import '../storage/onboarding_pending_storage.dart';
 Future<bool> syncOnboardingPending() async {
   final pending = await OnboardingPendingStorage.read();
   if (pending == null) {
-    debugPrint('[onboarding_sync] No pending data — triggering answer backfill');
+    debugPrint(
+      '[onboarding_sync] No pending data — triggering answer backfill',
+    );
     // Still call answers endpoint so the backend backfills missing answers from profile
     try {
       await apiDio.get('/api/onboarding/answers');
@@ -25,31 +27,16 @@ Future<bool> syncOnboardingPending() async {
     return false;
   }
 
-  debugPrint('[onboarding_sync] Syncing pending onboarding data: '
-      'age=${pending.age} height=${pending.height} weight=${pending.weight} '
-      'targetWeight=${pending.targetWeight} gender=${pending.gender} '
-      'trainingDays=${pending.trainingDays} '
-      'healthConditions=${pending.healthConditions} '
-      'dietType=${pending.dietType} goals=${pending.goals}');
+  debugPrint(
+    '[onboarding_sync] Syncing pending onboarding data: '
+    'age=${pending.age} height=${pending.height} weight=${pending.weight} '
+    'targetWeight=${pending.targetWeight} gender=${pending.gender} '
+    'trainingDays=${pending.trainingDays} '
+    'healthConditions=${pending.healthConditions} '
+    'dietType=${pending.dietType} goals=${pending.goals}',
+  );
 
-  // Build request body — only include non-null/non-empty fields
-  final body = <String, dynamic>{};
-  if (pending.age != null) body['age'] = pending.age;
-  if (pending.height != null) body['height'] = pending.height;
-  if (pending.weight != null) body['weight'] = pending.weight;
-  if (pending.targetWeight != null) body['target_weight'] = pending.targetWeight;
-  if (pending.gender != null && pending.gender!.isNotEmpty) {
-    body['gender'] = pending.gender;
-  }
-  if (pending.trainingDays.isNotEmpty) body['training_days'] = pending.trainingDays;
-  if (pending.healthConditions.isNotEmpty) {
-    body['health_conditions'] = pending.healthConditions;
-  }
-  body['diet_type'] = pending.dietType;
-  if (pending.foodRestrictions != null && pending.foodRestrictions!.isNotEmpty) {
-    body['food_restrictions'] = pending.foodRestrictions;
-  }
-  if (pending.goals.isNotEmpty) body['goals'] = pending.goals;
+  final body = pending.toRequestBody();
 
   try {
     await apiDio.post('/api/onboarding/submit', data: body);
@@ -62,11 +49,15 @@ Future<bool> syncOnboardingPending() async {
     // 4xx means bad data — no point retrying; clear to avoid blocking the user
     final status = e.response?.statusCode;
     if (status != null && status >= 400 && status < 500) {
-      debugPrint('[onboarding_sync] 4xx error — clearing pending to avoid infinite retry');
+      debugPrint(
+        '[onboarding_sync] 4xx error — clearing pending to avoid infinite retry',
+      );
       await OnboardingPendingStorage.clear();
     }
   } catch (e) {
-    debugPrint('[onboarding_sync] Unexpected sync error (will retry on next start): $e');
+    debugPrint(
+      '[onboarding_sync] Unexpected sync error (will retry on next start): $e',
+    );
   }
   return true;
 }

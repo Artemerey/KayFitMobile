@@ -28,6 +28,7 @@ import '../../reward/widgets/reward_step.dart';
 import '../../way_to_goal/widgets/plan_result_view.dart';
 import '../widgets/ob_gradient_button.dart';
 import '../widgets/onboarding_scaffold.dart';
+import '../onboarding_calculation.dart';
 
 // ─── Step definitions ──────────────────────────────────────────────────────────
 enum _Step {
@@ -61,12 +62,7 @@ enum _Step {
   auth,
 }
 
-const _ageOptions = [
-  ('18–24', 21),
-  ('25–34', 30),
-  ('35–44', 40),
-  ('45+', 50),
-];
+const _ageOptions = [('18–24', 21), ('25–34', 30), ('35–44', 40), ('45+', 50)];
 
 // Hero text outline — four hard 1.4-pixel offsets simulate a stroke, then a
 // soft drop shadow lifts the text off the photo regardless of which area
@@ -80,51 +76,6 @@ const List<Shadow> _kHeroTextShadows = [
 ];
 
 // ─── Calculation helpers ───────────────────────────────────────────────────────
-double _getActivityCoef(String trainingFreq) {
-  switch (trainingFreq) {
-    case 'daily': return 1.725;
-    case '3-4': return 1.55;
-    case '1-2': return 1.375;
-    default: return 1.2;
-  }
-}
-
-CalculationResult _calcPreview({
-  required int age,
-  required double weight,
-  required double height,
-  required String gender,
-  required String trainingDays,
-  double? targetWeight,
-  double weightLossSpeedKgPerWeek = 0.5,
-}) {
-  final offset = gender == 'male' ? 5.0 : -161.0;
-  final bmr = 10 * weight + 6.25 * height - 5 * age + offset;
-  final tdee = bmr * _getActivityCoef(trainingDays);
-  final deficitPerDay = (weightLossSpeedKgPerWeek * 7700 / 7).clamp(100.0, 1100.0);
-  final target = (tdee - deficitPerDay).clamp(1200.0, 9999.0);
-  final protein = (weight * 1.6);
-  final fat = (weight * 0.9);
-  final carbs = ((target - protein * 4 - fat * 9) / 4).clamp(0.0, 9999.0);
-  int? daysToGoal;
-  if (targetWeight != null && targetWeight < weight) {
-    final deficit = tdee - target;
-    if (deficit > 0) {
-      daysToGoal = ((weight - targetWeight) * 7700 / deficit).round();
-    }
-  }
-  return CalculationResult(
-    bmr: bmr,
-    tdee: tdee,
-    targetCalories: target,
-    protein: protein,
-    fat: fat,
-    carbs: carbs,
-    daysToGoal: daysToGoal,
-    targetWeight: targetWeight,
-  );
-}
-
 // ─── Main screen ───────────────────────────────────────────────────────────────
 class OnboardingScreen extends ConsumerStatefulWidget {
   const OnboardingScreen({super.key});
@@ -209,7 +160,9 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       if (savedStepName == null) return;
 
       // Try to find the saved step in the enum.
-      final savedStep = _Step.values.where((s) => s.name == savedStepName).firstOrNull;
+      final savedStep = _Step.values
+          .where((s) => s.name == savedStepName)
+          .firstOrNull;
       if (savedStep == null) return;
 
       // Restore answers from JSON if available.
@@ -258,6 +211,8 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     _trainingFreq = answers['trainingFreq'] as String? ?? '';
     _dietType = answers['dietType'] as String? ?? 'none';
     _foodRestrictions = answers['foodRestrictions'] as String? ?? '';
+    _weightLossSpeedKgPerWeek =
+        (answers['weightLossSpeedKgPerWeek'] as num?)?.toDouble() ?? 0.5;
 
     final healthList = answers['healthConditions'];
     if (healthList is List) {
@@ -292,6 +247,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
           'foodRestrictions': _foodRestrictions,
           'healthConditions': _healthConditions.toList(),
           'goals': _goals.toList(),
+          'weightLossSpeedKgPerWeek': _weightLossSpeedKgPerWeek,
         }),
       );
     } catch (_) {
@@ -315,7 +271,9 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       _showSkipDialog = false;
       if (_stepIndex < steps.length - 1) {
         _stepIndex++;
-        AnalyticsService.onboardingStepViewed(_buildStepList()[_stepIndex].name);
+        AnalyticsService.onboardingStepViewed(
+          _buildStepList()[_stepIndex].name,
+        );
       }
     });
     // UC5: persist progress so kill-restore can resume from here.
@@ -332,18 +290,25 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   }
 
   void _savePending() {
-    OnboardingPendingStorage.save(OnboardingPendingData(
-      age: _age,
-      height: _height,
-      gender: _gender.isEmpty ? null : _gender,
-      weight: _weight,
-      targetWeight: _targetWeight,
-      trainingDays: _trainingFreq,
-      healthConditions: _healthConditions.toList(),
-      dietType: _dietType,
-      foodRestrictions: _foodRestrictions.isNotEmpty ? _foodRestrictions : null,
-      goals: _goals.toList(),
-    ));
+    OnboardingPendingStorage.save(
+      OnboardingPendingData(
+        age: _age,
+        height: _height,
+        gender: _gender.isEmpty ? null : _gender,
+        weight: _weight,
+        targetWeight: _targetWeight,
+        trainingDays: _trainingFreq,
+        healthConditions: _healthConditions.toList(),
+        dietType: _dietType,
+        foodRestrictions: _foodRestrictions.isNotEmpty
+            ? _foodRestrictions
+            : null,
+        goals: _goals.toList(),
+        weightLossSpeedKgPerWeek: _goals.contains('lose_weight')
+            ? _weightLossSpeedKgPerWeek
+            : null,
+      ),
+    );
   }
 
   // ── Step handlers ───────────────────────────────────────────────────────────
@@ -390,7 +355,13 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       setState(() => _error = l10n.ob_err_training);
       return;
     }
-    final daysCount = _trainingFreq == '0' ? 0 : _trainingFreq == '1-2' ? 2 : _trainingFreq == '3-4' ? 4 : 7;
+    final daysCount = _trainingFreq == '0'
+        ? 0
+        : _trainingFreq == '1-2'
+        ? 2
+        : _trainingFreq == '3-4'
+        ? 4
+        : 7;
     AnalyticsService.onboardingTrainingDaysSelected(daysCount);
     _savePending();
     _goNext();
@@ -416,8 +387,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       _bodyFormDesired = desiredIdx;
       // Target weight comes from body form only for lose_weight goal.
       // Muscle-gain / maintain goals → recomposition → no weight graph.
-      _targetWeight =
-          _goals.contains('lose_weight') ? calcTargetWeight : null;
+      _targetWeight = _goals.contains('lose_weight') ? calcTargetWeight : null;
     });
     _savePending();
     _goNext();
@@ -425,18 +395,25 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
 
   Future<void> _navigateToLogin() async {
     // Explicit await-save with all collected data before leaving onboarding.
-    await OnboardingPendingStorage.save(OnboardingPendingData(
-      age: _age,
-      height: _height,
-      gender: _gender.isEmpty ? null : _gender,
-      weight: _weight,
-      targetWeight: _targetWeight,
-      trainingDays: _trainingFreq,
-      healthConditions: _healthConditions.toList(),
-      dietType: _dietType,
-      foodRestrictions: _foodRestrictions.isNotEmpty ? _foodRestrictions : null,
-      goals: _goals.toList(),
-    ));
+    await OnboardingPendingStorage.save(
+      OnboardingPendingData(
+        age: _age,
+        height: _height,
+        gender: _gender.isEmpty ? null : _gender,
+        weight: _weight,
+        targetWeight: _targetWeight,
+        trainingDays: _trainingFreq,
+        healthConditions: _healthConditions.toList(),
+        dietType: _dietType,
+        foodRestrictions: _foodRestrictions.isNotEmpty
+            ? _foodRestrictions
+            : null,
+        goals: _goals.toList(),
+        weightLossSpeedKgPerWeek: _goals.contains('lose_weight')
+            ? _weightLossSpeedKgPerWeek
+            : null,
+      ),
+    );
     AnalyticsService.onboardingCompleted();
     AnalyticsService.onboardingGoToLogin();
     AnalyticsService.setUserProfile(
@@ -458,15 +435,18 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   }
 
   // ── Result calculation ──────────────────────────────────────────────────────
-  CalculationResult get _preview => _calcPreview(
-        age: _age ?? 30,
-        weight: _weight ?? 65,
-        height: _height ?? 165,
-        gender: _gender.isEmpty ? 'female' : _gender,
-        trainingDays: _trainingFreq,
-        targetWeight: _targetWeight,
-        weightLossSpeedKgPerWeek: _goals.contains('lose_weight') ? _weightLossSpeedKgPerWeek : 0.5,
-      );
+  CalculationResult get _preview => calculateOnboardingPreview(
+    OnboardingCalculationInput(
+      age: _age ?? 30,
+      weight: _weight ?? 65,
+      height: _height ?? 165,
+      gender: _gender.isEmpty ? 'female' : _gender,
+      trainingFrequency: _trainingFreq,
+      goals: _goals,
+      targetWeight: _targetWeight,
+      weightLossSpeedKgPerWeek: _weightLossSpeedKgPerWeek,
+    ),
+  );
 
   // ── Progress ────────────────────────────────────────────────────────────────
   bool get _canSkip => _stepIndex >= 1 && _stepIndex <= 8;
@@ -525,7 +505,11 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                   borderRadius: BorderRadius.circular(10),
                   boxShadow: AppShadow.sm,
                 ),
-                child: const Icon(Icons.arrow_back_ios_new_rounded, size: 16, color: AppColors.text),
+                child: const Icon(
+                  Icons.arrow_back_ios_new_rounded,
+                  size: 16,
+                  color: AppColors.text,
+                ),
               ),
             ),
             const SizedBox(width: 12),
@@ -546,7 +530,10 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                 onTap: () => setState(() => _showSkipDialog = true),
                 child: Text(
                   l10n.ob_skip_btn,
-                  style: const TextStyle(color: AppColors.textMuted, fontSize: 14),
+                  style: const TextStyle(
+                    color: AppColors.textMuted,
+                    fontSize: 14,
+                  ),
                 ),
               )
             else
@@ -743,7 +730,8 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
             if (mounted) context.go('/login');
           },
           locale: ref.watch(localeProvider),
-          onLocaleChange: (loc) => ref.read(localeProvider.notifier).setLocale(loc),
+          onLocaleChange: (loc) =>
+              ref.read(localeProvider.notifier).setLocale(loc),
           onboardingDone: ref.watch(onboardingDoneProvider),
         );
 
@@ -793,7 +781,11 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
         );
 
       case _Step.gender:
-        return _GenderStep(l10n: l10n, selected: _gender, onSelect: _handleGenderSelect);
+        return _GenderStep(
+          l10n: l10n,
+          selected: _gender,
+          onSelect: _handleGenderSelect,
+        );
 
       case _Step.weight:
         return _WeightStep(
@@ -834,7 +826,10 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       case _Step.weight_loss_speed:
         return _WeightLossSpeedStep(
           speedKgPerWeek: _weightLossSpeedKgPerWeek,
-          onChanged: (v) => setState(() => _weightLossSpeedKgPerWeek = v),
+          onChanged: (v) {
+            setState(() => _weightLossSpeedKgPerWeek = v);
+            _savePending();
+          },
           currentWeight: _weight ?? 70,
           targetWeight: _targetWeight ?? (_weight != null ? _weight! - 5 : 65),
           isRu: isRu,
@@ -847,11 +842,24 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
           titleRu: 'Распознаём точнее',
           titleEn: 'More accurate recognition',
           subtitleRu: 'Наш алгоритм анализирует форму, текстуру и цвет блюда',
-          subtitleEn: 'Our algorithm analyzes shape, texture and color of the dish',
+          subtitleEn:
+              'Our algorithm analyzes shape, texture and color of the dish',
           features: [
-            _InfoFeature(icon: Icons.photo_camera_rounded, textRu: 'ИИ-распознавание еды по фото', textEn: 'AI-powered food photo recognition'),
-            _InfoFeature(icon: Icons.record_voice_over_rounded, textRu: 'Голосовой ввод — скажи что съел', textEn: 'Voice input — just say what you ate'),
-            _InfoFeature(icon: Icons.edit_rounded, textRu: 'Текстовый ввод с умными подсказками', textEn: 'Text input with smart suggestions'),
+            _InfoFeature(
+              icon: Icons.photo_camera_rounded,
+              textRu: 'ИИ-распознавание еды по фото',
+              textEn: 'AI-powered food photo recognition',
+            ),
+            _InfoFeature(
+              icon: Icons.record_voice_over_rounded,
+              textRu: 'Голосовой ввод — скажи что съел',
+              textEn: 'Voice input — just say what you ate',
+            ),
+            _InfoFeature(
+              icon: Icons.edit_rounded,
+              textRu: 'Текстовый ввод с умными подсказками',
+              textEn: 'Text input with smart suggestions',
+            ),
           ],
           isRu: isRu,
         );
@@ -865,9 +873,21 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
           subtitleRu: 'Расчёты по международным стандартам питания',
           subtitleEn: 'Calculations based on international nutrition standards',
           features: [
-            _InfoFeature(icon: Icons.calculate_rounded, textRu: 'Формула Миффлина-Сент-Жора', textEn: 'Mifflin-St Jeor formula'),
-            _InfoFeature(icon: Icons.storage_rounded, textRu: 'База USDA — 500 000+ продуктов', textEn: 'USDA database — 500 000+ products'),
-            _InfoFeature(icon: Icons.fitness_center_rounded, textRu: 'Учёт уровня активности и метаболизма', textEn: 'Activity level and metabolism accounted for'),
+            _InfoFeature(
+              icon: Icons.calculate_rounded,
+              textRu: 'Формула Миффлина-Сент-Жора',
+              textEn: 'Mifflin-St Jeor formula',
+            ),
+            _InfoFeature(
+              icon: Icons.storage_rounded,
+              textRu: 'База USDA — 500 000+ продуктов',
+              textEn: 'USDA database — 500 000+ products',
+            ),
+            _InfoFeature(
+              icon: Icons.fitness_center_rounded,
+              textRu: 'Учёт уровня активности и метаболизма',
+              textEn: 'Activity level and metabolism accounted for',
+            ),
           ],
           isRu: isRu,
         );
@@ -881,9 +901,21 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
           subtitleRu: 'ИИ-помощник по питанию доступен 24/7',
           subtitleEn: 'AI nutrition assistant available 24/7',
           features: [
-            _InfoFeature(icon: Icons.chat_bubble_rounded, textRu: 'Персональные рекомендации в чате', textEn: 'Personalized recommendations in chat'),
-            _InfoFeature(icon: Icons.trending_down_rounded, textRu: 'Анализ рациона и прогресса', textEn: 'Diet and progress analysis'),
-            _InfoFeature(icon: Icons.star_rounded, textRu: 'Бесплатно — без ограничений', textEn: 'Free — without limits'),
+            _InfoFeature(
+              icon: Icons.chat_bubble_rounded,
+              textRu: 'Персональные рекомендации в чате',
+              textEn: 'Personalized recommendations in chat',
+            ),
+            _InfoFeature(
+              icon: Icons.trending_down_rounded,
+              textRu: 'Анализ рациона и прогресса',
+              textEn: 'Diet and progress analysis',
+            ),
+            _InfoFeature(
+              icon: Icons.star_rounded,
+              textRu: 'Бесплатно — без ограничений',
+              textEn: 'Free — without limits',
+            ),
           ],
           isRu: isRu,
         );
@@ -904,7 +936,9 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       case _Step.auth:
         // Auto-navigate to login
         WidgetsBinding.instance.addPostFrameCallback((_) => _navigateToLogin());
-        return const Center(child: CircularProgressIndicator(color: OBColors.pink));
+        return const Center(
+          child: CircularProgressIndicator(color: OBColors.pink),
+        );
     }
   }
 
@@ -927,21 +961,25 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(l10n.ob_skip_title,
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.text,
-                      decoration: TextDecoration.none,
-                    )),
+                Text(
+                  l10n.ob_skip_title,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.text,
+                    decoration: TextDecoration.none,
+                  ),
+                ),
                 const SizedBox(height: 8),
-                Text(l10n.ob_skip_sub,
-                    style: const TextStyle(
-                      color: AppColors.textMuted,
-                      fontSize: 14,
-                      decoration: TextDecoration.none,
-                    ),
-                    textAlign: TextAlign.center),
+                Text(
+                  l10n.ob_skip_sub,
+                  style: const TextStyle(
+                    color: AppColors.textMuted,
+                    fontSize: 14,
+                    decoration: TextDecoration.none,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
                 const SizedBox(height: 20),
                 SizedBox(
                   width: double.infinity,
@@ -950,15 +988,19 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                       setState(() => _showSkipDialog = false);
                       _goNext();
                     },
-                    style: ElevatedButton.styleFrom(backgroundColor: OBColors.pink),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: OBColors.pink,
+                    ),
                     child: Text(l10n.ob_skip_continue),
                   ),
                 ),
                 const SizedBox(height: 10),
                 TextButton(
                   onPressed: () => setState(() => _showSkipDialog = false),
-                  child: Text(l10n.ob_skip_back,
-                      style: const TextStyle(color: AppColors.textMuted)),
+                  child: Text(
+                    l10n.ob_skip_back,
+                    style: const TextStyle(color: AppColors.textMuted),
+                  ),
                 ),
               ],
             ),
@@ -1001,8 +1043,9 @@ class _LandingStep extends StatelessWidget {
           height: heroHeight,
           width: double.infinity,
           child: ClipRRect(
-            borderRadius:
-                const BorderRadius.vertical(bottom: Radius.circular(32)),
+            borderRadius: const BorderRadius.vertical(
+              bottom: Radius.circular(32),
+            ),
             child: Stack(
               fit: StackFit.expand,
               children: [
@@ -1107,13 +1150,22 @@ class _LandingStep extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
             child: Column(
               children: [
-                _FeatureTile(icon: Icons.photo_camera_rounded, text: l10n.ob_demo_perk1),
+                _FeatureTile(
+                  icon: Icons.photo_camera_rounded,
+                  text: l10n.ob_demo_perk1,
+                ),
                 const SizedBox(height: 16),
                 _FeatureTile(icon: Icons.mic_rounded, text: l10n.ob_demo_perk2),
                 const SizedBox(height: 16),
-                _FeatureTile(icon: Icons.bar_chart_rounded, text: l10n.ob_demo_perk3),
+                _FeatureTile(
+                  icon: Icons.bar_chart_rounded,
+                  text: l10n.ob_demo_perk3,
+                ),
                 const SizedBox(height: 16),
-                _FeatureTile(icon: Icons.smart_toy_rounded, text: l10n.ob_demo_perk4),
+                _FeatureTile(
+                  icon: Icons.smart_toy_rounded,
+                  text: l10n.ob_demo_perk4,
+                ),
               ],
             ),
           ),
@@ -1165,7 +1217,10 @@ class _LandingStep extends StatelessWidget {
                   const SizedBox(height: 8),
                   Text(
                     '${l10n.ob_landing_cta_sub1} — ${l10n.ob_landing_cta_sub2}',
-                    style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+                    style: const TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 13,
+                    ),
                   ),
                 ],
               ],
@@ -1196,8 +1251,16 @@ class _LangToggle extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _Chip(label: 'RU', active: isRu, onTap: () => onToggle(const Locale('ru'))),
-          _Chip(label: 'EN', active: !isRu, onTap: () => onToggle(const Locale('en'))),
+          _Chip(
+            label: 'RU',
+            active: isRu,
+            onTap: () => onToggle(const Locale('ru')),
+          ),
+          _Chip(
+            label: 'EN',
+            active: !isRu,
+            onTap: () => onToggle(const Locale('en')),
+          ),
         ],
       ),
     );
@@ -1259,7 +1322,11 @@ class _FeatureTile extends StatelessWidget {
         Expanded(
           child: Text(
             text,
-            style: const TextStyle(fontSize: 15, color: AppColors.text, height: 1.3),
+            style: const TextStyle(
+              fontSize: 15,
+              color: AppColors.text,
+              height: 1.3,
+            ),
           ),
         ),
       ],
@@ -1280,11 +1347,21 @@ class _HealthStep extends StatelessWidget {
   });
 
   static const _options = <(String, IconData, String, String)>[
-    ('none', Icons.check_circle_outline_rounded, 'Нет ограничений', 'No restrictions'),
+    (
+      'none',
+      Icons.check_circle_outline_rounded,
+      'Нет ограничений',
+      'No restrictions',
+    ),
     ('diabetes', Icons.water_drop_rounded, 'Диабет', 'Diabetes'),
     ('hypertension', Icons.favorite_rounded, 'Гипертония', 'Hypertension'),
     ('celiac', Icons.grass_rounded, 'Целиакия', 'Celiac disease'),
-    ('lactose', Icons.local_drink_rounded, 'Непереносимость лактозы', 'Lactose intolerance'),
+    (
+      'lactose',
+      Icons.local_drink_rounded,
+      'Непереносимость лактозы',
+      'Lactose intolerance',
+    ),
     ('kidney', Icons.healing_rounded, 'Болезни почек', 'Kidney disease'),
     ('heart', Icons.monitor_heart_rounded, 'Болезни сердца', 'Heart disease'),
     ('allergies', Icons.eco_rounded, 'Аллергии', 'Allergies'),
@@ -1316,13 +1393,25 @@ class _HealthStep extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            isRu ? 'Есть ли у тебя ограничения по здоровью?' : 'Any health conditions?',
-            style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800, letterSpacing: -0.5),
+            isRu
+                ? 'Есть ли у тебя ограничения по здоровью?'
+                : 'Any health conditions?',
+            style: const TextStyle(
+              fontSize: 26,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.5,
+            ),
           ),
           const SizedBox(height: 8),
           Text(
-            isRu ? 'Это поможет составить безопасный план питания' : 'This helps us create a safe nutrition plan',
-            style: const TextStyle(color: AppColors.textMuted, fontSize: 14, height: 1.4),
+            isRu
+                ? 'Это поможет составить безопасный план питания'
+                : 'This helps us create a safe nutrition plan',
+            style: const TextStyle(
+              color: AppColors.textMuted,
+              fontSize: 14,
+              height: 1.4,
+            ),
           ),
           const SizedBox(height: 10),
           Container(
@@ -1335,14 +1424,22 @@ class _HealthStep extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.medical_services_outlined, size: 16, color: Color(0xFFEA580C)),
+                const Icon(
+                  Icons.medical_services_outlined,
+                  size: 16,
+                  color: Color(0xFFEA580C),
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     isRu
                         ? 'Приложение не заменяет консультацию врача. При наличии заболеваний проконсультируйтесь со специалистом перед изменением рациона.'
                         : 'This app does not replace professional medical advice. If you have any health conditions, consult a healthcare professional before changing your diet.',
-                    style: const TextStyle(fontSize: 12, color: Color(0xFF9A3412), height: 1.4),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFF9A3412),
+                      height: 1.4,
+                    ),
                   ),
                 ),
               ],
@@ -1358,7 +1455,10 @@ class _HealthStep extends StatelessWidget {
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 150),
                   width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
                   decoration: BoxDecoration(
                     color: isSelected ? OBColors.pinkSoft : Colors.white,
                     borderRadius: BorderRadius.circular(14),
@@ -1369,14 +1469,20 @@ class _HealthStep extends StatelessWidget {
                   ),
                   child: Row(
                     children: [
-                      Icon(opt.$2, size: 20, color: isSelected ? OBColors.pink : AppColors.textMuted),
+                      Icon(
+                        opt.$2,
+                        size: 20,
+                        color: isSelected ? OBColors.pink : AppColors.textMuted,
+                      ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
                           isRu ? opt.$3 : opt.$4,
                           style: TextStyle(
                             fontSize: 15,
-                            fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                            fontWeight: isSelected
+                                ? FontWeight.w600
+                                : FontWeight.normal,
                             color: isSelected ? OBColors.pink : AppColors.text,
                           ),
                         ),
@@ -1386,14 +1492,20 @@ class _HealthStep extends StatelessWidget {
                         height: 22,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: isSelected ? OBColors.pink : Colors.transparent,
+                          color: isSelected
+                              ? OBColors.pink
+                              : Colors.transparent,
                           border: Border.all(
                             color: isSelected ? OBColors.pink : OBColors.border,
                             width: 1.5,
                           ),
                         ),
                         child: isSelected
-                            ? const Icon(Icons.check, color: Colors.white, size: 14)
+                            ? const Icon(
+                                Icons.check,
+                                color: Colors.white,
+                                size: 14,
+                              )
                             : null,
                       ),
                     ],
@@ -1426,7 +1538,12 @@ class _DietStep extends StatelessWidget {
     ('vegan', Icons.spa_rounded, 'Веганство', 'Vegan'),
     ('keto', Icons.local_fire_department_rounded, 'Кето', 'Keto'),
     ('paleo', Icons.set_meal_rounded, 'Палео', 'Paleo'),
-    ('mediterranean', Icons.water_rounded, 'Средиземноморская', 'Mediterranean'),
+    (
+      'mediterranean',
+      Icons.water_rounded,
+      'Средиземноморская',
+      'Mediterranean',
+    ),
     ('halal', Icons.star_rounded, 'Халяль', 'Halal'),
     ('kosher', Icons.star_border_rounded, 'Кошерная', 'Kosher'),
   ];
@@ -1439,13 +1556,23 @@ class _DietStep extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            isRu ? 'Придерживаешься какой-либо диеты?' : 'Do you follow a specific diet?',
-            style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800, letterSpacing: -0.5),
+            isRu
+                ? 'Придерживаешься какой-либо диеты?'
+                : 'Do you follow a specific diet?',
+            style: const TextStyle(
+              fontSize: 26,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.5,
+            ),
           ),
           const SizedBox(height: 8),
           Text(
             isRu ? 'Выбери один вариант' : 'Choose one option',
-            style: const TextStyle(color: AppColors.textMuted, fontSize: 14, height: 1.4),
+            style: const TextStyle(
+              color: AppColors.textMuted,
+              fontSize: 14,
+              height: 1.4,
+            ),
           ),
           const SizedBox(height: 20),
           ..._options.map((opt) {
@@ -1457,7 +1584,10 @@ class _DietStep extends StatelessWidget {
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 150),
                   width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
                   decoration: BoxDecoration(
                     color: isSelected ? OBColors.pinkSoft : Colors.white,
                     borderRadius: BorderRadius.circular(14),
@@ -1468,14 +1598,20 @@ class _DietStep extends StatelessWidget {
                   ),
                   child: Row(
                     children: [
-                      Icon(opt.$2, size: 20, color: isSelected ? OBColors.pink : AppColors.textMuted),
+                      Icon(
+                        opt.$2,
+                        size: 20,
+                        color: isSelected ? OBColors.pink : AppColors.textMuted,
+                      ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
                           isRu ? opt.$3 : opt.$4,
                           style: TextStyle(
                             fontSize: 15,
-                            fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                            fontWeight: isSelected
+                                ? FontWeight.w600
+                                : FontWeight.normal,
                             color: isSelected ? OBColors.pink : AppColors.text,
                           ),
                         ),
@@ -1485,14 +1621,20 @@ class _DietStep extends StatelessWidget {
                         height: 22,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: isSelected ? OBColors.pink : Colors.transparent,
+                          color: isSelected
+                              ? OBColors.pink
+                              : Colors.transparent,
                           border: Border.all(
                             color: isSelected ? OBColors.pink : OBColors.border,
                             width: 1.5,
                           ),
                         ),
                         child: isSelected
-                            ? const Icon(Icons.check, color: Colors.white, size: 14)
+                            ? const Icon(
+                                Icons.check,
+                                color: Colors.white,
+                                size: 14,
+                              )
                             : null,
                       ),
                     ],
@@ -1547,13 +1689,25 @@ class _FoodRestrictionsStepState extends State<_FoodRestrictionsStep> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            isRu ? 'Есть нелюбимые или запрещённые продукты?' : 'Any foods you avoid?',
-            style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800, letterSpacing: -0.5),
+            isRu
+                ? 'Есть нелюбимые или запрещённые продукты?'
+                : 'Any foods you avoid?',
+            style: const TextStyle(
+              fontSize: 26,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.5,
+            ),
           ),
           const SizedBox(height: 8),
           Text(
-            isRu ? 'Необязательно — пропусти, если нет' : 'Optional — skip if none',
-            style: const TextStyle(color: AppColors.textMuted, fontSize: 14, height: 1.4),
+            isRu
+                ? 'Необязательно — пропусти, если нет'
+                : 'Optional — skip if none',
+            style: const TextStyle(
+              color: AppColors.textMuted,
+              fontSize: 14,
+              height: 1.4,
+            ),
           ),
           const SizedBox(height: 24),
           TextField(
@@ -1602,12 +1756,37 @@ class _GoalsStep extends StatelessWidget {
 
   static const _options = <(String, IconData, String, String)>[
     ('lose_weight', Icons.monitor_weight_rounded, 'Похудеть', 'Lose weight'),
-    ('maintain_weight', Icons.track_changes_rounded, 'Поддерживать вес', 'Maintain weight'),
-    ('gain_muscle', Icons.fitness_center_rounded, 'Набирать мышечную массу', 'Build muscle'),
+    (
+      'maintain_weight',
+      Icons.track_changes_rounded,
+      'Поддерживать вес',
+      'Maintain weight',
+    ),
+    (
+      'gain_muscle',
+      Icons.fitness_center_rounded,
+      'Набирать мышечную массу',
+      'Build muscle',
+    ),
     ('stay_toned', Icons.flash_on_rounded, 'Быть в тонусе', 'Stay toned'),
-    ('maintain_glucose', Icons.water_drop_rounded, 'Поддерживать уровень глюкозы', 'Maintain glucose'),
-    ('maintain_energy', Icons.bolt_rounded, 'Высокий уровень энергии', 'High energy all day'),
-    ('mental_clarity', Icons.psychology_rounded, 'Ясность разума', 'Mental clarity'),
+    (
+      'maintain_glucose',
+      Icons.water_drop_rounded,
+      'Поддерживать уровень глюкозы',
+      'Maintain glucose',
+    ),
+    (
+      'maintain_energy',
+      Icons.bolt_rounded,
+      'Высокий уровень энергии',
+      'High energy all day',
+    ),
+    (
+      'mental_clarity',
+      Icons.psychology_rounded,
+      'Ясность разума',
+      'Mental clarity',
+    ),
   ];
 
   void _toggle(String id) {
@@ -1615,6 +1794,17 @@ class _GoalsStep extends StatelessWidget {
     if (updated.contains(id)) {
       updated.remove(id);
     } else {
+      if (const {
+        'lose_weight',
+        'maintain_weight',
+        'gain_muscle',
+      }.contains(id)) {
+        updated.removeAll(const {
+          'lose_weight',
+          'maintain_weight',
+          'gain_muscle',
+        });
+      }
       updated.add(id);
     }
     onChange(updated);
@@ -1629,12 +1819,20 @@ class _GoalsStep extends StatelessWidget {
         children: [
           Text(
             isRu ? 'Какова твоя цель?' : "What's your goal?",
-            style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800, letterSpacing: -0.5),
+            style: const TextStyle(
+              fontSize: 26,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.5,
+            ),
           ),
           const SizedBox(height: 8),
           Text(
             isRu ? 'Можно выбрать несколько' : 'Choose one or more',
-            style: const TextStyle(color: AppColors.textMuted, fontSize: 14, height: 1.4),
+            style: const TextStyle(
+              color: AppColors.textMuted,
+              fontSize: 14,
+              height: 1.4,
+            ),
           ),
           const SizedBox(height: 20),
           ..._options.map((opt) {
@@ -1646,7 +1844,10 @@ class _GoalsStep extends StatelessWidget {
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 150),
                   width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
                   decoration: BoxDecoration(
                     color: isSelected ? OBColors.pinkSoft : Colors.white,
                     borderRadius: BorderRadius.circular(14),
@@ -1657,14 +1858,20 @@ class _GoalsStep extends StatelessWidget {
                   ),
                   child: Row(
                     children: [
-                      Icon(opt.$2, size: 20, color: isSelected ? OBColors.pink : AppColors.textMuted),
+                      Icon(
+                        opt.$2,
+                        size: 20,
+                        color: isSelected ? OBColors.pink : AppColors.textMuted,
+                      ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
                           isRu ? opt.$3 : opt.$4,
                           style: TextStyle(
                             fontSize: 15,
-                            fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                            fontWeight: isSelected
+                                ? FontWeight.w600
+                                : FontWeight.normal,
                             color: isSelected ? OBColors.pink : AppColors.text,
                           ),
                         ),
@@ -1674,14 +1881,20 @@ class _GoalsStep extends StatelessWidget {
                         height: 22,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: isSelected ? OBColors.pink : Colors.transparent,
+                          color: isSelected
+                              ? OBColors.pink
+                              : Colors.transparent,
                           border: Border.all(
                             color: isSelected ? OBColors.pink : OBColors.border,
                             width: 1.5,
                           ),
                         ),
                         child: isSelected
-                            ? const Icon(Icons.check, color: Colors.white, size: 14)
+                            ? const Icon(
+                                Icons.check,
+                                color: Colors.white,
+                                size: 14,
+                              )
                             : null,
                       ),
                     ],
@@ -1702,7 +1915,11 @@ class _AgeStep extends StatelessWidget {
   final int? selected;
   final ValueChanged<int> onSelect;
 
-  const _AgeStep({required this.l10n, required this.selected, required this.onSelect});
+  const _AgeStep({
+    required this.l10n,
+    required this.selected,
+    required this.onSelect,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1762,7 +1979,11 @@ class _HeightStep extends StatelessWidget {
                   keyboardType: TextInputType.number,
                   inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                   textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 48, fontWeight: FontWeight.w700, color: AppColors.text),
+                  style: const TextStyle(
+                    fontSize: 48,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.text,
+                  ),
                   decoration: const InputDecoration(
                     border: InputBorder.none,
                     enabledBorder: InputBorder.none,
@@ -1778,14 +1999,20 @@ class _HeightStep extends StatelessWidget {
                 padding: const EdgeInsets.only(bottom: 8),
                 child: Text(
                   l10n.ob_step_height_unit,
-                  style: const TextStyle(fontSize: 18, color: AppColors.textMuted),
+                  style: const TextStyle(
+                    fontSize: 18,
+                    color: AppColors.textMuted,
+                  ),
                 ),
               ),
             ],
           ),
           if (error != null) ...[
             const SizedBox(height: 12),
-            Text(error!, style: const TextStyle(color: AppColors.accentOver, fontSize: 13)),
+            Text(
+              error!,
+              style: const TextStyle(color: AppColors.accentOver, fontSize: 13),
+            ),
           ],
         ],
       ),
@@ -1799,7 +2026,11 @@ class _GenderStep extends StatelessWidget {
   final String selected;
   final ValueChanged<String> onSelect;
 
-  const _GenderStep({required this.l10n, required this.selected, required this.onSelect});
+  const _GenderStep({
+    required this.l10n,
+    required this.selected,
+    required this.onSelect,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1860,7 +2091,10 @@ class _WeightStep extends StatelessWidget {
           ),
           if (error != null) ...[
             const SizedBox(height: 12),
-            Text(error!, style: const TextStyle(color: AppColors.accentOver, fontSize: 13)),
+            Text(
+              error!,
+              style: const TextStyle(color: AppColors.accentOver, fontSize: 13),
+            ),
           ],
         ],
       ),
@@ -1892,7 +2126,10 @@ class _WeightCard extends StatelessWidget {
       ),
       child: Column(
         children: [
-          Text(label, style: const TextStyle(color: AppColors.textMuted, fontSize: 13)),
+          Text(
+            label,
+            style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+          ),
           const SizedBox(height: 8),
           TextField(
             controller: controller,
@@ -1954,7 +2191,10 @@ class _TrainingStep extends StatelessWidget {
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 150),
                   width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
                   decoration: BoxDecoration(
                     color: isSelected ? OBColors.pinkSoft : AppColors.surface,
                     borderRadius: BorderRadius.circular(AppRadius.sm),
@@ -1969,13 +2209,19 @@ class _TrainingStep extends StatelessWidget {
                         child: Text(
                           opt.$2,
                           style: TextStyle(
-                            fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                            fontWeight: isSelected
+                                ? FontWeight.w600
+                                : FontWeight.normal,
                             color: isSelected ? OBColors.pink : AppColors.text,
                           ),
                         ),
                       ),
                       if (isSelected)
-                        const Icon(Icons.check_circle_rounded, color: OBColors.pink, size: 20),
+                        const Icon(
+                          Icons.check_circle_rounded,
+                          color: OBColors.pink,
+                          size: 20,
+                        ),
                     ],
                   ),
                 ),
@@ -1983,7 +2229,10 @@ class _TrainingStep extends StatelessWidget {
             );
           }),
           if (error != null)
-            Text(error!, style: const TextStyle(color: AppColors.accentOver, fontSize: 13)),
+            Text(
+              error!,
+              style: const TextStyle(color: AppColors.accentOver, fontSize: 13),
+            ),
         ],
       ),
     );
@@ -2019,7 +2268,11 @@ class _WeightLossInfoStep extends StatelessWidget {
                     color: Colors.white.withValues(alpha: 0.25),
                     borderRadius: BorderRadius.circular(24),
                   ),
-                  child: const Icon(Icons.monitor_weight_outlined, color: Colors.white, size: 44),
+                  child: const Icon(
+                    Icons.monitor_weight_outlined,
+                    color: Colors.white,
+                    size: 44,
+                  ),
                 ),
                 const SizedBox(height: 16),
                 Text(
@@ -2037,7 +2290,9 @@ class _WeightLossInfoStep extends StatelessWidget {
           const SizedBox(height: 24),
           _BulletRow(
             emoji: '✅',
-            text: isRu ? 'Оптимальный дефицит калорий' : 'Optimal calorie deficit',
+            text: isRu
+                ? 'Оптимальный дефицит калорий'
+                : 'Optimal calorie deficit',
           ),
           const SizedBox(height: 12),
           _BulletRow(
@@ -2070,7 +2325,11 @@ class _BulletRow extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: OBColors.border),
         boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8, offset: const Offset(0, 2)),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
         ],
       ),
       child: Row(
@@ -2082,13 +2341,21 @@ class _BulletRow extends StatelessWidget {
               color: OBColors.pink.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: const Icon(Icons.check_rounded, color: OBColors.pink, size: 18),
+            child: const Icon(
+              Icons.check_rounded,
+              color: OBColors.pink,
+              size: 18,
+            ),
           ),
           const SizedBox(width: 14),
           Expanded(
             child: Text(
               text,
-              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: AppColors.text),
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w500,
+                color: AppColors.text,
+              ),
             ),
           ),
         ],
@@ -2102,7 +2369,11 @@ class _InfoFeature {
   final IconData icon;
   final String textRu;
   final String textEn;
-  const _InfoFeature({required this.icon, required this.textRu, required this.textEn});
+  const _InfoFeature({
+    required this.icon,
+    required this.textRu,
+    required this.textEn,
+  });
 }
 
 // ─── Info step (reusable) ──────────────────────────────────────────────────────
@@ -2141,7 +2412,10 @@ class _InfoStep extends StatelessWidget {
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [iconColor.withValues(alpha: 0.12), iconColor.withValues(alpha: 0.04)],
+                colors: [
+                  iconColor.withValues(alpha: 0.12),
+                  iconColor.withValues(alpha: 0.04),
+                ],
               ),
               borderRadius: BorderRadius.circular(28),
               border: Border.all(color: iconColor.withValues(alpha: 0.18)),
@@ -2189,10 +2463,12 @@ class _InfoStep extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 20),
-          ...features.map((f) => Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: _FeatureRow(feature: f, color: iconColor, isRu: isRu),
-          )),
+          ...features.map(
+            (f) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _FeatureRow(feature: f, color: iconColor, isRu: isRu),
+            ),
+          ),
         ],
       ),
     );
@@ -2204,7 +2480,11 @@ class _FeatureRow extends StatelessWidget {
   final Color color;
   final bool isRu;
 
-  const _FeatureRow({required this.feature, required this.color, required this.isRu});
+  const _FeatureRow({
+    required this.feature,
+    required this.color,
+    required this.isRu,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -2264,7 +2544,8 @@ class _MethodStep extends ConsumerStatefulWidget {
 
 enum _DemoLoadingType { none, voice, photo, text }
 
-class _MethodStepState extends ConsumerState<_MethodStep> with SingleTickerProviderStateMixin {
+class _MethodStepState extends ConsumerState<_MethodStep>
+    with SingleTickerProviderStateMixin {
   _DemoMode _active = _DemoMode.none;
   _DemoLoadingType _loadingType = _DemoLoadingType.none;
   bool get _loading => _loadingType != _DemoLoadingType.none;
@@ -2288,7 +2569,8 @@ class _MethodStepState extends ConsumerState<_MethodStep> with SingleTickerProvi
     super.dispose();
   }
 
-  String get _lang => Localizations.localeOf(context).languageCode == 'ru' ? 'ru' : 'en';
+  String get _lang =>
+      Localizations.localeOf(context).languageCode == 'ru' ? 'ru' : 'en';
 
   /// Returns true if the user hasn't consented yet and we navigated to the
   /// consent screen. The caller should abort their action in that case.
@@ -2303,12 +2585,16 @@ class _MethodStepState extends ConsumerState<_MethodStep> with SingleTickerProvi
   Future<void> _parseText(String text) async {
     if (_requireConsent()) return;
     if (text.trim().isEmpty) return;
-    setState(() { _loadingType = _DemoLoadingType.text; _error = null; _items = []; });
+    setState(() {
+      _loadingType = _DemoLoadingType.text;
+      _error = null;
+      _items = [];
+    });
     try {
-      final resp = await apiDio.post('/api/onboarding/parse_meal', data: {
-        'text': text,
-        'language': _lang,
-      });
+      final resp = await apiDio.post(
+        '/api/onboarding/parse_meal',
+        data: {'text': text, 'language': _lang},
+      );
       final list = (resp.data['items'] as List<dynamic>)
           .map((e) => e as Map<String, dynamic>)
           .toList();
@@ -2322,22 +2608,35 @@ class _MethodStepState extends ConsumerState<_MethodStep> with SingleTickerProvi
 
   Future<void> _pickPhoto(ImageSource source) async {
     if (_requireConsent()) return;
-    setState(() { _active = _DemoMode.photo; _items = []; _error = null; });
+    setState(() {
+      _active = _DemoMode.photo;
+      _items = [];
+      _error = null;
+    });
     final picker = ImagePicker();
     final file = await picker.pickImage(source: source, imageQuality: 80);
-    if (file == null) { setState(() => _active = _DemoMode.none); return; }
+    if (file == null) {
+      setState(() => _active = _DemoMode.none);
+      return;
+    }
     setState(() => _loadingType = _DemoLoadingType.photo);
     try {
       final form = FormData.fromMap({
         'image': await MultipartFile.fromFile(file.path, filename: 'photo.jpg'),
       });
-      final resp = await apiDio.post('/api/onboarding/recognize_photo?language=$_lang', data: form);
+      final resp = await apiDio.post(
+        '/api/onboarding/recognize_photo?language=$_lang',
+        data: form,
+      );
       final error = resp.data['error'] as String?;
       final rawItems = resp.data['items'] as List<dynamic>?;
       if (error != null && error.isNotEmpty) {
         setState(() => _error = error);
       } else if (rawItems != null && rawItems.isNotEmpty) {
-        setState(() => _items = rawItems.map((e) => e as Map<String, dynamic>).toList());
+        setState(
+          () =>
+              _items = rawItems.map((e) => e as Map<String, dynamic>).toList(),
+        );
       }
     } catch (e) {
       setState(() => _error = '$e');
@@ -2353,16 +2652,18 @@ class _MethodStepState extends ConsumerState<_MethodStep> with SingleTickerProvi
     if (!status.isGranted) {
       setState(() => _error = widget.l10n.ob_method_mic_denied);
       if (status.isPermanentlyDenied && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(widget.l10n.ob_method_mic_denied),
-          behavior: SnackBarBehavior.floating,
-          backgroundColor: const Color(0xFFEF4444),
-          action: SnackBarAction(
-            label: widget.l10n.addMeal_open_settings,
-            textColor: Colors.white,
-            onPressed: openAppSettings,
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(widget.l10n.ob_method_mic_denied),
+            behavior: SnackBarBehavior.floating,
+            backgroundColor: const Color(0xFFEF4444),
+            action: SnackBarAction(
+              label: widget.l10n.addMeal_open_settings,
+              textColor: Colors.white,
+              onPressed: openAppSettings,
+            ),
           ),
-        ));
+        );
       }
       return;
     }
@@ -2377,10 +2678,18 @@ class _MethodStepState extends ConsumerState<_MethodStep> with SingleTickerProvi
 
   Future<void> _stopVoice() async {
     await _recorder.stop();
-    setState(() { _isRecording = false; _loadingType = _DemoLoadingType.voice; _items = []; _error = null; });
+    setState(() {
+      _isRecording = false;
+      _loadingType = _DemoLoadingType.voice;
+      _items = [];
+      _error = null;
+    });
     try {
       final form = FormData.fromMap({
-        'audio': await MultipartFile.fromFile(_recordPath!, filename: 'voice.m4a'),
+        'audio': await MultipartFile.fromFile(
+          _recordPath!,
+          filename: 'voice.m4a',
+        ),
       });
       final resp = await apiDio.post('/api/onboarding/transcribe', data: form);
       final text = resp.data['text'] as String? ?? '';
@@ -2418,8 +2727,10 @@ class _MethodStepState extends ConsumerState<_MethodStep> with SingleTickerProvi
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(l10n.addMeal_photo,
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+            Text(
+              l10n.addMeal_photo,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+            ),
             const SizedBox(height: 16),
             _OBSourceOption(
               icon: Icons.camera_alt_rounded,
@@ -2435,8 +2746,10 @@ class _MethodStepState extends ConsumerState<_MethodStep> with SingleTickerProvi
             const SizedBox(height: 4),
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: Text(l10n.common_cancel,
-                  style: const TextStyle(color: AppColors.textMuted)),
+              child: Text(
+                l10n.common_cancel,
+                style: const TextStyle(color: AppColors.textMuted),
+              ),
             ),
           ],
         ),
@@ -2457,11 +2770,23 @@ class _MethodStepState extends ConsumerState<_MethodStep> with SingleTickerProvi
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(l10n.ob_method_title,
-                  style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800, letterSpacing: -0.5)),
+              Text(
+                l10n.ob_method_title,
+                style: const TextStyle(
+                  fontSize: 26,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.5,
+                ),
+              ),
               const SizedBox(height: 8),
-              Text(l10n.ob_method_sub,
-                  style: const TextStyle(color: AppColors.textMuted, fontSize: 14, height: 1.4)),
+              Text(
+                l10n.ob_method_sub,
+                style: const TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 14,
+                  height: 1.4,
+                ),
+              ),
               const SizedBox(height: 20),
 
               // Method tiles
@@ -2470,11 +2795,17 @@ class _MethodStepState extends ConsumerState<_MethodStep> with SingleTickerProvi
                 title: l10n.ob_method_photo_title,
                 desc: l10n.ob_method_photo_desc,
                 active: _active == _DemoMode.photo,
-                onTap: _loading ? null : () {
-                  AnalyticsService.onboardingMethodSelected('photo');
-                  setState(() { _active = _DemoMode.photo; _items = []; _error = null; });
-                  _showPhotoSourcePicker();
-                },
+                onTap: _loading
+                    ? null
+                    : () {
+                        AnalyticsService.onboardingMethodSelected('photo');
+                        setState(() {
+                          _active = _DemoMode.photo;
+                          _items = [];
+                          _error = null;
+                        });
+                        _showPhotoSourcePicker();
+                      },
               ),
               const SizedBox(height: 10),
               _MethodTile(
@@ -2485,17 +2816,23 @@ class _MethodStepState extends ConsumerState<_MethodStep> with SingleTickerProvi
                     : l10n.ob_method_voice_desc,
                 active: _active == _DemoMode.voice,
                 recording: _isRecording,
-                onTap: _loading ? null : () {
-                  if (_active != _DemoMode.voice) {
-                    AnalyticsService.onboardingMethodSelected('voice');
-                    setState(() { _active = _DemoMode.voice; _items = []; _error = null; });
-                    _startVoice();
-                  } else if (_isRecording) {
-                    _stopVoice();
-                  } else {
-                    _startVoice();
-                  }
-                },
+                onTap: _loading
+                    ? null
+                    : () {
+                        if (_active != _DemoMode.voice) {
+                          AnalyticsService.onboardingMethodSelected('voice');
+                          setState(() {
+                            _active = _DemoMode.voice;
+                            _items = [];
+                            _error = null;
+                          });
+                          _startVoice();
+                        } else if (_isRecording) {
+                          _stopVoice();
+                        } else {
+                          _startVoice();
+                        }
+                      },
               ),
               const SizedBox(height: 10),
               _MethodTile(
@@ -2503,14 +2840,16 @@ class _MethodStepState extends ConsumerState<_MethodStep> with SingleTickerProvi
                 title: l10n.ob_method_text_title,
                 desc: l10n.ob_method_text_desc,
                 active: _active == _DemoMode.text,
-                onTap: _loading ? null : () {
-                  AnalyticsService.onboardingMethodSelected('text');
-                  setState(() {
-                    _active = _DemoMode.text;
-                    _items = [];
-                    _error = null;
-                  });
-                },
+                onTap: _loading
+                    ? null
+                    : () {
+                        AnalyticsService.onboardingMethodSelected('text');
+                        setState(() {
+                          _active = _DemoMode.text;
+                          _items = [];
+                          _error = null;
+                        });
+                      },
               ),
 
               // Text input area
@@ -2535,13 +2874,18 @@ class _MethodStepState extends ConsumerState<_MethodStep> with SingleTickerProvi
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(14),
-                      borderSide: const BorderSide(color: OBColors.pink, width: 2),
+                      borderSide: const BorderSide(
+                        color: OBColors.pink,
+                        width: 2,
+                      ),
                     ),
                   ),
                 ),
                 const SizedBox(height: 10),
                 GestureDetector(
-                  onTap: _loadingType == _DemoLoadingType.text ? null : () => _parseText(_textCtrl.text),
+                  onTap: _loadingType == _DemoLoadingType.text
+                      ? null
+                      : () => _parseText(_textCtrl.text),
                   child: Container(
                     height: 48,
                     decoration: BoxDecoration(
@@ -2550,10 +2894,22 @@ class _MethodStepState extends ConsumerState<_MethodStep> with SingleTickerProvi
                     ),
                     alignment: Alignment.center,
                     child: _loadingType == _DemoLoadingType.text
-                        ? const SizedBox(width: 20, height: 20,
-                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                        : Text(l10n.ob_method_recognize,
-                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15)),
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : Text(
+                            l10n.ob_method_recognize,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 15,
+                            ),
+                          ),
                   ),
                 ),
               ],
@@ -2569,10 +2925,29 @@ class _MethodStepState extends ConsumerState<_MethodStep> with SingleTickerProvi
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.error_outline, color: AppColors.accentOver, size: 18),
+                      const Icon(
+                        Icons.error_outline,
+                        color: AppColors.accentOver,
+                        size: 18,
+                      ),
                       const SizedBox(width: 8),
-                      Expanded(child: Text(_error!, style: const TextStyle(fontSize: 13, color: AppColors.accentOver))),
-                      GestureDetector(onTap: _reset, child: const Icon(Icons.close, size: 16, color: AppColors.textMuted)),
+                      Expanded(
+                        child: Text(
+                          _error!,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: AppColors.accentOver,
+                          ),
+                        ),
+                      ),
+                      GestureDetector(
+                        onTap: _reset,
+                        child: const Icon(
+                          Icons.close,
+                          size: 16,
+                          color: AppColors.textMuted,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -2593,15 +2968,29 @@ class _MethodStepState extends ConsumerState<_MethodStep> with SingleTickerProvi
                     children: [
                       Row(
                         children: [
-                          const Icon(Icons.check_circle_rounded, color: OBColors.pink, size: 18),
+                          const Icon(
+                            Icons.check_circle_rounded,
+                            color: OBColors.pink,
+                            size: 18,
+                          ),
                           const SizedBox(width: 8),
-                          Text(l10n.ob_method_recognized,
-                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                          Text(
+                            l10n.ob_method_recognized,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 14,
+                            ),
+                          ),
                           const Spacer(),
                           GestureDetector(
                             onTap: _reset,
-                            child: Text(l10n.ob_method_reset,
-                                style: const TextStyle(color: OBColors.pink, fontSize: 13)),
+                            child: Text(
+                              l10n.ob_method_reset,
+                              style: const TextStyle(
+                                color: OBColors.pink,
+                                fontSize: 13,
+                              ),
+                            ),
                           ),
                         ],
                       ),
@@ -2611,28 +3000,63 @@ class _MethodStepState extends ConsumerState<_MethodStep> with SingleTickerProvi
                         final first = (sug != null && sug.isNotEmpty)
                             ? sug[0] as Map<String, dynamic>
                             : item;
-                        final name = first['name'] as String? ?? item['name'] as String? ?? '';
-                        final cal = (first['calories'] as num?)?.toStringAsFixed(0) ?? '?';
-                        final protein = (first['protein'] as num?)?.toStringAsFixed(0);
+                        final name =
+                            first['name'] as String? ??
+                            item['name'] as String? ??
+                            '';
+                        final cal =
+                            (first['calories'] as num?)?.toStringAsFixed(0) ??
+                            '?';
+                        final protein = (first['protein'] as num?)
+                            ?.toStringAsFixed(0);
                         final fat = (first['fat'] as num?)?.toStringAsFixed(0);
-                        final carbs = (first['carbs'] as num?)?.toStringAsFixed(0);
+                        final carbs = (first['carbs'] as num?)?.toStringAsFixed(
+                          0,
+                        );
 
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 8),
                           child: Row(
                             children: [
                               Container(
-                                width: 8, height: 8,
-                                decoration: const BoxDecoration(color: OBColors.pink, shape: BoxShape.circle),
+                                width: 8,
+                                height: 8,
+                                decoration: const BoxDecoration(
+                                  color: OBColors.pink,
+                                  shape: BoxShape.circle,
+                                ),
                               ),
                               const SizedBox(width: 10),
-                              Expanded(child: Text(name, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500))),
-                              Text(l10n.ob_method_kcal(cal),
-                                  style: const TextStyle(fontSize: 13, color: OBColors.pink, fontWeight: FontWeight.w700)),
+                              Expanded(
+                                child: Text(
+                                  name,
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                              Text(
+                                l10n.ob_method_kcal(cal),
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  color: OBColors.pink,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
                               if (protein != null) ...[
                                 const SizedBox(width: 6),
-                                Text(l10n.ob_method_macros(protein, fat ?? '0', carbs ?? '0'),
-                                    style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+                                Text(
+                                  l10n.ob_method_macros(
+                                    protein,
+                                    fat ?? '0',
+                                    carbs ?? '0',
+                                  ),
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: AppColors.textMuted,
+                                  ),
+                                ),
                               ],
                             ],
                           ),
@@ -2650,12 +3074,20 @@ class _MethodStepState extends ConsumerState<_MethodStep> with SingleTickerProvi
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.celebration_rounded, color: OBColors.pink, size: 18),
+                      const Icon(
+                        Icons.celebration_rounded,
+                        color: OBColors.pink,
+                        size: 18,
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           l10n.ob_method_ai_success,
-                          style: const TextStyle(color: OBColors.pink, fontSize: 13, fontWeight: FontWeight.w500),
+                          style: const TextStyle(
+                            color: OBColors.pink,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
                       ),
                     ],
@@ -2669,11 +3101,9 @@ class _MethodStepState extends ConsumerState<_MethodStep> with SingleTickerProvi
         ),
 
         // Animated recognition overlay for voice/photo
-        if (_loadingType == _DemoLoadingType.voice || _loadingType == _DemoLoadingType.photo)
-          _OBRecognizingOverlay(
-            type: _loadingType,
-            l10n: widget.l10n,
-          ),
+        if (_loadingType == _DemoLoadingType.voice ||
+            _loadingType == _DemoLoadingType.photo)
+          _OBRecognizingOverlay(type: _loadingType, l10n: widget.l10n),
       ],
     );
   }
@@ -2696,7 +3126,6 @@ class _MethodTile extends StatelessWidget {
     this.recording = false,
   });
 
-
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
@@ -2717,25 +3146,39 @@ class _MethodTile extends StatelessWidget {
           children: [
             recording
                 ? _PulsingDot()
-                : Icon(icon, size: 28, color: active ? OBColors.pink : AppColors.text),
+                : Icon(
+                    icon,
+                    size: 28,
+                    color: active ? OBColors.pink : AppColors.text,
+                  ),
             const SizedBox(width: 14),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 15,
-                        color: active ? OBColors.pink : AppColors.text,
-                      )),
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 15,
+                      color: active ? OBColors.pink : AppColors.text,
+                    ),
+                  ),
                   const SizedBox(height: 2),
-                  Text(desc, style: const TextStyle(color: AppColors.textMuted, fontSize: 13)),
+                  Text(
+                    desc,
+                    style: const TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 13,
+                    ),
+                  ),
                 ],
               ),
             ),
             Icon(
-              active ? Icons.check_circle_rounded : Icons.arrow_forward_ios_rounded,
+              active
+                  ? Icons.check_circle_rounded
+                  : Icons.arrow_forward_ios_rounded,
               color: active ? OBColors.pink : AppColors.textMuted,
               size: active ? 22 : 16,
             ),
@@ -2751,15 +3194,18 @@ class _PulsingDot extends StatefulWidget {
   State<_PulsingDot> createState() => _PulsingDotState();
 }
 
-class _PulsingDotState extends State<_PulsingDot> with SingleTickerProviderStateMixin {
+class _PulsingDotState extends State<_PulsingDot>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl;
   late final Animation<double> _anim;
 
   @override
   void initState() {
     super.initState();
-    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 800))
-      ..repeat(reverse: true);
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    )..repeat(reverse: true);
     _anim = Tween<double>(begin: 0.5, end: 1.0).animate(_ctrl);
   }
 
@@ -2814,7 +3260,11 @@ class _StepScaffold extends StatelessWidget {
   final String hint;
   final Widget child;
 
-  const _StepScaffold({required this.title, required this.hint, required this.child});
+  const _StepScaffold({
+    required this.title,
+    required this.hint,
+    required this.child,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -2823,8 +3273,14 @@ class _StepScaffold extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title,
-              style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800, letterSpacing: -0.5)),
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 26,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.5,
+            ),
+          ),
           const SizedBox(height: 8),
           Container(
             padding: const EdgeInsets.all(12),
@@ -2834,11 +3290,21 @@ class _StepScaffold extends StatelessWidget {
             ),
             child: Row(
               children: [
-                const Icon(Icons.lightbulb_rounded, color: OBColors.pink, size: 18),
+                const Icon(
+                  Icons.lightbulb_rounded,
+                  color: OBColors.pink,
+                  size: 18,
+                ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text(hint,
-                      style: const TextStyle(color: OBColors.pink, fontSize: 13, height: 1.4)),
+                  child: Text(
+                    hint,
+                    style: const TextStyle(
+                      color: OBColors.pink,
+                      fontSize: 13,
+                      height: 1.4,
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -2958,7 +3424,10 @@ class _OBRecognizingOverlayState extends State<_OBRecognizingOverlay>
   @override
   void initState() {
     super.initState();
-    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1400))..repeat();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    )..repeat();
   }
 
   @override
@@ -2987,7 +3456,11 @@ class _OBRecognizingOverlayState extends State<_OBRecognizingOverlay>
           const SizedBox(height: 28),
           Text(
             label,
-            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.text),
+            style: const TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+              color: AppColors.text,
+            ),
           ),
           const SizedBox(height: 8),
           _OBDotLoading(controller: _ctrl),
@@ -3016,7 +3489,10 @@ class _OBWaveAnimation extends StatelessWidget {
         return Container(
           width: 80,
           height: 80,
-          decoration: const BoxDecoration(color: OBColors.pinkSoft, shape: BoxShape.circle),
+          decoration: const BoxDecoration(
+            color: OBColors.pinkSoft,
+            shape: BoxShape.circle,
+          ),
           alignment: Alignment.center,
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -3059,7 +3535,8 @@ class _OBScanAnimation extends StatelessWidget {
     return AnimatedBuilder(
       animation: controller,
       builder: (context, _) {
-        final pulse = 0.4 + 0.3 * (0.5 + 0.5 * _approxCos(controller.value * 6.2832));
+        final pulse =
+            0.4 + 0.3 * (0.5 + 0.5 * _approxCos(controller.value * 6.2832));
         return SizedBox(
           width: 90,
           height: 90,
@@ -3071,14 +3548,24 @@ class _OBScanAnimation extends StatelessWidget {
                 child: Container(
                   width: 80,
                   height: 80,
-                  decoration: const BoxDecoration(color: OBColors.pinkSoft, shape: BoxShape.circle),
+                  decoration: const BoxDecoration(
+                    color: OBColors.pinkSoft,
+                    shape: BoxShape.circle,
+                  ),
                 ),
               ),
               Transform.rotate(
                 angle: controller.value * 6.2832,
-                child: CustomPaint(size: const Size(88, 88), painter: _OBArcPainter()),
+                child: CustomPaint(
+                  size: const Size(88, 88),
+                  painter: _OBArcPainter(),
+                ),
               ),
-              const Icon(Icons.camera_alt_rounded, color: OBColors.pink, size: 32),
+              const Icon(
+                Icons.camera_alt_rounded,
+                color: OBColors.pink,
+                size: 32,
+              ),
             ],
           ),
         );
@@ -3100,7 +3587,13 @@ class _OBArcPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 3.5
       ..strokeCap = StrokeCap.round;
-    canvas.drawArc(Rect.fromLTWH(0, 0, size.width, size.height), 0, 1.8, false, paint);
+    canvas.drawArc(
+      Rect.fromLTWH(0, 0, size.width, size.height),
+      0,
+      1.8,
+      false,
+      paint,
+    );
   }
 
   @override
@@ -3119,7 +3612,11 @@ class _OBDotLoading extends StatelessWidget {
         final count = ((controller.value * 3).floor() % 4);
         return Text(
           '●' * count + '○' * (3 - count),
-          style: const TextStyle(fontSize: 12, color: OBColors.pink, letterSpacing: 4),
+          style: const TextStyle(
+            fontSize: 12,
+            color: OBColors.pink,
+            letterSpacing: 4,
+          ),
         );
       },
     );
@@ -3155,7 +3652,11 @@ class _OBSourceOption extends StatelessWidget {
             const SizedBox(width: 12),
             Text(
               label,
-              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.text),
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: AppColors.text,
+              ),
             ),
           ],
         ),
@@ -3194,13 +3695,43 @@ class _WeightLossSpeedStepState extends State<_WeightLossSpeedStep> {
   }
 
   String _goalDateLabel(double speedKgPerWeek, bool isRu) {
-    final weightToLose = (widget.currentWeight - widget.targetWeight).clamp(0.0, 999.0);
+    final weightToLose = (widget.currentWeight - widget.targetWeight).clamp(
+      0.0,
+      999.0,
+    );
     if (weightToLose <= 0) return isRu ? 'цель достигнута' : 'goal reached';
-    final daysToGoal = (weightToLose * 7700 / (speedKgPerWeek * 7700 / 7)).ceil();
+    final daysToGoal = (weightToLose * 7700 / (speedKgPerWeek * 7700 / 7))
+        .ceil();
     final goalDate = DateTime.now().add(Duration(days: daysToGoal));
     final months = isRu
-        ? ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек']
-        : ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        ? [
+            'янв',
+            'фев',
+            'мар',
+            'апр',
+            'мая',
+            'июн',
+            'июл',
+            'авг',
+            'сен',
+            'окт',
+            'ноя',
+            'дек',
+          ]
+        : [
+            'Jan',
+            'Feb',
+            'Mar',
+            'Apr',
+            'May',
+            'Jun',
+            'Jul',
+            'Aug',
+            'Sep',
+            'Oct',
+            'Nov',
+            'Dec',
+          ];
     return '${goalDate.day} ${months[goalDate.month - 1]}';
   }
 
@@ -3212,9 +3743,13 @@ class _WeightLossSpeedStepState extends State<_WeightLossSpeedStep> {
     final title = isRu
         ? 'Как быстро вы хотите\nдостигнуть своей цели?'
         : 'How fast do you want\nto reach your goal?';
-    final speedLabel = isRu ? 'Скорость похудения в неделю' : 'Weight loss speed per week';
+    final speedLabel = isRu
+        ? 'Скорость похудения в неделю'
+        : 'Weight loss speed per week';
     final recommendedLabel = isRu ? 'Рекомендуется' : 'Recommended';
-    final goalLabel = isRu ? 'Вы достигнете своей цели\nк ' : 'You will reach your goal\nby ';
+    final goalLabel = isRu
+        ? 'Вы достигнете своей цели\nк '
+        : 'You will reach your goal\nby ';
     final kgUnit = isRu ? ' кг' : ' kg';
 
     final sliderMin = 0.1;
@@ -3318,9 +3853,27 @@ class _WeightLossSpeedStepState extends State<_WeightLossSpeedStep> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('0.1$kgUnit', style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
-                Text('0.5$kgUnit', style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
-                Text('1$kgUnit', style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                Text(
+                  '0.1$kgUnit',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textMuted,
+                  ),
+                ),
+                Text(
+                  '0.5$kgUnit',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textMuted,
+                  ),
+                ),
+                Text(
+                  '1$kgUnit',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textMuted,
+                  ),
+                ),
               ],
             ),
           ),
@@ -3346,7 +3899,11 @@ class _WeightLossSpeedStepState extends State<_WeightLossSpeedStep> {
             child: Text(
               '$goalLabel${_goalDateLabel(_speed, isRu)}',
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 16, color: AppColors.text, height: 1.4),
+              style: const TextStyle(
+                fontSize: 16,
+                color: AppColors.text,
+                height: 1.4,
+              ),
             ),
           ),
         ],
@@ -3390,11 +3947,14 @@ class _ReviewsStep extends StatelessWidget {
           // Stars
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
-            children: List.generate(5, (_) => const Icon(
-              Icons.star_rounded,
-              color: Color(0xFFFBBF24),
-              size: 36,
-            )),
+            children: List.generate(
+              5,
+              (_) => const Icon(
+                Icons.star_rounded,
+                color: Color(0xFFFBBF24),
+                size: 36,
+              ),
+            ),
           ),
           const SizedBox(height: 16),
 
@@ -3419,8 +3979,16 @@ class _ReviewsStep extends StatelessWidget {
                 height: 28,
                 child: Stack(
                   children: [
-                    _AvatarCircle(color: const Color(0xFF60A5FA), offset: 0, initial: 'A'),
-                    _AvatarCircle(color: const Color(0xFF34D399), offset: 18, initial: 'M'),
+                    _AvatarCircle(
+                      color: const Color(0xFF60A5FA),
+                      offset: 0,
+                      initial: 'A',
+                    ),
+                    _AvatarCircle(
+                      color: const Color(0xFF34D399),
+                      offset: 18,
+                      initial: 'M',
+                    ),
                   ],
                 ),
               ),
@@ -3439,10 +4007,12 @@ class _ReviewsStep extends StatelessWidget {
           const SizedBox(height: 24),
 
           // Review cards
-          ...reviews.map((r) => Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: _ReviewCard(review: r),
-          )),
+          ...reviews.map(
+            (r) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _ReviewCard(review: r),
+            ),
+          ),
         ],
       ),
     );
@@ -3453,7 +4023,11 @@ class _AvatarCircle extends StatelessWidget {
   final Color color;
   final double offset;
   final String initial;
-  const _AvatarCircle({required this.color, required this.offset, required this.initial});
+  const _AvatarCircle({
+    required this.color,
+    required this.offset,
+    required this.initial,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -3470,7 +4044,11 @@ class _AvatarCircle extends StatelessWidget {
         alignment: Alignment.center,
         child: Text(
           initial,
-          style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700),
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+          ),
         ),
       ),
     );
@@ -3486,30 +4064,36 @@ class _Review {
 const _reviewsRu = [
   _Review(
     name: 'Антон К.',
-    text: 'Разобрался за минуту. Всё просто, быстро, и наконец-то вижу прогресс.',
+    text:
+        'Разобрался за минуту. Всё просто, быстро, и наконец-то вижу прогресс.',
   ),
   _Review(
     name: 'София Л.',
-    text: 'Столько трекеров пробовала — всё бросала. А этот другой — пользуюсь каждый день.',
+    text:
+        'Столько трекеров пробовала — всё бросала. А этот другой — пользуюсь каждый день.',
   ),
   _Review(
     name: 'Данил Б.',
-    text: 'Сначала был скептичен, но приложение реально работает. За месяц минус 4 кг!',
+    text:
+        'Сначала был скептичен, но приложение реально работает. За месяц минус 4 кг!',
   ),
 ];
 
 const _reviewsEn = [
   _Review(
     name: 'Anton K.',
-    text: 'Figured it out in a minute. Simple, fast, and I finally see real progress.',
+    text:
+        'Figured it out in a minute. Simple, fast, and I finally see real progress.',
   ),
   _Review(
     name: 'Sofia L.',
-    text: 'Tried so many trackers — always quit. This one is different — use it every day.',
+    text:
+        'Tried so many trackers — always quit. This one is different — use it every day.',
   ),
   _Review(
     name: 'Daniel B.',
-    text: 'Was skeptical at first, but the app actually works. Minus 4 kg in one month!',
+    text:
+        'Was skeptical at first, but the app actually works. Minus 4 kg in one month!',
   ),
 ];
 
@@ -3569,11 +4153,14 @@ class _ReviewCard extends StatelessWidget {
                     ),
                   ),
                   Row(
-                    children: List.generate(5, (_) => const Icon(
-                      Icons.star_rounded,
-                      color: Color(0xFFFBBF24),
-                      size: 14,
-                    )),
+                    children: List.generate(
+                      5,
+                      (_) => const Icon(
+                        Icons.star_rounded,
+                        color: Color(0xFFFBBF24),
+                        size: 14,
+                      ),
+                    ),
                   ),
                 ],
               ),
