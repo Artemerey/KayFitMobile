@@ -140,6 +140,11 @@ class PhotoRecognitionNotifier extends Notifier<PhotoRecognitionState> {
   // Photos waiting to be recognized (excludes the in-flight one).
   final List<_QueuedPhoto> _pending = [];
 
+  // A capture may be delivered twice by a rapid tap / route callback. Keep the
+  // path reserved until its outcome is consumed so it can trigger only one
+  // recognition request and one result prompt.
+  final Set<String> _knownPaths = <String>{};
+
   // True while a recognition HTTP call is in flight.
   bool _busy = false;
 
@@ -153,6 +158,7 @@ class PhotoRecognitionNotifier extends Notifier<PhotoRecognitionState> {
   /// Adds a photo to the recognition queue and kicks the processor.
   /// Photos are recognized strictly one at a time, in FIFO order.
   void enqueue(XFile photo, String lang) {
+    if (photo.path.isEmpty || !_knownPaths.add(photo.path)) return;
     _pending.add(_QueuedPhoto(photo, lang));
     state = state.copyWith(queuedCount: _pending.length);
     unawaited(_kick());
@@ -162,6 +168,7 @@ class PhotoRecognitionNotifier extends Notifier<PhotoRecognitionState> {
   /// shown to the user (sheet dismissed, or error message injected).
   void consumeFirstOutcome() {
     if (state.outcomes.isEmpty) return;
+    _knownPaths.remove(state.outcomes.first.photoPath);
     state = state.copyWith(outcomes: state.outcomes.sublist(1));
   }
 
@@ -171,6 +178,7 @@ class PhotoRecognitionNotifier extends Notifier<PhotoRecognitionState> {
     _gen++;
     _stageTimer?.cancel();
     _pending.clear();
+    _knownPaths.clear();
     _busy = false;
     state = const PhotoRecognitionState();
   }
