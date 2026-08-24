@@ -27,6 +27,7 @@ import 'features/add_meal/screens/kf2_result_page.dart';
 import 'features/add_meal/screens/recognition_result_args.dart';
 import 'features/chat/screens/chat_v2_screen.dart';
 import 'features/journal/screens/journal_v2_screen.dart';
+import 'features/meal_program/screens/meal_program_screen.dart';
 import 'features/recipes/screens/recipes_screen.dart';
 import 'features/recipes/screens/recipe_detail_screen.dart';
 import 'features/kayfit2/screens/kayfit2_preview_screen.dart';
@@ -234,6 +235,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/journal-v2',
         builder: (context, state) => const JournalV2Screen(),
+      ),
+      GoRoute(
+        path: '/meal-program',
+        builder: (context, state) => const MealProgramScreen(),
       ),
       GoRoute(
         path: '/chat-v2',
