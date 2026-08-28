@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
@@ -16,9 +17,61 @@ import '../../../core/api/api_client.dart';
 
 part 'journal_screen.g.dart';
 
+enum MealProgramSyncOutcome { synced, unavailable, skipped }
+
+/// Materializes the server-owned meal program for [date] into the journal.
+///
+/// The backend deliberately performs the journal upsert while reading a
+/// program day. Keeping this call inside the journal removes the old hidden
+/// dependency on opening `/meal-program` first.
+@visibleForTesting
+Future<MealProgramSyncOutcome> syncMealProgramDay({
+  required String date,
+  Dio? client,
+}) async {
+  final dio = client ?? apiDio;
+  try {
+    String? programId;
+    try {
+      final current = await dio.get('/api/meal-programs/current');
+      programId = current.data['id'] as String?;
+    } on DioException catch (error) {
+      if (error.response?.statusCode == 402) {
+        return MealProgramSyncOutcome.unavailable;
+      }
+      if (error.response?.statusCode != 404) rethrow;
+      debugPrint('[meal_program] No current program; creating one');
+      final created = await dio.post('/api/meal-programs');
+      programId = created.data['id'] as String?;
+    }
+    if (programId == null) return MealProgramSyncOutcome.skipped;
+    await dio.get(
+      '/api/meal-programs/$programId/days',
+      queryParameters: {'from': date, 'to': date},
+    );
+    debugPrint('[meal_program] Synced $date into journal');
+    return MealProgramSyncOutcome.synced;
+  } on DioException catch (error) {
+    debugPrint(
+      '[meal_program] Sync skipped status=${error.response?.statusCode}',
+    );
+    if ({402, 404, 422}.contains(error.response?.statusCode)) {
+      return error.response?.statusCode == 402
+          ? MealProgramSyncOutcome.unavailable
+          : MealProgramSyncOutcome.skipped;
+    }
+    // A meal-program outage must not prevent users from opening their journal.
+    return MealProgramSyncOutcome.skipped;
+  }
+}
+
 @riverpod
 Future<List<Meal>> journalDayMeals(JournalDayMealsRef ref, String date) async {
-  final resp = await apiDio.get('/api/meals/history', queryParameters: {'limit': 500});
+  await syncMealProgramDay(date: date);
+  final resp = await apiDio.get(
+    '/api/meals/history',
+    queryParameters: {'limit': 500},
+  );
   final list = resp.data as List<dynamic>;
   final all = list.map((e) {
     final map = Map<String, dynamic>.from(e as Map);
@@ -32,7 +85,8 @@ Future<List<Meal>> journalDayMeals(JournalDayMealsRef ref, String date) async {
     if (raw == null) return false;
     final mDate = DateTime.tryParse(raw)?.toLocal();
     if (mDate == null) return false;
-    final dayStr = '${mDate.year.toString().padLeft(4, '0')}-'
+    final dayStr =
+        '${mDate.year.toString().padLeft(4, '0')}-'
         '${mDate.month.toString().padLeft(2, '0')}-'
         '${mDate.day.toString().padLeft(2, '0')}';
     return dayStr == date;
