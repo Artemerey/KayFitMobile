@@ -35,6 +35,7 @@ class Kayfit2MealRow extends StatelessWidget {
     this.onLongPress,
     this.onMore,
     this.onWeightChange,
+    this.onReplace,
   });
 
   /// Meal data to render.
@@ -63,6 +64,9 @@ class Kayfit2MealRow extends StatelessWidget {
   /// (the pill is still shown read-only when [K2MealRowData.weightGrams]
   /// is non-null).
   final ValueChanged<double>? onWeightChange;
+
+  /// Replaces an AI-plan meal with a server-approved analogue.
+  final VoidCallback? onReplace;
 
   @override
   Widget build(BuildContext context) {
@@ -96,7 +100,7 @@ class Kayfit2MealRow extends StatelessWidget {
             const SizedBox(width: 12),
 
             // ── RIGHT: kcal number + label ─────────────────────────────────
-            _KcalColumn(meal: meal, theme: theme),
+            _KcalColumn(meal: meal, theme: theme, onReplace: onReplace),
 
             // ── FAR RIGHT: ⋮ copy button (optional) ───────────────────────
             if (onMore != null) ...[
@@ -474,10 +478,15 @@ class _MacroLine extends StatelessWidget {
 }
 
 class _KcalColumn extends StatelessWidget {
-  const _KcalColumn({required this.meal, required this.theme});
+  const _KcalColumn({
+    required this.meal,
+    required this.theme,
+    required this.onReplace,
+  });
 
   final K2MealRowData meal;
   final K2Theme theme;
+  final VoidCallback? onReplace;
 
   @override
   Widget build(BuildContext context) {
@@ -508,18 +517,42 @@ class _KcalColumn extends StatelessWidget {
         ),
         if (meal.isAiRecommendation) ...[
           const SizedBox(height: 10),
-          Text(
-            Localizations.localeOf(context).languageCode == 'ru'
-                ? 'Рекомендация AI'
-                : 'AI recommendation',
-            style: TextStyle(
-              fontSize: 8,
-              fontWeight: FontWeight.w400,
-              color: theme.fgMute,
-              letterSpacing: 0.1,
-              height: 1.2,
-            ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.auto_awesome_rounded, size: 10, color: theme.fgMute),
+              const SizedBox(width: 3),
+              Text(
+                'Suggested by AI',
+                style: TextStyle(
+                  fontSize: 8,
+                  fontWeight: FontWeight.w400,
+                  color: theme.fgMute,
+                  letterSpacing: 0.1,
+                  height: 1.2,
+                ),
+              ),
+            ],
           ),
+          if (onReplace != null)
+            TextButton(
+              onPressed: onReplace,
+              style: TextButton.styleFrom(
+                minimumSize: Size.zero,
+                padding: const EdgeInsets.only(top: 4),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                foregroundColor: theme.fgDim,
+              ),
+              child: Text(
+                Localizations.localeOf(context).languageCode == 'ru'
+                    ? 'Заменить'
+                    : 'Replace',
+                style: const TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
         ],
       ],
     );

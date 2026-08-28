@@ -9,6 +9,7 @@
 
 import 'dart:async';
 
+import 'package:kayfit/core/analytics/analytics_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -65,6 +66,12 @@ double? _extractWeightFromName(String name) {
   return double.tryParse(m.group(1)!.replaceAll(',', '.'));
 }
 
+String? _mealProgramEntryId(String? sourceUrl) {
+  if (sourceUrl == null) return null;
+  final parts = sourceUrl.split(':');
+  return parts.length == 3 && parts.first == 'meal-program' ? parts.last : null;
+}
+
 /// Converts a [Meal] from the API into the KF2 view-model.
 K2MealRowData _toRowData(Meal m) {
   // Extract HH:MM from ISO createdAt, fallback to '--:--'.
@@ -107,6 +114,7 @@ K2MealRowData _toRowData(Meal m) {
     carbs: m.carbs.round(),
     source: source,
     isAiRecommendation: m.source == 'ai_plan',
+    mealProgramEntryId: _mealProgramEntryId(m.sourceUrl),
     weightGrams: weightGrams,
     photoSeed: photoSeed,
     photoUrl: m.sourceUrl,
@@ -203,6 +211,90 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
         );
       }
       return false;
+    }
+  }
+
+  Future<void> _replaceAiMeal(K2MealRowData meal) async {
+    final entryId = meal.mealProgramEntryId;
+    if (entryId == null) return;
+    final isRu = Localizations.localeOf(context).languageCode == 'ru';
+    try {
+      final response = await apiDio.post(
+        '/api/meal-plan-entries/$entryId/replace-options',
+      );
+      final data = Map<String, dynamic>.from(response.data as Map);
+      final options = List<Map<String, dynamic>>.from(
+        (data['items'] as List).map((item) => Map<String, dynamic>.from(item)),
+      );
+      if (!mounted) return;
+      if (options.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              isRu
+                  ? 'Подходящих аналогов не найдено'
+                  : 'No suitable alternatives found',
+            ),
+          ),
+        );
+        return;
+      }
+      final selectedId = await showModalBottomSheet<String>(
+        context: context,
+        showDragHandle: true,
+        builder: (sheetContext) => SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+                child: Text(
+                  isRu ? 'Выберите аналог' : 'Choose an alternative',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+              for (final option in options)
+                ListTile(
+                  title: Text(option['name'].toString()),
+                  subtitle: Text(
+                    '${option['portion_g']} g · ${(option['calories'] as num).round()} kcal',
+                  ),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () =>
+                      Navigator.pop(sheetContext, option['meal_id'].toString()),
+                ),
+            ],
+          ),
+        ),
+      );
+      if (selectedId == null) return;
+      await apiDio.post(
+        '/api/meal-plan-entries/$entryId/replace',
+        data: {'meal_id': selectedId},
+      );
+      AnalyticsService.tap('journal', 'meal_plan_entry_replaced', {
+        'meal_type': meal.type,
+      });
+      ref.invalidate(todayStatsProvider);
+      ref.invalidate(todayMealsProvider);
+      ref.invalidate(dailyKcalHistoryProvider);
+      ref.invalidate(journalDayMealsProvider(_dateKey));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(isRu ? 'Блюдо заменено' : 'Meal replaced')),
+        );
+      }
+    } on Exception {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              isRu ? 'Не удалось заменить блюдо' : 'Could not replace meal',
+            ),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -651,6 +743,7 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
                       onCopy: _onCopyTapped,
                       onCopyGroup: _onCopyGroupTapped,
                       onWeightChange: _onRowWeightChange,
+                      onReplace: _replaceAiMeal,
                     );
                   },
                 ),
@@ -735,6 +828,7 @@ class _MealList extends StatelessWidget {
     this.onCopy,
     this.onCopyGroup,
     this.onWeightChange,
+    this.onReplace,
   });
 
   final List<K2MealRowData> rows;
@@ -755,6 +849,8 @@ class _MealList extends StatelessWidget {
   /// Inline weight edit committed on a row. Receives `(mealId, newGrams)`.
   /// Null disables the inline edit (pill becomes read-only).
   final void Function(String id, double grams)? onWeightChange;
+
+  final ValueChanged<K2MealRowData>? onReplace;
 
   @override
   Widget build(BuildContext context) {
@@ -794,6 +890,10 @@ class _MealList extends StatelessWidget {
                   onWeightChange: onWeightChange == null
                       ? null
                       : (g) => onWeightChange!(meal.id, g),
+                  onReplace:
+                      meal.mealProgramEntryId == null || onReplace == null
+                      ? null
+                      : () => onReplace!(meal),
                 ),
               )
             else
@@ -807,6 +907,9 @@ class _MealList extends StatelessWidget {
                 onWeightChange: onWeightChange == null
                     ? null
                     : (g) => onWeightChange!(meal.id, g),
+                onReplace: meal.mealProgramEntryId == null || onReplace == null
+                    ? null
+                    : () => onReplace!(meal),
               ),
         ],
         const SizedBox(height: 16),

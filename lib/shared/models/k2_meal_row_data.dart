@@ -36,6 +36,7 @@ class K2MealRowData {
     required this.carbs,
     required this.source,
     this.isAiRecommendation = false,
+    this.mealProgramEntryId,
     this.weightGrams,
     this.photoSeed,
     this.photoUrl,
@@ -71,6 +72,10 @@ class K2MealRowData {
   /// True only for server meal-program entries (`source=ai_plan`).
   final bool isAiRecommendation;
 
+  /// Structured meal-program entry ID, extracted from the server source URL.
+  /// Present only for replaceable AI-plan meals.
+  final String? mealProgramEntryId;
+
   /// Weight in grams when known. Surface separately from `name` so the row
   /// can render a tappable pill that's inline-editable in the journal list.
   /// Null when the meal was logged without a weight (legacy).
@@ -99,6 +104,7 @@ class K2MealRowData {
     int? carbs,
     K2MealSource? source,
     bool? isAiRecommendation,
+    String? mealProgramEntryId,
     double? weightGrams,
     int? photoSeed,
     String? photoUrl,
@@ -114,6 +120,7 @@ class K2MealRowData {
       carbs: carbs ?? this.carbs,
       source: source ?? this.source,
       isAiRecommendation: isAiRecommendation ?? this.isAiRecommendation,
+      mealProgramEntryId: mealProgramEntryId ?? this.mealProgramEntryId,
       weightGrams: weightGrams ?? this.weightGrams,
       photoSeed: photoSeed ?? this.photoSeed,
       photoUrl: photoUrl ?? this.photoUrl,
@@ -134,6 +141,7 @@ class K2MealRowData {
         other.carbs == carbs &&
         other.source == source &&
         other.isAiRecommendation == isAiRecommendation &&
+        other.mealProgramEntryId == mealProgramEntryId &&
         other.weightGrams == weightGrams &&
         other.photoSeed == photoSeed &&
         other.photoUrl == photoUrl;
@@ -151,6 +159,7 @@ class K2MealRowData {
     carbs,
     source,
     isAiRecommendation,
+    mealProgramEntryId,
     weightGrams,
     photoSeed,
     photoUrl,

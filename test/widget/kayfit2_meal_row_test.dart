@@ -94,19 +94,32 @@ const _aiMeal = K2MealRowData(
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 void main() {
-  testWidgets('shows AI recommendation badge only for meal-program entries', (
-    tester,
-  ) async {
-    await tester.pumpWidget(
-      _wrap(const Kayfit2MealRow(meal: _aiMeal, theme: _light)),
-    );
-    expect(find.text('AI recommendation'), findsOneWidget);
+  testWidgets(
+    'shows subtle AI suggestion and replace action for plan entries',
+    (tester) async {
+      var replaced = false;
+      await tester.pumpWidget(
+        _wrap(
+          Kayfit2MealRow(
+            meal: _aiMeal,
+            theme: _light,
+            onReplace: () => replaced = true,
+          ),
+        ),
+      );
+      expect(find.text('Suggested by AI'), findsOneWidget);
+      expect(find.byIcon(Icons.auto_awesome_rounded), findsOneWidget);
+      expect(find.text('Replace'), findsOneWidget);
+      await tester.tap(find.text('Replace'));
+      expect(replaced, isTrue);
 
-    await tester.pumpWidget(
-      _wrap(const Kayfit2MealRow(meal: _textMeal, theme: _light)),
-    );
-    expect(find.text('AI recommendation'), findsNothing);
-  });
+      await tester.pumpWidget(
+        _wrap(const Kayfit2MealRow(meal: _textMeal, theme: _light)),
+      );
+      expect(find.text('Suggested by AI'), findsNothing);
+      expect(find.text('Replace'), findsNothing);
+    },
+  );
 
   // ── Kayfit2MealPhoto ──────────────────────────────────────────────────────
 
