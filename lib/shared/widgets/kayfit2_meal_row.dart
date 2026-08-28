@@ -202,10 +202,6 @@ class _CenterColumn extends StatelessWidget {
             ),
           ),
         const SizedBox(height: 2),
-        if (meal.isAiRecommendation) ...[
-          _AiRecommendationBadge(theme: theme),
-          const SizedBox(height: 5),
-        ],
         // Meal name
         Text(
           meal.name,
@@ -235,45 +231,6 @@ class _CenterColumn extends StatelessWidget {
           ],
         ),
       ],
-    );
-  }
-}
-
-class _AiRecommendationBadge extends StatelessWidget {
-  const _AiRecommendationBadge({required this.theme});
-
-  final K2Theme theme;
-
-  @override
-  Widget build(BuildContext context) {
-    final isRu = Localizations.localeOf(context).languageCode == 'ru';
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-      decoration: BoxDecoration(
-        color: const Color(0xFFEDE9FE),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: const Color(0xFFC4B5FD)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(
-            Icons.auto_awesome_rounded,
-            size: 11,
-            color: Color(0xFF7C3AED),
-          ),
-          const SizedBox(width: 4),
-          Text(
-            isRu ? 'Рекомендация AI' : 'AI recommendation',
-            style: TextStyle(
-              fontSize: 9,
-              fontWeight: FontWeight.w700,
-              color: theme.fg,
-              letterSpacing: 0.2,
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -549,6 +506,21 @@ class _KcalColumn extends StatelessWidget {
             height: 1.2,
           ),
         ),
+        if (meal.isAiRecommendation) ...[
+          const SizedBox(height: 10),
+          Text(
+            Localizations.localeOf(context).languageCode == 'ru'
+                ? 'Рекомендация AI'
+                : 'AI recommendation',
+            style: TextStyle(
+              fontSize: 8,
+              fontWeight: FontWeight.w400,
+              color: theme.fgMute,
+              letterSpacing: 0.1,
+              height: 1.2,
+            ),
+          ),
+        ],
       ],
     );
   }
