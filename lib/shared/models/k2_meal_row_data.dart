@@ -15,11 +15,11 @@ enum K2MealSource {
 
   /// Short uppercase label shown in the row when there is no photo thumbnail.
   String get label => switch (this) {
-        K2MealSource.photo => 'PHOTO',
-        K2MealSource.voice => 'VOICE',
-        K2MealSource.text => 'TEXT',
-        K2MealSource.barcode => 'SCAN',
-      };
+    K2MealSource.photo => 'PHOTO',
+    K2MealSource.voice => 'VOICE',
+    K2MealSource.text => 'TEXT',
+    K2MealSource.barcode => 'SCAN',
+  };
 }
 
 /// Immutable view-model for a single meal entry rendered by [Kayfit2MealRow].
@@ -35,6 +35,7 @@ class K2MealRowData {
     required this.fat,
     required this.carbs,
     required this.source,
+    this.isAiRecommendation = false,
     this.weightGrams,
     this.photoSeed,
     this.photoUrl,
@@ -67,6 +68,9 @@ class K2MealRowData {
   /// How the meal was logged.
   final K2MealSource source;
 
+  /// True only for server meal-program entries (`source=ai_plan`).
+  final bool isAiRecommendation;
+
   /// Weight in grams when known. Surface separately from `name` so the row
   /// can render a tappable pill that's inline-editable in the journal list.
   /// Null when the meal was logged without a weight (legacy).
@@ -94,6 +98,7 @@ class K2MealRowData {
     int? fat,
     int? carbs,
     K2MealSource? source,
+    bool? isAiRecommendation,
     double? weightGrams,
     int? photoSeed,
     String? photoUrl,
@@ -108,6 +113,7 @@ class K2MealRowData {
       fat: fat ?? this.fat,
       carbs: carbs ?? this.carbs,
       source: source ?? this.source,
+      isAiRecommendation: isAiRecommendation ?? this.isAiRecommendation,
       weightGrams: weightGrams ?? this.weightGrams,
       photoSeed: photoSeed ?? this.photoSeed,
       photoUrl: photoUrl ?? this.photoUrl,
@@ -127,6 +133,7 @@ class K2MealRowData {
         other.fat == fat &&
         other.carbs == carbs &&
         other.source == source &&
+        other.isAiRecommendation == isAiRecommendation &&
         other.weightGrams == weightGrams &&
         other.photoSeed == photoSeed &&
         other.photoUrl == photoUrl;
@@ -134,17 +141,18 @@ class K2MealRowData {
 
   @override
   int get hashCode => Object.hash(
-        id,
-        time,
-        type,
-        name,
-        kcal,
-        protein,
-        fat,
-        carbs,
-        source,
-        weightGrams,
-        photoSeed,
-        photoUrl,
-      );
+    id,
+    time,
+    type,
+    name,
+    kcal,
+    protein,
+    fat,
+    carbs,
+    source,
+    isAiRecommendation,
+    weightGrams,
+    photoSeed,
+    photoUrl,
+  );
 }

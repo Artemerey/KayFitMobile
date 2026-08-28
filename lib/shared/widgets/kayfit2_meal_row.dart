@@ -74,9 +74,7 @@ class Kayfit2MealRow extends StatelessWidget {
       child: Container(
         padding: EdgeInsets.symmetric(horizontal: 16, vertical: vertPad),
         decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(color: theme.hairline, width: 1),
-          ),
+          border: Border(bottom: BorderSide(color: theme.hairline, width: 1)),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -204,14 +202,14 @@ class _CenterColumn extends StatelessWidget {
             ),
           ),
         const SizedBox(height: 2),
+        if (meal.isAiRecommendation) ...[
+          _AiRecommendationBadge(theme: theme),
+          const SizedBox(height: 5),
+        ],
         // Meal name
         Text(
           meal.name,
-          style: TextStyle(
-            fontSize: 14,
-            color: theme.fg,
-            height: 1.3,
-          ),
+          style: TextStyle(fontSize: 14, color: theme.fg, height: 1.3),
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
         ),
@@ -231,10 +229,51 @@ class _CenterColumn extends StatelessWidget {
               ),
               const SizedBox(width: 8),
             ],
-            Expanded(child: _MacroLine(meal: meal, theme: theme)),
+            Expanded(
+              child: _MacroLine(meal: meal, theme: theme),
+            ),
           ],
         ),
       ],
+    );
+  }
+}
+
+class _AiRecommendationBadge extends StatelessWidget {
+  const _AiRecommendationBadge({required this.theme});
+
+  final K2Theme theme;
+
+  @override
+  Widget build(BuildContext context) {
+    final isRu = Localizations.localeOf(context).languageCode == 'ru';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: const Color(0xFFEDE9FE),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: const Color(0xFFC4B5FD)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.auto_awesome_rounded,
+            size: 11,
+            color: Color(0xFF7C3AED),
+          ),
+          const SizedBox(width: 4),
+          Text(
+            isRu ? 'Рекомендация AI' : 'AI recommendation',
+            style: TextStyle(
+              fontSize: 9,
+              fontWeight: FontWeight.w700,
+              color: theme.fg,
+              letterSpacing: 0.2,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -341,8 +380,9 @@ class _WeightPillState extends State<_WeightPill> {
             child: TextField(
               controller: _ctrl,
               focusNode: _focus,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: false),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: false,
+              ),
               textAlign: TextAlign.center,
               onSubmitted: (_) => _commit(),
               style: TextStyle(
@@ -388,8 +428,11 @@ class _WeightPillState extends State<_WeightPill> {
                 color: accent,
                 borderRadius: BorderRadius.circular(13),
               ),
-              child: const Icon(Icons.check_rounded,
-                  size: 16, color: Colors.white),
+              child: const Icon(
+                Icons.check_rounded,
+                size: 16,
+                color: Colors.white,
+              ),
             ),
           ),
         ],
@@ -400,9 +443,7 @@ class _WeightPillState extends State<_WeightPill> {
     final borderColor = editable
         ? accent.withValues(alpha: isPlaceholder ? 0.7 : 0.4)
         : t.border;
-    final bgColor = isPlaceholder
-        ? accent.withValues(alpha: 0.06)
-        : t.bg;
+    final bgColor = isPlaceholder ? accent.withValues(alpha: 0.06) : t.bg;
 
     return GestureDetector(
       onTap: editable ? _startEdit : null,

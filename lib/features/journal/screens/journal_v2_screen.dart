@@ -106,6 +106,7 @@ K2MealRowData _toRowData(Meal m) {
     fat: m.fat.round(),
     carbs: m.carbs.round(),
     source: source,
+    isAiRecommendation: m.source == 'ai_plan',
     weightGrams: weightGrams,
     photoSeed: photoSeed,
     photoUrl: m.sourceUrl,

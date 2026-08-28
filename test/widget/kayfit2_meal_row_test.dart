@@ -21,26 +21,26 @@ import 'package:kayfit/shared/widgets/kayfit2_meal_row.dart';
 /// Wraps a widget with localization delegates so AppLocalizations.of(context)
 /// resolves inside Kayfit2MealRow (which uses l10n for macro labels).
 Widget _wrap(Widget child) => MaterialApp(
-      locale: const Locale('en'),
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
-      supportedLocales: AppLocalizations.supportedLocales,
-      home: Scaffold(body: child),
-    );
+  locale: const Locale('en'),
+  localizationsDelegates: AppLocalizations.localizationsDelegates,
+  supportedLocales: AppLocalizations.supportedLocales,
+  home: Scaffold(body: child),
+);
 
 const _light = K2Theme.light;
 
 K2MealRowData _photoMeal({int seed = 1}) => K2MealRowData(
-      id: 'p1',
-      time: '08:24',
-      type: 'breakfast',
-      name: 'oatmeal with berries',
-      kcal: 320,
-      protein: 12,
-      fat: 6,
-      carbs: 54,
-      source: K2MealSource.photo,
-      photoSeed: seed,
-    );
+  id: 'p1',
+  time: '08:24',
+  type: 'breakfast',
+  name: 'oatmeal with berries',
+  kcal: 320,
+  protein: 12,
+  fat: 6,
+  carbs: 54,
+  source: K2MealSource.photo,
+  photoSeed: seed,
+);
 
 const _voiceMeal = K2MealRowData(
   id: 'v1',
@@ -78,9 +78,36 @@ const _barcodeMeal = K2MealRowData(
   source: K2MealSource.barcode,
 );
 
+const _aiMeal = K2MealRowData(
+  id: 'ai1',
+  time: '12:00',
+  type: 'lunch',
+  name: 'planned lunch',
+  kcal: 500,
+  protein: 30,
+  fat: 15,
+  carbs: 55,
+  source: K2MealSource.text,
+  isAiRecommendation: true,
+);
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 void main() {
+  testWidgets('shows AI recommendation badge only for meal-program entries', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _wrap(const Kayfit2MealRow(meal: _aiMeal, theme: _light)),
+    );
+    expect(find.text('AI recommendation'), findsOneWidget);
+
+    await tester.pumpWidget(
+      _wrap(const Kayfit2MealRow(meal: _textMeal, theme: _light)),
+    );
+    expect(find.text('AI recommendation'), findsNothing);
+  });
+
   // ── Kayfit2MealPhoto ──────────────────────────────────────────────────────
 
   group('Kayfit2MealPhoto', () {
@@ -111,9 +138,7 @@ void main() {
     });
 
     testWidgets('shows camera icon', (tester) async {
-      await tester.pumpWidget(
-        _wrap(Kayfit2MealPhoto(seed: 0, theme: _light)),
-      );
+      await tester.pumpWidget(_wrap(Kayfit2MealPhoto(seed: 0, theme: _light)));
       expect(find.byIcon(Icons.camera_alt_outlined), findsOneWidget);
     });
   });
@@ -173,8 +198,9 @@ void main() {
       final kcal = tc.$3;
       final name = tc.$4;
 
-      testWidgets('${meal.source.name}: shows source label $label',
-          (tester) async {
+      testWidgets('${meal.source.name}: shows source label $label', (
+        tester,
+      ) async {
         await tester.pumpWidget(
           _wrap(Kayfit2MealRow(meal: meal, theme: _light)),
         );
