@@ -98,8 +98,14 @@ void main() {
       final raw = prefs.getString(mealLogIncidentOutboxKey)!;
       for (final forbidden in [
         'audio',
+        'image',
+        'photo.jpg',
+        'raw_ocr',
+        'label_values_raw',
         'token',
+        'email',
         'secret_url',
+        'https://',
         'stack_trace',
         'bearer ',
       ]) {

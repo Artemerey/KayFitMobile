@@ -31,6 +31,45 @@ void main() {
     expect(RecognitionClarification.fromJson(null), isNull);
   });
 
+  test('typed label clarification identifies the concrete basis field', () {
+    final parsed = RecognitionClarification.fromJson({
+      'required': true,
+      'code': 'label_nutrition_clarification_required',
+      'field': 'nutrition_basis',
+      'question': 'Уточните basis',
+      'options': ['Изменить', 'Сфотографировать снова'],
+      'uncertainty_reasons': ['nutrition_basis_conflict'],
+    });
+    expect(parsed?.code, 'label_nutrition_clarification_required');
+    expect(parsed?.field, 'nutrition_basis');
+    expect(parsed?.primaryField, RecognitionUncertainField.macros);
+  });
+
+  testWidgets('shows a concrete label basis conflict reason', (tester) async {
+    await tester.pumpWidget(
+      localized(
+        RecognitionClarificationCard(
+          clarification: const RecognitionClarification(
+            required: true,
+            question: 'Уточните данные этикетки',
+            options: ['Изменить', 'Сфотографировать снова'],
+            uncertaintyReasons: ['nutrition_basis_conflict'],
+            field: 'nutrition_basis',
+          ),
+          confirmed: false,
+          onConfirm: () {},
+          onEdit: (_) {},
+        ),
+      ),
+    );
+    expect(
+      find.text(
+        'Значения на 100 г, на порцию или на штуку противоречат друг другу',
+      ),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('requires an explicit edit or confirmation choice', (
     tester,
   ) async {

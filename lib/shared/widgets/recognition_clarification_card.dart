@@ -29,6 +29,13 @@ class RecognitionClarificationCard extends StatelessWidget {
     'low_model_confidence' => l10n.recognition_uncertainty_low_confidence,
     'provider_requested_clarification' => l10n.recognition_uncertainty_provider,
     'energy_unit_missing' => l10n.recognition_uncertainty_energy_unit,
+    'energy_unit_conflict' => l10n.recognition_uncertainty_energy_conflict,
+    'nutrition_basis_conflict' => l10n.recognition_uncertainty_basis_conflict,
+    'nutrition_basis_unknown' => l10n.recognition_uncertainty_basis_unknown,
+    'nutrition_value_low_confidence' =>
+      l10n.recognition_uncertainty_nutrition_confidence,
+    'label_payload_ambiguous' => l10n.recognition_uncertainty_label_ambiguous,
+    'label_payload_invalid' => l10n.recognition_uncertainty_label_invalid,
     _ => l10n.recognition_uncertainty_fallback,
   };
 

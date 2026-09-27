@@ -2888,6 +2888,42 @@ abstract class AppLocalizations {
   /// **'Не удалось уверенно прочитать единицу энергии'**
   String get recognition_uncertainty_energy_unit;
 
+  /// No description provided for @recognition_uncertainty_energy_conflict.
+  ///
+  /// In ru, this message translates to:
+  /// **'Значения ккал и кДж не совпадают'**
+  String get recognition_uncertainty_energy_conflict;
+
+  /// No description provided for @recognition_uncertainty_basis_conflict.
+  ///
+  /// In ru, this message translates to:
+  /// **'Значения на 100 г, на порцию или на штуку противоречат друг другу'**
+  String get recognition_uncertainty_basis_conflict;
+
+  /// No description provided for @recognition_uncertainty_basis_unknown.
+  ///
+  /// In ru, this message translates to:
+  /// **'Непонятно, к чему относятся значения КБЖУ'**
+  String get recognition_uncertainty_basis_unknown;
+
+  /// No description provided for @recognition_uncertainty_nutrition_confidence.
+  ///
+  /// In ru, this message translates to:
+  /// **'Значения КБЖУ распознаны неуверенно'**
+  String get recognition_uncertainty_nutrition_confidence;
+
+  /// No description provided for @recognition_uncertainty_label_ambiguous.
+  ///
+  /// In ru, this message translates to:
+  /// **'Нельзя однозначно связать этикетку с продуктом'**
+  String get recognition_uncertainty_label_ambiguous;
+
+  /// No description provided for @recognition_uncertainty_label_invalid.
+  ///
+  /// In ru, this message translates to:
+  /// **'Данные этикетки не прошли безопасную проверку'**
+  String get recognition_uncertainty_label_invalid;
+
   /// No description provided for @recognition_uncertainty_fallback.
   ///
   /// In ru, this message translates to:

@@ -157,6 +157,7 @@ class RecognitionResultSheetKF2 extends ConsumerStatefulWidget {
     this.feedbackSource = FeedbackSource.photo,
     this.recognitionDuration,
     this.clarification,
+    this.operationId,
   });
 
   final String dishName;
@@ -166,6 +167,7 @@ class RecognitionResultSheetKF2 extends ConsumerStatefulWidget {
   final FeedbackSource feedbackSource;
   final Duration? recognitionDuration;
   final RecognitionClarification? clarification;
+  final String? operationId;
 
   /// Called with [dishName] immediately before Navigator.pop(true).
   final void Function(String dishName)? onSaved;
@@ -203,6 +205,13 @@ class _RecognitionResultSheetKF2State
 
   String _ensureOperation() {
     if (_operationId case final id?) return id;
+    if (widget.operationId case final existingId?) {
+      ref
+          .read(mealLogOperationProvider.notifier)
+          .resumeOrCreate(existingId, MealLogSource.photo);
+      _operationId = existingId;
+      return existingId;
+    }
     final operation = ref.read(mealLogOperationProvider.notifier).start(
       switch (widget.feedbackSource) {
         FeedbackSource.voice => MealLogSource.voice,

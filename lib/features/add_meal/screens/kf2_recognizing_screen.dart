@@ -11,10 +11,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:kayfit/core/api/api_client.dart';
 import 'package:kayfit/core/feedback/feedback_models.dart';
 import 'package:kayfit/core/i18n/generated/app_localizations.dart';
+import 'package:kayfit/core/meal_logging/meal_log_incident.dart';
+import 'package:kayfit/core/meal_logging/meal_log_incident_reporter.dart';
+import 'package:kayfit/core/meal_logging/meal_log_operation.dart';
+import 'package:kayfit/core/meal_logging/meal_log_operation_provider.dart';
 import 'package:kayfit/shared/models/ingredient_v2.dart';
 import 'package:kayfit/shared/models/recognition_clarification.dart';
 import 'package:kayfit/shared/theme/kayfit2_theme.dart';
 import 'package:kayfit/shared/utils/nutrient_parser.dart';
+import 'package:kayfit/shared/widgets/recognition_clarification_card.dart';
 import 'recognition_result_sheet_kf2.dart';
 
 /// KF2-RECOG: Full-screen recognizing screen.
@@ -25,9 +30,15 @@ import 'recognition_result_sheet_kf2.dart';
 ///   as a full-screen modal (so the back stack remains clean).
 /// - On error   → shows a [SnackBar] and pops back to the capture screen.
 class Kf2RecognizingScreen extends ConsumerStatefulWidget {
-  const Kf2RecognizingScreen({super.key, required this.photo, this.onSaved});
+  const Kf2RecognizingScreen({
+    super.key,
+    required this.photo,
+    this.onSaved,
+    this.autoStart = true,
+  });
 
   final XFile photo;
+  final bool autoStart;
 
   /// Optional callback fired with the dish name when the user confirms saving.
   /// Use this to inject a coaching message in the chat without depending on
@@ -45,6 +56,7 @@ class _Kf2RecognizingScreenState extends ConsumerState<Kf2RecognizingScreen>
 
   late final AnimationController _dotCtrl;
   late final AnimationController _pulseCtrl;
+  String? _operationId;
 
   @override
   void initState() {
@@ -65,7 +77,24 @@ class _Kf2RecognizingScreenState extends ConsumerState<Kf2RecognizingScreen>
       FileImage(File(widget.photo.path)),
     );
 
-    WidgetsBinding.instance.addPostFrameCallback((_) => _recognize());
+    if (widget.autoStart) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _ensureOperation();
+        _recognize();
+      });
+    }
+  }
+
+  String _ensureOperation() {
+    if (_operationId case final id?) return id;
+    final operation = ref
+        .read(mealLogOperationProvider.notifier)
+        .start(MealLogSource.photo);
+    _operationId = operation.id;
+    ref
+        .read(mealLogOperationProvider.notifier)
+        .advance(operation.id, MealLogStage.inputAcquired);
+    return operation.id;
   }
 
   @override
@@ -78,10 +107,14 @@ class _Kf2RecognizingScreenState extends ConsumerState<Kf2RecognizingScreen>
   // ── Recognition logic ──────────────────────────────────────────────────────
 
   Future<void> _recognize() async {
+    final operationId = _ensureOperation();
     final lang = Localizations.localeOf(context).languageCode;
     final recognitionTimer = Stopwatch()..start();
 
     try {
+      ref
+          .read(mealLogOperationProvider.notifier)
+          .advance(operationId, MealLogStage.recognitionStarted);
       // Read bytes once for upload. Display uses Image.file directly,
       // with cache eviction in initState ensuring the fresh photo is shown.
       // The temp file can still be flushing right after capture, so a first
@@ -93,11 +126,12 @@ class _Kf2RecognizingScreenState extends ConsumerState<Kf2RecognizingScreen>
       }
       if (!mounted) return;
       if (originalBytes.isEmpty) {
-        _handleError('empty image bytes');
+        await _reportRecognitionFailure(MealLogIncidentCode.flutterException);
+        _handleError();
         return;
       }
       debugPrint(
-        'KF2-RECOG: original ${originalBytes.length ~/ 1024} KB  path=${widget.photo.path}',
+        'KF2-RECOG: image acquired (${originalBytes.length ~/ 1024} KB)',
       );
 
       final compressed = await FlutterImageCompress.compressWithList(
@@ -125,7 +159,10 @@ class _Kf2RecognizingScreenState extends ConsumerState<Kf2RecognizingScreen>
         );
       }
 
-      final form = FormData.fromMap({'image': multipart});
+      final form = FormData.fromMap({
+        'image': multipart,
+        'client_operation_id': operationId,
+      });
       final resp = await apiDio.post(
         '/api/v2/recognize_photo?language=$lang',
         data: form,
@@ -144,9 +181,27 @@ class _Kf2RecognizingScreenState extends ConsumerState<Kf2RecognizingScreen>
       final clarification = RecognitionClarification.fromJson(
         resp.data['clarification'],
       );
+      final correlationId = resp.data['correlation_id']?.toString();
+      final runId = resp.data['run_id']?.toString();
 
       if (error != null && error.isNotEmpty) {
-        _handleError(error);
+        await _reportRecognitionFailure(
+          MealLogIncidentCode.http4xx,
+          correlationId: correlationId,
+          runId: runId,
+          reachedBackend: true,
+          httpStatus: resp.statusCode,
+          durationMs: recognitionTimer.elapsedMilliseconds,
+        );
+        _handleError();
+        return;
+      }
+
+      if (clarification != null && (rawItems == null || rawItems.isEmpty)) {
+        ref
+            .read(mealLogOperationProvider.notifier)
+            .advance(operationId, MealLogStage.clarificationRequired);
+        await _showBlockingClarification(clarification);
         return;
       }
 
@@ -166,10 +221,50 @@ class _Kf2RecognizingScreenState extends ConsumerState<Kf2RecognizingScreen>
               .join(', ');
 
       if (!mounted) return;
+      ref
+          .read(mealLogOperationProvider.notifier)
+          .advance(operationId, MealLogStage.recognitionCompleted);
       _pushResult(dishName, v2items, recognitionTimer.elapsed, clarification);
-    } on Exception catch (e) {
-      _handleError(e.toString());
+    } on DioException catch (error) {
+      await _reportRecognitionFailure(
+        classifyMealSaveDioFailure(error),
+        reachedBackend: error.response != null,
+        httpStatus: error.response?.statusCode,
+        durationMs: recognitionTimer.elapsedMilliseconds,
+      );
+      _handleError();
+    } on Exception {
+      await _reportRecognitionFailure(
+        MealLogIncidentCode.flutterException,
+        durationMs: recognitionTimer.elapsedMilliseconds,
+      );
+      _handleError();
     }
+  }
+
+  Future<void> _reportRecognitionFailure(
+    MealLogIncidentCode errorCode, {
+    String? correlationId,
+    String? runId,
+    bool reachedBackend = false,
+    int? httpStatus,
+    int? durationMs,
+  }) async {
+    final operationId = _ensureOperation();
+    ref
+        .read(mealLogOperationProvider.notifier)
+        .advance(operationId, MealLogStage.failed);
+    await MealLogIncidentRuntime.reporter?.report(
+      source: 'photo',
+      stage: 'recognition_started',
+      errorCode: errorCode,
+      clientOperationId: operationId,
+      correlationId: correlationId,
+      runId: runId,
+      reachedBackend: reachedBackend,
+      httpStatus: httpStatus,
+      durationMs: durationMs,
+    );
   }
 
   void _pushResult(
@@ -196,6 +291,7 @@ class _Kf2RecognizingScreenState extends ConsumerState<Kf2RecognizingScreen>
             feedbackSource: FeedbackSource.photo,
             recognitionDuration: recognitionDuration,
             clarification: clarification,
+            operationId: _operationId,
             onSaved: widget.onSaved,
           ),
         ),
@@ -221,7 +317,28 @@ class _Kf2RecognizingScreenState extends ConsumerState<Kf2RecognizingScreen>
     Navigator.of(context).pop();
   }
 
-  void _handleError(String message) {
+  Future<void> _showBlockingClarification(
+    RecognitionClarification clarification,
+  ) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        key: const ValueKey('label_blocking_clarification_dialog'),
+        contentPadding: const EdgeInsets.only(top: 12, bottom: 4),
+        content: RecognitionClarificationCard(
+          clarification: clarification,
+          confirmed: false,
+          onEdit: (_) => Navigator.of(dialogContext).pop(),
+          onConfirm: () => Navigator.of(dialogContext).pop(),
+        ),
+      ),
+    );
+    if (mounted) Navigator.of(context).pop();
+  }
+
+  void _handleError() {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(

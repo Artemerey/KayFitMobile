@@ -1474,6 +1474,30 @@ class AppLocalizationsEn extends AppLocalizations {
       'The energy unit could not be read confidently';
 
   @override
+  String get recognition_uncertainty_energy_conflict =>
+      'The kcal and kJ values do not agree';
+
+  @override
+  String get recognition_uncertainty_basis_conflict =>
+      'The per-100 g, per-serving, or per-piece values conflict';
+
+  @override
+  String get recognition_uncertainty_basis_unknown =>
+      'It is unclear whether the values are per 100 g, serving, or piece';
+
+  @override
+  String get recognition_uncertainty_nutrition_confidence =>
+      'The nutrition values were recognized with low confidence';
+
+  @override
+  String get recognition_uncertainty_label_ambiguous =>
+      'The label cannot be linked to one product safely';
+
+  @override
+  String get recognition_uncertainty_label_invalid =>
+      'The label data did not pass the safety check';
+
+  @override
   String get recognition_uncertainty_fallback =>
       'Please check the recognized values';
 }

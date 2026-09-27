@@ -20,6 +20,7 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:kayfit/features/add_meal/screens/kf2_capture_screen.dart';
 import 'package:kayfit/features/add_meal/screens/kf2_recognizing_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Error suppression helpers
@@ -67,22 +68,24 @@ XFile _fakeXFile() => XFile('/tmp/kf2_test_photo.jpg');
 // App wrappers
 // ─────────────────────────────────────────────────────────────────────────────
 
-Widget _captureApp() => const ProviderScope(
-      child: MaterialApp(home: Kf2CaptureScreen()),
-    );
+Widget _captureApp() =>
+    const ProviderScope(child: MaterialApp(home: Kf2CaptureScreen()));
 
 Widget _recognizingApp(XFile photo) => ProviderScope(
-      child: MaterialApp(
-        home: Kf2RecognizingScreen(photo: photo),
-      ),
-    );
+  child: MaterialApp(
+    home: Kf2RecognizingScreen(photo: photo, autoStart: false),
+  ),
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
 
 void main() {
-  setUp(_suppressNetworkErrors);
+  setUp(() {
+    _suppressNetworkErrors();
+    SharedPreferences.setMockInitialValues({});
+  });
   tearDown(_restoreHandler);
 
   // ── 1. Kf2CaptureScreen renders cancel (X) button ──────────────────────────
@@ -114,10 +117,7 @@ void main() {
       await tester.pumpWidget(_captureApp());
       await _pumpAndSettle(tester);
 
-      expect(
-        find.byIcon(Icons.photo_library_outlined),
-        findsOneWidget,
-      );
+      expect(find.byIcon(Icons.photo_library_outlined), findsOneWidget);
     });
 
     // ── 4. PHOTO label shown in top bar ───────────────────────────────────────
@@ -168,7 +168,7 @@ void main() {
       await tester.tap(find.text('open'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 80));
-      tester.takeException();
+      expect(tester.takeException(), isNull);
 
       // Tap X — triggers context.pop(null) via GoRouter.
       await tester.tap(find.byIcon(Icons.close));
@@ -187,9 +187,9 @@ void main() {
       final photo = _fakeXFile();
 
       await tester.pumpWidget(_recognizingApp(photo));
-      // Single pump only — before the async Dio call can complete.
-      await tester.pump();
-      tester.takeException();
+      // Assert the initial frame before the intentionally missing test photo
+      // completes the real recognition callback and closes the screen.
+      expect(tester.takeException(), isNull);
 
       expect(find.text('Analyzing your meal…'), findsOneWidget);
     });
@@ -198,7 +198,6 @@ void main() {
       final photo = _fakeXFile();
 
       await tester.pumpWidget(_recognizingApp(photo));
-      await tester.pump();
       tester.takeException();
 
       expect(find.text('AI is identifying items'), findsOneWidget);
@@ -208,7 +207,6 @@ void main() {
       final photo = _fakeXFile();
 
       await tester.pumpWidget(_recognizingApp(photo));
-      await tester.pump();
       tester.takeException();
 
       expect(find.text('ANALYZING'), findsOneWidget);

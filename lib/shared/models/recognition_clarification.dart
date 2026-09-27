@@ -6,14 +6,23 @@ class RecognitionClarification {
     required this.question,
     required this.options,
     required this.uncertaintyReasons,
+    this.code,
+    this.field,
   });
 
   final bool required;
   final String question;
   final List<String> options;
   final List<String> uncertaintyReasons;
+  final String? code;
+  final String? field;
 
   RecognitionUncertainField get primaryField {
+    if (field == 'energy') return RecognitionUncertainField.calories;
+    if (field == 'consumed_weight_g') return RecognitionUncertainField.weight;
+    if (field == 'nutrition_basis' || field == 'nutrition_values') {
+      return RecognitionUncertainField.macros;
+    }
     if (uncertaintyReasons.any((reason) => reason.contains('portion_mass'))) {
       return RecognitionUncertainField.weight;
     }
@@ -46,6 +55,8 @@ class RecognitionClarification {
       question: question,
       options: options,
       uncertaintyReasons: reasons,
+      code: raw['code']?.toString(),
+      field: raw['field']?.toString(),
     );
   }
 }

@@ -1474,6 +1474,30 @@ class AppLocalizationsRu extends AppLocalizations {
       'Не удалось уверенно прочитать единицу энергии';
 
   @override
+  String get recognition_uncertainty_energy_conflict =>
+      'Значения ккал и кДж не совпадают';
+
+  @override
+  String get recognition_uncertainty_basis_conflict =>
+      'Значения на 100 г, на порцию или на штуку противоречат друг другу';
+
+  @override
+  String get recognition_uncertainty_basis_unknown =>
+      'Непонятно, к чему относятся значения КБЖУ';
+
+  @override
+  String get recognition_uncertainty_nutrition_confidence =>
+      'Значения КБЖУ распознаны неуверенно';
+
+  @override
+  String get recognition_uncertainty_label_ambiguous =>
+      'Нельзя однозначно связать этикетку с продуктом';
+
+  @override
+  String get recognition_uncertainty_label_invalid =>
+      'Данные этикетки не прошли безопасную проверку';
+
+  @override
   String get recognition_uncertainty_fallback =>
       'Проверьте распознанные данные';
 }

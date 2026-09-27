@@ -7,6 +7,7 @@ enum MealLogStage {
   inputAcquired,
   recognitionStarted,
   recognitionCompleted,
+  clarificationRequired,
   saveStarted,
   saveResponseReceived,
   savePersisted,
@@ -37,6 +38,7 @@ class MealLogOperation {
 
   bool get isTerminal => switch (stage) {
     MealLogStage.successRendered ||
+    MealLogStage.clarificationRequired ||
     MealLogStage.failed ||
     MealLogStage.cancelledByUser => true,
     _ => false,

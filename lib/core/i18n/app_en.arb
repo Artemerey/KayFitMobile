@@ -587,5 +587,11 @@
   "recognition_uncertainty_low_confidence": "The dish could not be identified confidently",
   "recognition_uncertainty_provider": "Please check the recognized values",
   "recognition_uncertainty_energy_unit": "The energy unit could not be read confidently",
+  "recognition_uncertainty_energy_conflict": "The kcal and kJ values do not agree",
+  "recognition_uncertainty_basis_conflict": "The per-100 g, per-serving, or per-piece values conflict",
+  "recognition_uncertainty_basis_unknown": "It is unclear whether the values are per 100 g, serving, or piece",
+  "recognition_uncertainty_nutrition_confidence": "The nutrition values were recognized with low confidence",
+  "recognition_uncertainty_label_ambiguous": "The label cannot be linked to one product safely",
+  "recognition_uncertainty_label_invalid": "The label data did not pass the safety check",
   "recognition_uncertainty_fallback": "Please check the recognized values"
 }

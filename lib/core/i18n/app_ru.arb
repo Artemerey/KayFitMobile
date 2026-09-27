@@ -587,5 +587,11 @@
   "recognition_uncertainty_low_confidence": "Не удалось уверенно определить блюдо",
   "recognition_uncertainty_provider": "Нужно проверить распознанные данные",
   "recognition_uncertainty_energy_unit": "Не удалось уверенно прочитать единицу энергии",
+  "recognition_uncertainty_energy_conflict": "Значения ккал и кДж не совпадают",
+  "recognition_uncertainty_basis_conflict": "Значения на 100 г, на порцию или на штуку противоречат друг другу",
+  "recognition_uncertainty_basis_unknown": "Непонятно, к чему относятся значения КБЖУ",
+  "recognition_uncertainty_nutrition_confidence": "Значения КБЖУ распознаны неуверенно",
+  "recognition_uncertainty_label_ambiguous": "Нельзя однозначно связать этикетку с продуктом",
+  "recognition_uncertainty_label_invalid": "Данные этикетки не прошли безопасную проверку",
   "recognition_uncertainty_fallback": "Проверьте распознанные данные"
 }
