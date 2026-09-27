@@ -13,10 +13,10 @@ void main() {
     test('combines committed buffer with live words, never overwriting', () {
       final m = VoiceSessionMachine();
       m.start();
-      m.beginSession();
+      final first = m.beginSession();
 
-      expect(m.onWords('hello'), 'hello');
-      expect(m.onWords('hello world'), 'hello world');
+      expect(m.onWords(first, 'hello'), 'hello');
+      expect(m.onWords(first, 'hello world'), 'hello world');
 
       // Session ends on a pause → words are committed, not lost.
       expect(m.onSessionEnded(), VoiceEndAction.restart);
@@ -24,8 +24,8 @@ void main() {
       expect(m.currentWords, '');
 
       // Restarted session appends rather than clobbering earlier speech.
-      m.beginSession();
-      expect(m.onWords('how are you'), 'hello world how are you');
+      final second = m.beginSession();
+      expect(m.onWords(second, 'how are you'), 'hello world how are you');
       expect(m.onSessionEnded(), VoiceEndAction.restart);
       expect(m.committedTranscript, 'hello world how are you');
     });
@@ -33,8 +33,8 @@ void main() {
     test('start() clears the buffer for a fresh recording', () {
       final m = VoiceSessionMachine();
       m.start();
-      m.beginSession();
-      m.onWords('leftover');
+      final session = m.beginSession();
+      m.onWords(session, 'leftover');
       m.onSessionEnded();
       expect(m.committedTranscript, 'leftover');
 
@@ -50,8 +50,8 @@ void main() {
     test('a second end (done + notListening) is ignored', () {
       final m = VoiceSessionMachine();
       m.start();
-      m.beginSession();
-      m.onWords('hi');
+      final session = m.beginSession();
+      m.onWords(session, 'hi');
 
       expect(m.onSessionEnded(), VoiceEndAction.restart);
       // The duplicate callback must not re-commit or re-decide.
@@ -64,8 +64,8 @@ void main() {
     test('requestStop makes the next end resolve to idle, not restart', () {
       final m = VoiceSessionMachine();
       m.start();
-      m.beginSession();
-      m.onWords('final words');
+      final session = m.beginSession();
+      m.onWords(session, 'final words');
 
       m.requestStop();
       // requestStop clears sessionActive, so the in-flight end is a no-op...
@@ -76,8 +76,8 @@ void main() {
     test('user stop while a session is active ends as idle', () {
       final m = VoiceSessionMachine();
       m.start();
-      m.beginSession();
-      m.onWords('text');
+      final session = m.beginSession();
+      m.onWords(session, 'text');
       // Simulate the user-stop flag being set without clearing sessionActive
       // (e.g. an error path) — the end must still go idle.
       m.userStopped = true;
@@ -107,8 +107,8 @@ void main() {
 
       m.beginSession();
       expect(m.onSessionEnded(), VoiceEndAction.restart); // empty=1
-      m.beginSession();
-      m.onWords('something'); // resets empty counter
+      final speechSession = m.beginSession();
+      m.onWords(speechSession, 'something'); // resets empty counter
       expect(m.onSessionEnded(), VoiceEndAction.restart); // empty=0
       expect(m.emptySessions, 0);
 
@@ -148,6 +148,41 @@ void main() {
       m.tryScheduleRestart();
       m.userStopped = true;
       expect(m.onRestartFired(), isFalse);
+    });
+  });
+
+  group('VoiceSessionMachine — Android session identity', () {
+    test('provenance exists before any final callback', () {
+      final m = VoiceSessionMachine()..start();
+      expect(m.voiceProvenance, isTrue);
+      expect(m.transcript, isEmpty);
+    });
+
+    test('late callback from an old session is ignored', () {
+      final m = VoiceSessionMachine()..start();
+      final old = m.beginSession();
+      m.onWords(old, 'первая строка');
+      m.onSessionEnded();
+      final current = m.beginSession();
+      m.onWords(current, 'вторая строка');
+      expect(m.onWords(old, 'ПОЗДНИЙ МУСОР'), 'первая строка вторая строка');
+    });
+
+    test('empty and repeated partials do not duplicate transcript', () {
+      final m = VoiceSessionMachine()..start();
+      final session = m.beginSession();
+      m.onWords(session, 'рис двести грамм');
+      m.onWords(session, 'рис двести грамм');
+      m.onWords(session, '');
+      expect(m.transcript, 'рис двести грамм');
+    });
+
+    test('restore keeps confirmed transcript and voice provenance', () {
+      final m = VoiceSessionMachine();
+      m.restore(committed: 'суп триста грамм', provenance: true);
+      expect(m.committedTranscript, 'суп триста грамм');
+      expect(m.currentWords, isEmpty);
+      expect(m.voiceProvenance, isTrue);
     });
   });
 }

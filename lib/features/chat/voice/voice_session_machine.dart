@@ -52,6 +52,17 @@ class VoiceSessionMachine {
   /// Consecutive native sessions that produced no speech.
   int emptySessions = 0;
 
+  /// Monotonic native session identity. Callbacks carrying an older value are
+  /// ignored, which prevents a delayed Android result from corrupting the
+  /// newly restarted session.
+  int _nextSessionId = 0;
+  int? activeSessionId;
+
+  /// Provenance belongs to the logical recording, not to a final callback.
+  bool voiceProvenance = false;
+
+  String get transcript => '$committedTranscript $currentWords'.trim();
+
   /// Begins a fresh logical recording — clears the buffer and bookkeeping.
   void start() {
     userStopped = false;
@@ -59,28 +70,41 @@ class VoiceSessionMachine {
     currentWords = '';
     emptySessions = 0;
     restartScheduled = false;
+    voiceProvenance = true;
+    activeSessionId = null;
   }
 
   /// Marks a native session as started.
-  void beginSession() {
+  int beginSession() {
     sessionActive = true;
+    activeSessionId = ++_nextSessionId;
+    return activeSessionId!;
   }
 
   /// Records new (partial or final) words for the current session and returns
   /// the combined text to show in the field — committed buffer plus the live
   /// session, so a restart never clobbers earlier speech.
-  String onWords(String words) {
-    currentWords = words;
+  String onWords(int sessionId, String words) {
+    if (!sessionActive || sessionId != activeSessionId) return transcript;
+    final normalized = words.trim();
+    if (normalized.isEmpty) return transcript;
+    if (normalized == currentWords.trim()) return transcript;
+    currentWords = normalized;
     if (words.isNotEmpty) emptySessions = 0;
-    return '$committedTranscript $words'.trim();
+    return transcript;
   }
 
   /// Marks an intentional stop (user tap / dispose / background). Any in-flight
   /// session end will then resolve to [VoiceEndAction.idle], not a restart.
   void requestStop() {
+    if (currentWords.isNotEmpty) {
+      committedTranscript = '$committedTranscript $currentWords'.trim();
+      currentWords = '';
+    }
     userStopped = true;
     restartScheduled = false;
     sessionActive = false;
+    activeSessionId = null;
   }
 
   /// Handles a native session end (status done/notListening, or a silence
@@ -122,5 +146,16 @@ class VoiceSessionMachine {
   bool onRestartFired() {
     restartScheduled = false;
     return !userStopped;
+  }
+
+  /// Restores the confirmed portion after route/process recreation. Live
+  /// partial text is deliberately not promoted to committed text.
+  void restore({required String committed, required bool provenance}) {
+    committedTranscript = committed.trim();
+    currentWords = '';
+    voiceProvenance = provenance;
+    userStopped = true;
+    sessionActive = false;
+    activeSessionId = null;
   }
 }

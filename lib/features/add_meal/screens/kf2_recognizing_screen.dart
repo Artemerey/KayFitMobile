@@ -9,8 +9,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 // XFile is re-exported by flutter_image_compress, no separate import needed.
 
 import 'package:kayfit/core/api/api_client.dart';
+import 'package:kayfit/core/feedback/feedback_models.dart';
 import 'package:kayfit/core/i18n/generated/app_localizations.dart';
 import 'package:kayfit/shared/models/ingredient_v2.dart';
+import 'package:kayfit/shared/models/recognition_clarification.dart';
 import 'package:kayfit/shared/theme/kayfit2_theme.dart';
 import 'package:kayfit/shared/utils/nutrient_parser.dart';
 import 'recognition_result_sheet_kf2.dart';
@@ -23,13 +25,10 @@ import 'recognition_result_sheet_kf2.dart';
 ///   as a full-screen modal (so the back stack remains clean).
 /// - On error   → shows a [SnackBar] and pops back to the capture screen.
 class Kf2RecognizingScreen extends ConsumerStatefulWidget {
-  const Kf2RecognizingScreen({
-    super.key,
-    required this.photo,
-    this.onSaved,
-  });
+  const Kf2RecognizingScreen({super.key, required this.photo, this.onSaved});
 
   final XFile photo;
+
   /// Optional callback fired with the dish name when the user confirms saving.
   /// Use this to inject a coaching message in the chat without depending on
   /// the Navigator return type.
@@ -62,8 +61,9 @@ class _Kf2RecognizingScreenState extends ConsumerState<Kf2RecognizingScreen>
 
     // Evict any cached version of this path so Image.file always shows
     // the freshly taken photo rather than a stale cached frame.
-    PaintingBinding.instance.imageCache
-        .evict(FileImage(File(widget.photo.path)));
+    PaintingBinding.instance.imageCache.evict(
+      FileImage(File(widget.photo.path)),
+    );
 
     WidgetsBinding.instance.addPostFrameCallback((_) => _recognize());
   }
@@ -79,6 +79,7 @@ class _Kf2RecognizingScreenState extends ConsumerState<Kf2RecognizingScreen>
 
   Future<void> _recognize() async {
     final lang = Localizations.localeOf(context).languageCode;
+    final recognitionTimer = Stopwatch()..start();
 
     try {
       // Read bytes once for upload. Display uses Image.file directly,
@@ -95,7 +96,9 @@ class _Kf2RecognizingScreenState extends ConsumerState<Kf2RecognizingScreen>
         _handleError('empty image bytes');
         return;
       }
-      debugPrint('KF2-RECOG: original ${originalBytes.length ~/ 1024} KB  path=${widget.photo.path}');
+      debugPrint(
+        'KF2-RECOG: original ${originalBytes.length ~/ 1024} KB  path=${widget.photo.path}',
+      );
 
       final compressed = await FlutterImageCompress.compressWithList(
         originalBytes,
@@ -138,6 +141,9 @@ class _Kf2RecognizingScreenState extends ConsumerState<Kf2RecognizingScreen>
       final rawItems = resp.data['items'] as List<dynamic>?;
       final isFood = resp.data['is_food'] as bool?;
       final notFoodReason = resp.data['not_food_reason'] as String?;
+      final clarification = RecognitionClarification.fromJson(
+        resp.data['clarification'],
+      );
 
       if (error != null && error.isNotEmpty) {
         _handleError(error);
@@ -152,20 +158,26 @@ class _Kf2RecognizingScreenState extends ConsumerState<Kf2RecognizingScreen>
 
       final items = rawItems.map((e) => e as Map<String, dynamic>).toList();
       final v2items = items.map(ingredientV2FromJson).toList();
-      final dishName = resp.data['dish_name'] as String? ??
+      final dishName =
+          resp.data['dish_name'] as String? ??
           items
               .map((e) => (e['name'] as String?) ?? '')
               .where((n) => n.isNotEmpty)
               .join(', ');
 
       if (!mounted) return;
-      _pushResult(dishName, v2items);
+      _pushResult(dishName, v2items, recognitionTimer.elapsed, clarification);
     } on Exception catch (e) {
       _handleError(e.toString());
     }
   }
 
-  void _pushResult(String dishName, List<IngredientV2> items) {
+  void _pushResult(
+    String dishName,
+    List<IngredientV2> items,
+    Duration recognitionDuration,
+    RecognitionClarification? clarification,
+  ) {
     if (!mounted) return;
     HapticFeedback.mediumImpact();
 
@@ -181,6 +193,9 @@ class _Kf2RecognizingScreenState extends ConsumerState<Kf2RecognizingScreen>
             ingredients: items,
             mealDate: null,
             originalText: null,
+            feedbackSource: FeedbackSource.photo,
+            recognitionDuration: recognitionDuration,
+            clarification: clarification,
             onSaved: widget.onSaved,
           ),
         ),
@@ -244,11 +259,7 @@ class _Kf2RecognizingScreenState extends ConsumerState<Kf2RecognizingScreen>
             ),
 
             // ── Overlay status bar ────────────────────────────────────────
-            _StatusBar(
-              theme: t,
-              dotCtrl: _dotCtrl,
-              bottomPad: bottomPad,
-            ),
+            _StatusBar(theme: t, dotCtrl: _dotCtrl, bottomPad: bottomPad),
           ],
         ),
       ),
@@ -285,7 +296,11 @@ class _PhotoDisplay extends StatelessWidget {
           gaplessPlayback: false,
           errorBuilder: (context, error, stackTrace) => Container(
             color: theme.card,
-            child: Icon(Icons.broken_image_outlined, color: theme.fgMute, size: 48),
+            child: Icon(
+              Icons.broken_image_outlined,
+              color: theme.fgMute,
+              size: 48,
+            ),
           ),
         ),
 

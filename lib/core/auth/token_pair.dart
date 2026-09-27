@@ -40,12 +40,11 @@ class TokenPair {
     required String accessToken,
     required String refreshToken,
     required String expiresAtIso,
-  }) =>
-      TokenPair(
-        accessToken: accessToken,
-        refreshToken: refreshToken,
-        expiresAt: DateTime.parse(expiresAtIso),
-      );
+  }) => TokenPair(
+    accessToken: accessToken,
+    refreshToken: refreshToken,
+    expiresAt: DateTime.parse(expiresAtIso),
+  );
 
   /// ISO-8601 representation for storage.
   String get expiresAtIso => expiresAt.toIso8601String();

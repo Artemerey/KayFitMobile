@@ -6,14 +6,12 @@ import 'core/locale/locale_provider.dart';
 import 'core/notifications/notification_service.dart';
 import 'router.dart';
 import 'shared/theme/app_theme.dart';
+import 'shared/widgets/kayfit_brand_frame.dart';
 
 class KayfitApp extends ConsumerWidget {
   const KayfitApp({super.key});
 
-  static const _supportedLocales = [
-    Locale('ru'),
-    Locale('en'),
-  ];
+  static const _supportedLocales = [Locale('ru'), Locale('en')];
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -28,6 +26,8 @@ class KayfitApp extends ConsumerWidget {
       title: 'Kayfit',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
+      builder: (context, child) =>
+          KayfitBrandFrame(child: child ?? const SizedBox.shrink()),
       routerConfig: router,
       locale: locale,
       localizationsDelegates: const [

@@ -511,6 +511,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get auth_apple => 'Sign in with Apple';
 
   @override
+  String get auth_apple_register => 'Sign up with Apple';
+
+  @override
+  String get auth_or_email => 'or with email';
+
+  @override
   String get auth_email => 'Sign in with Email';
 
   @override
@@ -1332,4 +1338,142 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get session_expired => 'Session expired. Please sign in again.';
+
+  @override
+  String get feedback_onboarding_question =>
+      'How well does this plan suit you?';
+
+  @override
+  String get feedback_meal_question => 'Was everything recognized correctly?';
+
+  @override
+  String feedback_meal_subject_question(String subject) {
+    return 'Did we recognize $subject correctly?';
+  }
+
+  @override
+  String get feedback_like => 'Yes, correct';
+
+  @override
+  String get feedback_dislike => 'No, improve it';
+
+  @override
+  String get feedback_improve => 'What could be improved?';
+
+  @override
+  String get feedback_comment => 'Comment (optional)';
+
+  @override
+  String get feedback_other_explanation => 'Brief explanation (required)';
+
+  @override
+  String get feedback_privacy_hint =>
+      'Do not include personal data, passwords, or secrets.';
+
+  @override
+  String get feedback_privacy_error =>
+      'Remove personal data or secrets before sending.';
+
+  @override
+  String get feedback_send => 'Send feedback';
+
+  @override
+  String get feedback_dismiss => 'Not now';
+
+  @override
+  String get feedback_thanks => 'Thank you for your feedback!';
+
+  @override
+  String get feedback_recognition_question =>
+      'Was everything recognized correctly?';
+
+  @override
+  String get feedback_recognition_saved => 'Thanks, your feedback was saved';
+
+  @override
+  String get feedback_recognition_dislike => 'Recognition was incorrect';
+
+  @override
+  String get feedback_recognition_like => 'Recognition was correct';
+
+  @override
+  String get feedback_error => 'Could not save feedback. Try again.';
+
+  @override
+  String get feedback_semantics_prompt => 'Feedback prompt';
+
+  @override
+  String get feedback_reason_too_few_calories => 'Too few calories';
+
+  @override
+  String get feedback_reason_too_many_calories => 'Too many calories';
+
+  @override
+  String get feedback_reason_wrong_goal => 'Wrong goal';
+
+  @override
+  String get feedback_reason_wrong_macros => 'Incorrect macros';
+
+  @override
+  String get feedback_reason_answers_not_considered =>
+      'My answers were not considered';
+
+  @override
+  String get feedback_reason_other => 'Other';
+
+  @override
+  String get feedback_reason_wrong_food => 'Wrong food';
+
+  @override
+  String get feedback_reason_missing_item => 'An item is missing';
+
+  @override
+  String get feedback_reason_extra_item => 'There is an extra item';
+
+  @override
+  String get feedback_reason_wrong_weight => 'Incorrect weight';
+
+  @override
+  String get feedback_reason_wrong_calories => 'Incorrect calories';
+
+  @override
+  String get feedback_reason_recognition_too_slow => 'Recognition was too slow';
+
+  @override
+  String get recognition_uncertainty_portion => 'Check the portion size';
+
+  @override
+  String get recognition_uncertainty_calories => 'Check the calories';
+
+  @override
+  String get recognition_uncertainty_zero_calories =>
+      'The calorie value looks unusually low';
+
+  @override
+  String get recognition_uncertainty_macros =>
+      'Check protein, fat, and carbohydrates';
+
+  @override
+  String get recognition_uncertainty_macro_mass =>
+      'The macro total looks inconsistent';
+
+  @override
+  String get recognition_uncertainty_energy_macros =>
+      'Calories do not match the product composition';
+
+  @override
+  String get recognition_uncertainty_low_confidence =>
+      'The dish could not be identified confidently';
+
+  @override
+  String get recognition_uncertainty_provider =>
+      'Please check the recognized values';
+
+  @override
+  String get recognition_uncertainty_energy_unit =>
+      'The energy unit could not be read confidently';
+
+  @override
+  String get recognition_uncertainty_fallback =>
+      'Please check the recognized values';
 }

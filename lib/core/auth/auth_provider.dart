@@ -9,6 +9,7 @@ import '../../shared/models/user_profile.dart';
 import '../api/api_client.dart';
 import '../notifications/notification_service.dart';
 import '../ai_consent/ai_consent_provider.dart';
+import '../feedback/feedback_coordinator.dart';
 import 'onboarding_sync.dart';
 
 part 'auth_provider.g.dart';
@@ -54,6 +55,14 @@ class AuthNotifier extends _$AuthNotifier {
     state = AsyncValue.data(user);
   }
 
+  /// Publishes a fully committed handoff. AuthHandoffCoordinator is the only
+  /// login path allowed to call this; token exchange alone is not auth.
+  Future<void> publishAuthenticated(UserProfile user) async {
+    await _saveCache(user);
+    state = AsyncValue.data(user);
+    _postLoginSideEffects(user.id, syncPending: false);
+  }
+
   Future<void> checkSession({bool backgroundRefresh = false}) async {
     if (!backgroundRefresh) state = const AsyncValue.loading();
 
@@ -79,7 +88,7 @@ class AuthNotifier extends _$AuthNotifier {
       if (user != null) {
         await _saveCache(user);
         state = AsyncValue.data(user);
-        _postLoginSideEffects();
+        _postLoginSideEffects(user.id);
         return;
       }
       // user == null → /me returned 401 and _AuthInterceptor already fired
@@ -99,13 +108,16 @@ class AuthNotifier extends _$AuthNotifier {
     }
   }
 
-  void _postLoginSideEffects() {
-    syncOnboardingPending().catchError(
-      (e) {
-        debugPrint('[auth] onboarding retry error: $e');
-        return false;
-      },
-    );
+  void _postLoginSideEffects(int userId, {bool syncPending = true}) {
+    () async {
+      try {
+        if (syncPending) await syncOnboardingPending(userId: userId);
+        final owner = FeedbackRuntime.ownerBindingForUser(userId);
+        if (owner != null) await FeedbackRuntime.coordinator?.flush(owner);
+      } catch (_) {
+        debugPrint('[auth] post-login sync will retry later');
+      }
+    }();
     NotificationService.registerTokenAfterLogin();
     ref.read(aiConsentProvider.notifier).load();
   }

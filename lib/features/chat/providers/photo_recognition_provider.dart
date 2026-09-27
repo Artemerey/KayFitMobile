@@ -9,15 +9,21 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/notifications/notification_service.dart';
 import '../../../shared/models/ingredient_v2.dart';
+import '../../../shared/models/recognition_clarification.dart';
 import '../../../shared/utils/nutrient_parser.dart';
 
 // ── Result type ───────────────────────────────────────────────────────────────
 
 @immutable
 class RecognitionResult {
-  const RecognitionResult({required this.dishName, required this.items});
+  const RecognitionResult({
+    required this.dishName,
+    required this.items,
+    this.clarification,
+  });
   final String dishName;
   final List<IngredientV2> items;
+  final RecognitionClarification? clarification;
 }
 
 // ── Outcome types ─────────────────────────────────────────────────────────────
@@ -29,28 +35,39 @@ class RecognitionResult {
 
 @immutable
 sealed class RecogOutcome {
-  const RecogOutcome({required this.photoPath, required this.langCode});
+  const RecogOutcome({
+    required this.photoPath,
+    required this.langCode,
+    required this.recognitionDuration,
+  });
   final String photoPath;
   final String langCode;
+  final Duration recognitionDuration;
 }
 
 final class RecogSuccess extends RecogOutcome {
   const RecogSuccess({
     required super.photoPath,
     required super.langCode,
+    required super.recognitionDuration,
     required this.result,
   });
   final RecognitionResult result;
 }
 
 final class RecogNotFood extends RecogOutcome {
-  const RecogNotFood({required super.photoPath, required super.langCode});
+  const RecogNotFood({
+    required super.photoPath,
+    required super.langCode,
+    required super.recognitionDuration,
+  });
 }
 
 final class RecogFailure extends RecogOutcome {
   const RecogFailure({
     required super.photoPath,
     required super.langCode,
+    required super.recognitionDuration,
     required this.message,
   });
   final String message;
@@ -216,11 +233,13 @@ class PhotoRecognitionNotifier extends Notifier<PhotoRecognitionState> {
     });
 
     RecogOutcome outcome;
+    final recognitionTimer = Stopwatch()..start();
     try {
       final result = await _doRecognize(item.photo, item.lang);
       outcome = RecogSuccess(
         photoPath: item.photo.path,
         langCode: item.lang,
+        recognitionDuration: recognitionTimer.elapsed,
         result: result,
       );
       final kcal = result.items.fold<double>(
@@ -233,11 +252,16 @@ class PhotoRecognitionNotifier extends Notifier<PhotoRecognitionState> {
         isRu: item.lang == 'ru',
       );
     } on _NotFoodException {
-      outcome = RecogNotFood(photoPath: item.photo.path, langCode: item.lang);
+      outcome = RecogNotFood(
+        photoPath: item.photo.path,
+        langCode: item.lang,
+        recognitionDuration: recognitionTimer.elapsed,
+      );
     } on Exception catch (e) {
       outcome = RecogFailure(
         photoPath: item.photo.path,
         langCode: item.lang,
+        recognitionDuration: recognitionTimer.elapsed,
         message: e.toString(),
       );
     }
@@ -330,7 +354,13 @@ class PhotoRecognitionNotifier extends Notifier<PhotoRecognitionState> {
             .where((n) => n.isNotEmpty)
             .join(', ');
 
-    return RecognitionResult(dishName: dishName, items: items);
+    return RecognitionResult(
+      dishName: dishName,
+      items: items,
+      clarification: RecognitionClarification.fromJson(
+        resp.data['clarification'],
+      ),
+    );
   }
 }
 

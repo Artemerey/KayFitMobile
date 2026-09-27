@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../../../core/i18n/generated/app_localizations.dart';
 import '../../../shared/models/ingredient_v2.dart';
 import '../../../shared/models/nutrients_v2.dart';
+import '../../../shared/models/recognition_clarification.dart';
 import '../../../shared/theme/kayfit2_theme.dart';
 import '../../../shared/widgets/nutrient_detail_sheet.dart';
 
@@ -37,10 +38,10 @@ class KF2ItemTile extends StatefulWidget {
   final K2Theme theme;
 
   @override
-  State<KF2ItemTile> createState() => _KF2ItemTileState();
+  State<KF2ItemTile> createState() => KF2ItemTileState();
 }
 
-class _KF2ItemTileState extends State<KF2ItemTile> {
+class KF2ItemTileState extends State<KF2ItemTile> {
   late final TextEditingController _weightCtrl;
   late final FocusNode _weightFocus;
 
@@ -65,12 +66,10 @@ class _KF2ItemTileState extends State<KF2ItemTile> {
     _weightFocus = FocusNode()..addListener(_onWeightFocusChange);
 
     final n = widget.item.nutrientsTotal;
-    _proteinCtrl =
-        TextEditingController(text: n.protein.toStringAsFixed(1));
+    _proteinCtrl = TextEditingController(text: n.protein.toStringAsFixed(1));
     _fatCtrl = TextEditingController(text: n.fat.toStringAsFixed(1));
     _carbsCtrl = TextEditingController(text: n.carbs.toStringAsFixed(1));
-    _caloriesCtrl =
-        TextEditingController(text: n.calories.toStringAsFixed(0));
+    _caloriesCtrl = TextEditingController(text: n.calories.toStringAsFixed(0));
 
     _proteinFocus = FocusNode();
     _fatFocus = FocusNode();
@@ -79,11 +78,11 @@ class _KF2ItemTileState extends State<KF2ItemTile> {
   }
 
   @override
-  void didUpdateWidget(KF2ItemTile old) {
-    super.didUpdateWidget(old);
+  void didUpdateWidget(KF2ItemTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
     // Keep weight field in sync when weight changes externally (e.g. from
     // another source), but preserve cursor position.
-    if (old.item.weightGrams != widget.item.weightGrams &&
+    if (oldWidget.item.weightGrams != widget.item.weightGrams &&
         !_weightFocus.hasFocus) {
       final newText = widget.item.weightGrams.toStringAsFixed(0);
       if (_weightCtrl.text != newText) {
@@ -103,7 +102,7 @@ class _KF2ItemTileState extends State<KF2ItemTile> {
     }
     // Edge-triggered: open macro editor when item transitions into the
     // "needs manual nutrition" state (e.g. after an undo that clears calories).
-    final wasNeeded = old.item.needsManualNutrition;
+    final wasNeeded = oldWidget.item.needsManualNutrition;
     final isNeeded = widget.item.needsManualNutrition;
     if (!wasNeeded && isNeeded) {
       setState(() => _editingMacros = true);
@@ -173,8 +172,11 @@ class _KF2ItemTileState extends State<KF2ItemTile> {
     final p = double.tryParse(_proteinCtrl.text.trim()) ?? 0;
     final f = double.tryParse(_fatCtrl.text.trim()) ?? 0;
     final c = double.tryParse(_carbsCtrl.text.trim()) ?? 0;
-    widget.onMacrosChanged(p.clamp(0, double.infinity),
-        f.clamp(0, double.infinity), c.clamp(0, double.infinity));
+    widget.onMacrosChanged(
+      p.clamp(0, double.infinity),
+      f.clamp(0, double.infinity),
+      c.clamp(0, double.infinity),
+    );
     // Sync calories field to reflect recalculated value (4/9/4 rule).
     final recalc = p * 4 + f * 9 + c * 4;
     _syncCaloriesField(recalc);
@@ -210,8 +212,23 @@ class _KF2ItemTileState extends State<KF2ItemTile> {
   void _toggleMacroEdit() {
     setState(() => _editingMacros = !_editingMacros);
     if (_editingMacros) {
-      Future.delayed(const Duration(milliseconds: 80),
-          () => _proteinFocus.requestFocus());
+      Future.delayed(
+        const Duration(milliseconds: 80),
+        () => _proteinFocus.requestFocus(),
+      );
+    }
+  }
+
+  void focusUncertainField(RecognitionUncertainField field) {
+    switch (field) {
+      case RecognitionUncertainField.weight:
+        _weightFocus.requestFocus();
+      case RecognitionUncertainField.calories:
+        setState(() => _editingMacros = true);
+        _caloriesFocus.requestFocus();
+      case RecognitionUncertainField.macros:
+        setState(() => _editingMacros = true);
+        _proteinFocus.requestFocus();
     }
   }
 
@@ -236,165 +253,168 @@ class _KF2ItemTileState extends State<KF2ItemTile> {
         child: Container(
           decoration: BoxDecoration(
             color: t.card,
-            border: Border(
-              bottom: BorderSide(color: t.hairline),
-            ),
+            border: Border(bottom: BorderSide(color: t.hairline)),
           ),
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ── Row 1: name · kcal · actions ────────────────────────────
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Expanded(
-                  child: Text(
-                    item.name,
-                    style: TextStyle(
-                      fontFamily: K2Fonts.sans,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w500,
-                      color: t.fg,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  n.calories.toStringAsFixed(0),
-                  style: TextStyle(
-                    fontFamily: K2Fonts.mono,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w500,
-                    color: t.fgDim,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                GestureDetector(
-                  onTap: _toggleMacroEdit,
-                  child: Icon(
-                    Icons.edit_outlined,
-                    size: 18,
-                    color: _editingMacros ? K2Colors.accent : t.fgMute,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                GestureDetector(
-                  onTap: () {
-                    HapticFeedback.lightImpact();
-                    widget.onDelete();
-                  },
-                  child: const Icon(
-                    Icons.close,
-                    size: 18,
-                    color: K2Colors.error,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            _SourceBadge(source: item.source, theme: t),
-            const SizedBox(height: 6),
-            // ── Row 2: weight pill · apply button · P·F·C ────────────────
-            Row(
-              children: [
-                _WeightPill(
-                  ctrl: _weightCtrl,
-                  focus: _weightFocus,
-                  isInvalid: _weightInvalid,
-                  onChanged: _onWeightChanged,
-                  onSubmitted: (v) {
-                    _onWeightChanged(v);
-                    FocusScope.of(context).unfocus();
-                  },
-                  theme: t,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  l10n.macro_g,
-                  style: TextStyle(
-                    fontFamily: K2Fonts.mono,
-                    fontSize: 12,
-                    color: t.fgMute,
-                  ),
-                ),
-                if (_weightFocused) ...[
-                  const SizedBox(width: 6),
-                  GestureDetector(
-                    onTap: () => FocusScope.of(context).unfocus(),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: K2Colors.accent,
-                        borderRadius: BorderRadius.circular(12),
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ── Row 1: name · kcal · actions ────────────────────────────
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Expanded(
+                    child: Text(
+                      item.name,
+                      style: TextStyle(
+                        fontFamily: K2Fonts.sans,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w500,
+                        color: t.fg,
                       ),
-                      child: const Icon(
-                        Icons.check,
-                        size: 14,
-                        color: Colors.white,
-                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                ] else
-                  const SizedBox(width: 10),
-                if (!_weightFocused)
+                  const SizedBox(width: 8),
                   Text(
-                    '${l10n.macro_protein_abbr} ${n.protein.toStringAsFixed(0)} · '
-                    '${l10n.macro_fat_abbr} ${n.fat.toStringAsFixed(0)} · '
-                    '${l10n.macro_carbs_abbr} ${n.carbs.toStringAsFixed(0)}',
+                    n.calories.toStringAsFixed(0),
                     style: TextStyle(
                       fontFamily: K2Fonts.mono,
-                      fontSize: 11,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                      color: t.fgDim,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: _toggleMacroEdit,
+                    child: Icon(
+                      Icons.edit_outlined,
+                      size: 18,
+                      color: _editingMacros ? K2Colors.accent : t.fgMute,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: () {
+                      HapticFeedback.lightImpact();
+                      widget.onDelete();
+                    },
+                    child: const Icon(
+                      Icons.close,
+                      size: 18,
+                      color: K2Colors.error,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              _SourceBadge(source: item.source, theme: t),
+              const SizedBox(height: 6),
+              // ── Row 2: weight pill · apply button · P·F·C ────────────────
+              Row(
+                children: [
+                  _WeightPill(
+                    ctrl: _weightCtrl,
+                    focus: _weightFocus,
+                    isInvalid: _weightInvalid,
+                    onChanged: _onWeightChanged,
+                    onSubmitted: (v) {
+                      _onWeightChanged(v);
+                      FocusScope.of(context).unfocus();
+                    },
+                    theme: t,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    l10n.macro_g,
+                    style: TextStyle(
+                      fontFamily: K2Fonts.mono,
+                      fontSize: 12,
                       color: t.fgMute,
                     ),
                   ),
-              ],
-            ),
-            // ── Manual entry warning ─────────────────────────────────────
-            if (item.needsManualNutrition) ...[
-              const SizedBox(height: 6),
-              GestureDetector(
-                onTap: () => setState(() => _editingMacros = true),
-                child: Row(
-                  children: [
-                    Icon(Icons.warning_amber_rounded,
-                        size: 13, color: Colors.orange.shade700),
-                    const SizedBox(width: 4),
-                    Text(
-                      l10n.item_enter_nutrition_manually,
-                      style: TextStyle(
-                        fontFamily: K2Fonts.sans,
-                        fontSize: 11,
-                        color: Colors.orange.shade700,
+                  if (_weightFocused) ...[
+                    const SizedBox(width: 6),
+                    GestureDetector(
+                      onTap: () => FocusScope.of(context).unfocus(),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: K2Colors.accent,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(
+                          Icons.check,
+                          size: 14,
+                          color: Colors.white,
+                        ),
                       ),
                     ),
-                  ],
+                  ] else
+                    const SizedBox(width: 10),
+                  if (!_weightFocused)
+                    Text(
+                      '${l10n.macro_protein_abbr} ${n.protein.toStringAsFixed(0)} · '
+                      '${l10n.macro_fat_abbr} ${n.fat.toStringAsFixed(0)} · '
+                      '${l10n.macro_carbs_abbr} ${n.carbs.toStringAsFixed(0)}',
+                      style: TextStyle(
+                        fontFamily: K2Fonts.mono,
+                        fontSize: 11,
+                        color: t.fgMute,
+                      ),
+                    ),
+                ],
+              ),
+              // ── Manual entry warning ─────────────────────────────────────
+              if (item.needsManualNutrition) ...[
+                const SizedBox(height: 6),
+                GestureDetector(
+                  onTap: () => setState(() => _editingMacros = true),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.warning_amber_rounded,
+                        size: 13,
+                        color: Colors.orange.shade700,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        l10n.item_enter_nutrition_manually,
+                        style: TextStyle(
+                          fontFamily: K2Fonts.sans,
+                          fontSize: 11,
+                          color: Colors.orange.shade700,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
+              ],
+              // ── Macro inline edit ────────────────────────────────────────
+              if (_editingMacros) ...[
+                const SizedBox(height: 10),
+                _KF2MacroInlineEdit(
+                  proteinCtrl: _proteinCtrl,
+                  fatCtrl: _fatCtrl,
+                  carbsCtrl: _carbsCtrl,
+                  caloriesCtrl: _caloriesCtrl,
+                  proteinFocus: _proteinFocus,
+                  fatFocus: _fatFocus,
+                  carbsFocus: _carbsFocus,
+                  caloriesFocus: _caloriesFocus,
+                  onMacrosChanged: _onMacroChanged,
+                  onCaloriesChanged: _onCaloriesChanged,
+                  onDone: () => setState(() => _editingMacros = false),
+                  theme: t,
+                ),
+              ],
             ],
-            // ── Macro inline edit ────────────────────────────────────────
-            if (_editingMacros) ...[
-              const SizedBox(height: 10),
-              _KF2MacroInlineEdit(
-                proteinCtrl: _proteinCtrl,
-                fatCtrl: _fatCtrl,
-                carbsCtrl: _carbsCtrl,
-                caloriesCtrl: _caloriesCtrl,
-                proteinFocus: _proteinFocus,
-                fatFocus: _fatFocus,
-                carbsFocus: _carbsFocus,
-                caloriesFocus: _caloriesFocus,
-                onMacrosChanged: _onMacroChanged,
-                onCaloriesChanged: _onCaloriesChanged,
-                onDone: () => setState(() => _editingMacros = false),
-                theme: t,
-              ),
-            ],
-          ],
-        ),
+          ),
         ),
       ),
     );
@@ -494,8 +514,9 @@ class _WeightPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final borderColor =
-        isInvalid && ctrl.text.isNotEmpty ? K2Colors.error : theme.border;
+    final borderColor = isInvalid && ctrl.text.isNotEmpty
+        ? K2Colors.error
+        : theme.border;
 
     return Container(
       width: 52,
@@ -509,8 +530,7 @@ class _WeightPill extends StatelessWidget {
         child: TextField(
           controller: ctrl,
           focusNode: focus,
-          keyboardType:
-              const TextInputType.numberWithOptions(decimal: true),
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
           textAlign: TextAlign.center,
           style: TextStyle(
             fontFamily: K2Fonts.mono,
@@ -616,8 +636,7 @@ class _KF2MacroInlineEdit extends StatelessWidget {
             onDone();
           },
           child: Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
             decoration: BoxDecoration(
               color: theme.fg,
               borderRadius: BorderRadius.circular(8),
@@ -681,8 +700,9 @@ class _MacroField extends StatelessWidget {
               child: TextField(
                 controller: ctrl,
                 focusNode: focus,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontFamily: K2Fonts.mono,
@@ -798,8 +818,5 @@ IngredientV2 rebuildIngredientMacros(
     glycemicIndexCategory: item.nutrientsPer100g.glycemicIndexCategory,
   );
 
-  return item.copyWith(
-    nutrientsTotal: newTotal,
-    nutrientsPer100g: newPer100,
-  );
+  return item.copyWith(nutrientsTotal: newTotal, nutrientsPer100g: newPer100);
 }

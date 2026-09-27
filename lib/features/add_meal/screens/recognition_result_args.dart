@@ -1,6 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/ingredient_v2.dart';
+import '../../../core/feedback/feedback_models.dart';
+import '../../../shared/models/recognition_clarification.dart';
 
 /// Holds the args for the result currently presented on `/kf2/result`.
 ///
@@ -27,10 +29,16 @@ class RecognitionResultArgs {
     required this.dishName,
     required this.items,
     this.onSaved,
+    this.feedbackSource = FeedbackSource.photo,
+    this.recognitionDuration,
+    this.clarification,
   });
 
   final String dishName;
   final List<IngredientV2> items;
+  final FeedbackSource feedbackSource;
+  final Duration? recognitionDuration;
+  final RecognitionClarification? clarification;
 
   /// Fired with the dish name immediately before the sheet pops on save.
   final void Function(String dishName)? onSaved;

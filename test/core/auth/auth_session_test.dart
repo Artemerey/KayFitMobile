@@ -96,55 +96,58 @@ void main() {
   // ── H3: catch-block classification ────────────────────────────────────────
 
   group('H3 — DioException does not reset state', () {
-    test('connectionTimeout from loadTokens does not set state to data(null)',
-        () async {
-      final storage = _FakeTokenStorage();
-      // Make loadTokens() throw a connectionTimeout DioException.
-      storage.throwOnLoad = DioException(
-        requestOptions: RequestOptions(path: ''),
-        type: DioExceptionType.connectionTimeout,
-      );
+    test(
+      'connectionTimeout from loadTokens does not set state to data(null)',
+      () async {
+        final storage = _FakeTokenStorage();
+        // Make loadTokens() throw a connectionTimeout DioException.
+        storage.throwOnLoad = DioException(
+          requestOptions: RequestOptions(path: ''),
+          type: DioExceptionType.connectionTimeout,
+        );
 
-      final container = ProviderContainer(
-        overrides: [secureStorageProvider.overrideWithValue(storage)],
-      );
-      addTearDown(container.dispose);
+        final container = ProviderContainer(
+          overrides: [secureStorageProvider.overrideWithValue(storage)],
+        );
+        addTearDown(container.dispose);
 
-      // checkSession with backgroundRefresh:false — in old code this would set
-      // data(null) on any exception; in fixed code it must not for network errors.
-      await container
-          .read(authNotifierProvider.notifier)
-          .checkSession(backgroundRefresh: false);
+        // checkSession with backgroundRefresh:false — in old code this would set
+        // data(null) on any exception; in fixed code it must not for network errors.
+        await container
+            .read(authNotifierProvider.notifier)
+            .checkSession(backgroundRefresh: false);
 
-      // State must NOT be AsyncData(null): connectionTimeout ≠ dead tokens.
-      // It may be loading() or data(someUser), but must never be data(null).
-      final state = container.read(authNotifierProvider);
-      expect(state, isNot(equals(const AsyncValue<UserProfile?>.data(null))));
-    });
-
-    test('receiveTimeout from loadTokens does not set state to data(null)',
-        () async {
-      final storage = _FakeTokenStorage();
-      storage.throwOnLoad = DioException(
-        requestOptions: RequestOptions(path: ''),
-        type: DioExceptionType.receiveTimeout,
-      );
-
-      final container = ProviderContainer(
-        overrides: [secureStorageProvider.overrideWithValue(storage)],
-      );
-      addTearDown(container.dispose);
-
-      await container
-          .read(authNotifierProvider.notifier)
-          .checkSession(backgroundRefresh: false);
-
-      final state = container.read(authNotifierProvider);
-      expect(state, isNot(equals(const AsyncValue<UserProfile?>.data(null))));
-    });
+        // State must NOT be AsyncData(null): connectionTimeout ≠ dead tokens.
+        // It may be loading() or data(someUser), but must never be data(null).
+        final state = container.read(authNotifierProvider);
+        expect(state, isNot(equals(const AsyncValue<UserProfile?>.data(null))));
+      },
+    );
 
     test(
-        'backgroundRefresh=false + DioException connectionError does not set '
+      'receiveTimeout from loadTokens does not set state to data(null)',
+      () async {
+        final storage = _FakeTokenStorage();
+        storage.throwOnLoad = DioException(
+          requestOptions: RequestOptions(path: ''),
+          type: DioExceptionType.receiveTimeout,
+        );
+
+        final container = ProviderContainer(
+          overrides: [secureStorageProvider.overrideWithValue(storage)],
+        );
+        addTearDown(container.dispose);
+
+        await container
+            .read(authNotifierProvider.notifier)
+            .checkSession(backgroundRefresh: false);
+
+        final state = container.read(authNotifierProvider);
+        expect(state, isNot(equals(const AsyncValue<UserProfile?>.data(null))));
+      },
+    );
+
+    test('backgroundRefresh=false + DioException connectionError does not set '
         'state to data(null)', () async {
       final storage = _FakeTokenStorage();
       storage.throwOnLoad = DioException(
@@ -169,116 +172,126 @@ void main() {
   // ── H5: KeychainUnavailableException in checkSession ──────────────────────
 
   group('H5 — KeychainUnavailableException does not reset state', () {
-    test('KeychainUnavailableException from loadTokens does not log out',
-        () async {
-      final storage = _FakeTokenStorage();
-      storage.throwOnLoad = const KeychainUnavailableException('-25308');
+    test(
+      'KeychainUnavailableException from loadTokens does not log out',
+      () async {
+        final storage = _FakeTokenStorage();
+        storage.throwOnLoad = const KeychainUnavailableException('-25308');
 
-      final container = ProviderContainer(
-        overrides: [secureStorageProvider.overrideWithValue(storage)],
-      );
-      addTearDown(container.dispose);
+        final container = ProviderContainer(
+          overrides: [secureStorageProvider.overrideWithValue(storage)],
+        );
+        addTearDown(container.dispose);
 
-      await container
-          .read(authNotifierProvider.notifier)
-          .checkSession(backgroundRefresh: false);
+        await container
+            .read(authNotifierProvider.notifier)
+            .checkSession(backgroundRefresh: false);
 
-      // Keychain temporarily locked → state must NOT become data(null).
-      // It remains loading() — the UI will retry when the device is unlocked.
-      final state = container.read(authNotifierProvider);
-      expect(state, isNot(equals(const AsyncValue<UserProfile?>.data(null))));
-      // Tokens must not be cleared — Keychain just wasn't accessible.
-      expect(storage.clearCount, equals(0));
-    });
+        // Keychain temporarily locked → state must NOT become data(null).
+        // It remains loading() — the UI will retry when the device is unlocked.
+        final state = container.read(authNotifierProvider);
+        expect(state, isNot(equals(const AsyncValue<UserProfile?>.data(null))));
+        // Tokens must not be cleared — Keychain just wasn't accessible.
+        expect(storage.clearCount, equals(0));
+      },
+    );
   });
 
   // ── H6: pair==null with backgroundRefresh=true → data(null) ──────────────
 
   group('H6 — backgroundRefresh=true + no tokens → state=data(null)', () {
-    test('checkSession backgroundRefresh=true with empty storage → data(null)',
-        () async {
-      final storage = _FakeTokenStorage(); // empty — no tokens
+    test(
+      'checkSession backgroundRefresh=true with empty storage → data(null)',
+      () async {
+        final storage = _FakeTokenStorage(); // empty — no tokens
 
-      final container = ProviderContainer(
-        overrides: [secureStorageProvider.overrideWithValue(storage)],
-      );
-      addTearDown(container.dispose);
+        final container = ProviderContainer(
+          overrides: [secureStorageProvider.overrideWithValue(storage)],
+        );
+        addTearDown(container.dispose);
 
-      // backgroundRefresh: true simulates the resumed lifecycle callback.
-      await container
-          .read(authNotifierProvider.notifier)
-          .checkSession(backgroundRefresh: true);
+        // backgroundRefresh: true simulates the resumed lifecycle callback.
+        await container
+            .read(authNotifierProvider.notifier)
+            .checkSession(backgroundRefresh: true);
 
-      final state = container.read(authNotifierProvider);
-      expect(state, isA<AsyncData<UserProfile?>>());
-      expect(state.value, isNull);
-    });
-
-    test('checkSession backgroundRefresh=false with empty storage → data(null)',
-        () async {
-      final storage = _FakeTokenStorage();
-
-      final container = ProviderContainer(
-        overrides: [secureStorageProvider.overrideWithValue(storage)],
-      );
-      addTearDown(container.dispose);
-
-      await container
-          .read(authNotifierProvider.notifier)
-          .checkSession(backgroundRefresh: false);
-
-      final state = container.read(authNotifierProvider);
-      expect(state, isA<AsyncData<UserProfile?>>());
-      expect(state.value, isNull);
-    });
+        final state = container.read(authNotifierProvider);
+        expect(state, isA<AsyncData<UserProfile?>>());
+        expect(state.value, isNull);
+      },
+    );
 
     test(
-        'checkSession backgroundRefresh=true + pair==null clears cache',
-        () async {
-      SharedPreferences.setMockInitialValues({
-        'cached_user': '{"id":42,"email":"old@example.com","isActive":true}',
-      });
-      final storage = _FakeTokenStorage(); // no tokens → pair == null
+      'checkSession backgroundRefresh=false with empty storage → data(null)',
+      () async {
+        final storage = _FakeTokenStorage();
 
-      final container = ProviderContainer(
-        overrides: [secureStorageProvider.overrideWithValue(storage)],
-      );
-      addTearDown(container.dispose);
+        final container = ProviderContainer(
+          overrides: [secureStorageProvider.overrideWithValue(storage)],
+        );
+        addTearDown(container.dispose);
 
-      await container
-          .read(authNotifierProvider.notifier)
-          .checkSession(backgroundRefresh: true);
+        await container
+            .read(authNotifierProvider.notifier)
+            .checkSession(backgroundRefresh: false);
 
-      final prefs = await SharedPreferences.getInstance();
-      expect(prefs.getString('cached_user'), isNull);
-    });
+        final state = container.read(authNotifierProvider);
+        expect(state, isA<AsyncData<UserProfile?>>());
+        expect(state.value, isNull);
+      },
+    );
 
     test(
-        'checkSession backgroundRefresh=true with KeychainUnavailableException '
-        '→ does not set data(null)',
-        () async {
-      // Simulate Keychain locked right when backgroundRefresh fires.
-      // _FakeTokenStorage throws KeychainUnavailableException directly,
-      // mimicking what SecureTokenStorageImpl does when it catches -25308.
-      final storage = _FakeTokenStorage();
-      storage.throwOnLoad = const KeychainUnavailableException('-25308');
+      'checkSession backgroundRefresh=true + pair==null clears cache',
+      () async {
+        SharedPreferences.setMockInitialValues({
+          'cached_user': '{"id":42,"email":"old@example.com","isActive":true}',
+        });
+        final storage = _FakeTokenStorage(); // no tokens → pair == null
 
-      final container = ProviderContainer(
-        overrides: [secureStorageProvider.overrideWithValue(storage)],
-      );
-      addTearDown(container.dispose);
+        final container = ProviderContainer(
+          overrides: [secureStorageProvider.overrideWithValue(storage)],
+        );
+        addTearDown(container.dispose);
 
-      // backgroundRefresh=true so we stay in data(user) — no loading flash.
-      container.read(authNotifierProvider.notifier).restoreFromCache(_testUser);
+        await container
+            .read(authNotifierProvider.notifier)
+            .checkSession(backgroundRefresh: true);
 
-      await container
-          .read(authNotifierProvider.notifier)
-          .checkSession(backgroundRefresh: true);
+        final prefs = await SharedPreferences.getInstance();
+        expect(prefs.getString('cached_user'), isNull);
+      },
+    );
 
-      // State must remain data(_testUser) — Keychain locked ≠ no tokens.
-      final state = container.read(authNotifierProvider);
-      expect(state, isA<AsyncData<UserProfile?>>());
-      expect(state.value, equals(_testUser));
-    });
+    test(
+      'checkSession backgroundRefresh=true with KeychainUnavailableException '
+      '→ does not set data(null)',
+      () async {
+        // Simulate Keychain locked right when backgroundRefresh fires.
+        // _FakeTokenStorage throws KeychainUnavailableException directly,
+        // mimicking what SecureTokenStorageImpl does when it catches -25308.
+        final storage = _FakeTokenStorage();
+        storage.throwOnLoad = const KeychainUnavailableException('-25308');
+
+        final container = ProviderContainer(
+          overrides: [secureStorageProvider.overrideWithValue(storage)],
+        );
+        addTearDown(container.dispose);
+
+        // backgroundRefresh=true so we stay in data(user) — no loading flash.
+        container
+            .read(authNotifierProvider.notifier)
+            .restoreFromCache(_testUser);
+
+        await container
+            .read(authNotifierProvider.notifier)
+            .checkSession(backgroundRefresh: true);
+
+        // State must remain data(_testUser) — Keychain locked ≠ no tokens.
+        final state = container.read(authNotifierProvider);
+        expect(state, isA<AsyncData<UserProfile?>>());
+        expect(state.value, equals(_testUser));
+      },
+    );
   });
 }

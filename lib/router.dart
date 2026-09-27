@@ -4,9 +4,11 @@ import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'core/analytics/analytics_service.dart';
 import 'core/auth/auth_provider.dart';
+import 'core/auth/auth_handoff_coordinator.dart';
 import 'core/ai_consent/ai_consent_provider.dart';
 import 'core/navigation/navigation_providers.dart';
 import 'features/auth/screens/login_screen.dart';
+import 'features/auth/screens/auth_completing_screen.dart';
 import 'features/dashboard/screens/dashboard_screen.dart';
 import 'features/journal/screens/journal_screen.dart';
 import 'features/journal/screens/edit_meal_screen.dart';
@@ -52,6 +54,16 @@ const _kfRecog = bool.fromEnvironment('KF2_RECOG', defaultValue: true);
 
 const _kOnboardingDoneKey = 'onboarding_done';
 
+/// First-priority router gate for the transactional auth handoff.
+/// Kept pure so regression tests exercise the exact production decision.
+String? authHandoffRedirect({
+  required bool authCompleting,
+  required String location,
+}) {
+  if (!authCompleting) return null;
+  return location == '/auth-completing' ? null : '/auth-completing';
+}
+
 /// Call after successful onboarding completion to mark it done.
 Future<void> markOnboardingDone(WidgetRef ref) async {
   final prefs = await SharedPreferences.getInstance();
@@ -68,6 +80,7 @@ class _RouterNotifier extends ChangeNotifier {
   _RouterNotifier(this._ref) {
     // Watch auth, onboarding, consent, wayToGoal — notify GoRouter on change.
     _ref.listen(authNotifierProvider, (_, __) => notifyListeners());
+    _ref.listen(authHandoffCoordinatorProvider, (_, __) => notifyListeners());
     _ref.listen(onboardingDoneProvider, (_, __) => notifyListeners());
     _ref.listen(showWayToGoalProvider, (_, __) => notifyListeners());
     _ref.listen(aiConsentProvider, (_, __) => notifyListeners());
@@ -78,12 +91,21 @@ class _RouterNotifier extends ChangeNotifier {
 
   String? redirect(BuildContext context, GoRouterState state) {
     final authNotifier = _ref.read(authNotifierProvider);
+    final handoff = _ref.read(authHandoffCoordinatorProvider);
     final onboardingDone = _ref.read(onboardingDoneProvider);
     final showWayToGoal = _ref.read(showWayToGoalProvider);
     final aiConsent = _ref.read(aiConsentProvider);
     final consentReady = _ref.read(aiConsentReadyProvider);
 
     final loc = state.matchedLocation;
+
+    // Token exchange is not authentication. Park on one neutral route until
+    // onboarding sync, profile load and the local commit all succeed.
+    final handoffRedirect = authHandoffRedirect(
+      authCompleting: handoff.authCompleting,
+      location: loc,
+    );
+    if (handoffRedirect != null) return handoffRedirect;
 
     // While the auth state is resolving, park on the branded splash so we never
     // flash the legacy initialLocation '/' (DashboardScreen) or a half-resolved
@@ -106,6 +128,7 @@ class _RouterNotifier extends ChangeNotifier {
     // Public routes
     final isPublic =
         loc == '/login' ||
+        loc == '/auth-completing' ||
         loc == '/email-auth' ||
         loc == '/onboarding' ||
         loc == '/way-to-goal' ||
@@ -212,6 +235,10 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const OnboardingScreen(),
       ),
       GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
+      GoRoute(
+        path: '/auth-completing',
+        builder: (context, state) => const AuthCompletingScreen(),
+      ),
       GoRoute(
         path: '/email-auth',
         builder: (context, state) => const EmailAuthScreen(),

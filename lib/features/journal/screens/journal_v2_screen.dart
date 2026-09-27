@@ -17,6 +17,11 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart' as intl;
 
 import '../../../core/api/api_client.dart';
+import '../../../core/api/meal_copy_result.dart';
+import '../../../core/auth/auth_provider.dart';
+import '../../../core/feedback/feedback_models.dart';
+import '../../../core/feedback/feedback_presenter.dart';
+import '../../../core/feedback/meal_save_result.dart';
 import '../../../core/i18n/generated/app_localizations.dart';
 import '../../../features/dashboard/providers/dashboard_provider.dart';
 import '../../../features/journal/screens/journal_screen.dart'
@@ -80,7 +85,8 @@ K2MealRowData _toRowData(Meal m) {
   if (raw != null) {
     final dt = DateTime.tryParse(raw)?.toLocal();
     if (dt != null) {
-      time = '${dt.hour.toString().padLeft(2, '0')}:'
+      time =
+          '${dt.hour.toString().padLeft(2, '0')}:'
           '${dt.minute.toString().padLeft(2, '0')}';
     }
   }
@@ -153,8 +159,7 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
   String _calSelected = 'today';
 
   // The date key that drives provider lookups.
-  String get _dateKey =>
-      _calSelected == 'today' ? _todayIso() : _calSelected;
+  String get _dateKey => _calSelected == 'today' ? _todayIso() : _calSelected;
 
   ({double kcal, double protein, double carbs, double fat}) _resolveGoals(
     AsyncValue<MacroGoals> goalsAsync,
@@ -366,13 +371,16 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
     _weightInflight.add(mealId);
     HapticFeedback.selectionClick();
     try {
-      await apiDio.patch('/api/meals/$mealId', data: {
-        'weight_grams': newGrams,
-        'calories': ?calories,
-        'protein': ?protein,
-        'fat': ?fat,
-        'carbs': ?carbs,
-      });
+      await apiDio.patch(
+        '/api/meals/$mealId',
+        data: {
+          'weight_grams': newGrams,
+          'calories': ?calories,
+          'protein': ?protein,
+          'fat': ?fat,
+          'carbs': ?carbs,
+        },
+      );
       // Refresh everything that displays this meal so the row + rings update.
       ref.invalidate(journalDayMealsProvider(_dateKey));
       ref.invalidate(todayStatsProvider);
@@ -381,11 +389,13 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
     } on Exception {
       if (mounted) {
         final l10n = AppLocalizations.of(context)!;
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(l10n.journal_could_not_update_weight),
-          behavior: SnackBarBehavior.floating,
-          backgroundColor: Colors.red,
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(l10n.journal_could_not_update_weight),
+            behavior: SnackBarBehavior.floating,
+            backgroundColor: Colors.red,
+          ),
+        );
       }
     } finally {
       _weightInflight.remove(mealId);
@@ -465,17 +475,19 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
     setState(() => _isCopying = true);
     _clearUndo();
     try {
-      final response = await apiDio.post('/api/meals/copy-batch', data: {
-        'meal_ids': mealIds,
-        'target_dates': targetDates,
-      });
-      final copiedIds =
-          (response.data['copied_ids'] as List).cast<int>();
+      final response = await apiDio.post(
+        '/api/meals/copy-batch',
+        data: {'meal_ids': mealIds, 'target_dates': targetDates},
+      );
+      final saveResult = MealSaveResult.fromCopyBatchJson(response.data);
+      final copyResult = MealCopyResult.fromJson(response.data);
+      final copiedIds = copyResult.mealIds;
+      final savedDates = copyResult.savedDateIsos;
 
       _lastCopiedIds = copiedIds;
-      _lastCopiedDates = targetDates;
+      _lastCopiedDates = savedDates;
 
-      for (final iso in targetDates) {
+      for (final iso in savedDates) {
         ref.invalidate(journalDayMealsProvider(iso));
       }
       ref.invalidate(dailyKcalHistoryProvider);
@@ -484,14 +496,19 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
       HapticFeedback.lightImpact();
 
       // Navigate to the first (earliest) target date so the user sees the result.
-      setState(() => _calSelected = targetDates.first);
+      setState(() => _calSelected = copyResult.firstSavedDateIso);
 
       final l10n = AppLocalizations.of(context)!;
       final isRu = l10n.localeName == 'ru';
-      final n = targetDates.length;
+      final n = savedDates.length;
       final snackText = n == 1
-          ? l10n.journal_copied_to(_humanReadableDate(targetDates.first, l10n: l10n))
-          : l10n.journal_copied_n_dates(n, isRu ? _russianDayWord(n) : (n == 1 ? 'day' : 'days'));
+          ? l10n.journal_copied_to(
+              _humanReadableDate(copyResult.firstSavedDateIso, l10n: l10n),
+            )
+          : l10n.journal_copied_n_dates(
+              n,
+              isRu ? _russianDayWord(n) : (n == 1 ? 'day' : 'days'),
+            );
 
       ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
@@ -510,6 +527,18 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
       );
 
       _undoTimer = Timer(const Duration(seconds: 4), _clearUndo);
+      final userId = ref.read(authNotifierProvider).valueOrNull?.id;
+      if (saveResult.canRequestFeedback && userId != null) {
+        unawaited(
+          showMealFeedbackPrompt(
+            context: context,
+            targetId: saveResult.feedbackTargetId!,
+            source: FeedbackSource.copy,
+            userId: userId,
+            aggregateContext: {'item_count': saveResult.added},
+          ),
+        );
+      }
     } on Exception {
       if (!mounted) return;
       final l10n = AppLocalizations.of(context)!;
@@ -543,10 +572,7 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
   }
 
   /// ⋮ handler on a meal-type group header — copies all meals in the group.
-  Future<void> _onCopyGroupTapped(
-    String mealType,
-    List<String> ids,
-  ) async {
+  Future<void> _onCopyGroupTapped(String mealType, List<String> ids) async {
     final intIds = ids.map(int.parse).toList();
     if (intIds.isEmpty) return;
     await _openCopySheet(intIds);
@@ -603,8 +629,9 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
         : <String, K2DayStatus>{
             for (final entry in kcalHistory.entries)
               if (entry.value > 0)
-                entry.key:
-                    entry.value > dayGoal ? K2DayStatus.over : K2DayStatus.good,
+                entry.key: entry.value > dayGoal
+                    ? K2DayStatus.over
+                    : K2DayStatus.good,
           };
 
     return Scaffold(
@@ -629,8 +656,7 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
             Kayfit2CalendarStrip(
               theme: t,
               expanded: _calExpanded,
-              onToggle: () =>
-                  setState(() => _calExpanded = !_calExpanded),
+              onToggle: () => setState(() => _calExpanded = !_calExpanded),
               selectedIso: _calSelected,
               onSelect: (iso) => setState(() => _calSelected = iso),
               statusByIso: statusByIso,
@@ -646,27 +672,29 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
             // rather than a second CircularProgressIndicator — the meal list
             // below already shows one, and stacking two indicators on the
             // same screen looked like a glitch.
-            Builder(builder: (_) {
-              final meals = mealsAsync.valueOrNull ?? const <Meal>[];
-              final eaten = _sumMeals(meals);
-              final g = _resolveGoals(goalsAsync);
-              return Padding(
-                padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
-                child: KayfitRingsSummary(
-                  theme: t,
-                  values: KayfitRingsValues(
-                    kcal: eaten.kcal,
-                    kcalGoal: g.kcal,
-                    protein: eaten.protein,
-                    proteinGoal: g.protein,
-                    carbs: eaten.carbs,
-                    carbsGoal: g.carbs,
-                    fat: eaten.fat,
-                    fatGoal: g.fat,
+            Builder(
+              builder: (_) {
+                final meals = mealsAsync.valueOrNull ?? const <Meal>[];
+                final eaten = _sumMeals(meals);
+                final g = _resolveGoals(goalsAsync);
+                return Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
+                  child: KayfitRingsSummary(
+                    theme: t,
+                    values: KayfitRingsValues(
+                      kcal: eaten.kcal,
+                      kcalGoal: g.kcal,
+                      protein: eaten.protein,
+                      proteinGoal: g.protein,
+                      carbs: eaten.carbs,
+                      carbsGoal: g.carbs,
+                      fat: eaten.fat,
+                      fatGoal: g.fat,
+                    ),
                   ),
-                ),
-              );
-            }),
+                );
+              },
+            ),
 
             // Guideline 1.4.1 — disclaimer required on every screen with
             // calculated health values.
@@ -734,10 +762,7 @@ class _JournalV2ScreenState extends ConsumerState<JournalV2Screen> {
                       onRowTap: (id) {
                         final intId = int.tryParse(id);
                         if (intId == null) return;
-                        context.push(
-                          '/meals/$intId/edit',
-                          extra: mealById[id],
-                        );
+                        context.push('/meals/$intId/edit', extra: mealById[id]);
                       },
                       onDelete: _deleteMeal,
                       onCopy: _onCopyTapped,
@@ -801,12 +826,12 @@ class _TopBar extends StatelessWidget {
             // Menu icon
             IconButton(
               icon: Icon(
-                Icons.more_horiz_rounded,
+                Icons.auto_awesome_outlined,
                 color: theme.fg,
-                size: 26,
+                size: 24,
               ),
-              onPressed: () => context.go('/settings'),
-              tooltip: 'Menu',
+              onPressed: () => context.push('/meal-program'),
+              tooltip: 'AI meal program',
             ),
           ],
         ),
@@ -866,10 +891,7 @@ class _MealList extends StatelessWidget {
             theme: theme,
             onCopyGroup: onCopyGroup == null
                 ? null
-                : () => onCopyGroup!(
-                      type,
-                      meals.map((m) => m.id).toList(),
-                    ),
+                : () => onCopyGroup!(type, meals.map((m) => m.id).toList()),
           ),
           for (final meal in meals)
             if (onDelete != null)
@@ -943,14 +965,16 @@ class _DeleteSwipeBackground extends StatelessWidget {
 // Group header
 // ─────────────────────────────────────────────────────────────────────────────
 
-({String emoji, String label}) _groupTitle(String type, AppLocalizations l10n) =>
-    switch (type) {
-      'breakfast' => (emoji: '🌅', label: l10n.mealType_breakfast),
-      'lunch' => (emoji: '☀️', label: l10n.mealType_lunch),
-      'snack' => (emoji: '🍎', label: l10n.mealType_snack),
-      'dinner' => (emoji: '🌙', label: l10n.mealType_dinner),
-      _ => (emoji: '🍽', label: type),
-    };
+({String emoji, String label}) _groupTitle(
+  String type,
+  AppLocalizations l10n,
+) => switch (type) {
+  'breakfast' => (emoji: '🌅', label: l10n.mealType_breakfast),
+  'lunch' => (emoji: '☀️', label: l10n.mealType_lunch),
+  'snack' => (emoji: '🍎', label: l10n.mealType_snack),
+  'dinner' => (emoji: '🌙', label: l10n.mealType_dinner),
+  _ => (emoji: '🍽', label: type),
+};
 
 class _GroupHeader extends StatelessWidget {
   const _GroupHeader({
@@ -980,9 +1004,7 @@ class _GroupHeader extends StatelessWidget {
       margin: const EdgeInsets.only(top: 20, bottom: 4),
       padding: EdgeInsets.fromLTRB(16, 12, onCopyGroup != null ? 4 : 16, 8),
       decoration: BoxDecoration(
-        border: Border(
-          top: BorderSide(color: theme.hairline),
-        ),
+        border: Border(top: BorderSide(color: theme.hairline)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,

@@ -9,6 +9,7 @@
 // The migration path (SharedPreferences → SecureStorage) is tested via
 // SharedPreferences.setMockInitialValues().
 
+import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -107,8 +108,7 @@ class FakeFlutterSecureStorage implements FlutterSecureStorage {
     WebOptions? webOptions,
     MacOsOptions? mOptions,
     WindowsOptions? wOptions,
-  }) async =>
-      _store.containsKey(key);
+  }) async => _store.containsKey(key);
 
   @override
   Future<Map<String, String>> readAll({
@@ -118,8 +118,7 @@ class FakeFlutterSecureStorage implements FlutterSecureStorage {
     WebOptions? webOptions,
     MacOsOptions? mOptions,
     WindowsOptions? wOptions,
-  }) async =>
-      Map.unmodifiable(_store);
+  }) async => Map.unmodifiable(_store);
 
   @override
   Future<void> deleteAll({
@@ -129,8 +128,7 @@ class FakeFlutterSecureStorage implements FlutterSecureStorage {
     WebOptions? webOptions,
     MacOsOptions? mOptions,
     WindowsOptions? wOptions,
-  }) async =>
-      _store.clear();
+  }) async => _store.clear();
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -139,12 +137,11 @@ TokenPair _makeTestPair({
   String access = 'access_abc',
   String refresh = 'refresh_xyz',
   Duration lifetime = const Duration(hours: 1),
-}) =>
-    TokenPair(
-      accessToken: access,
-      refreshToken: refresh,
-      expiresAt: DateTime.now().add(lifetime),
-    );
+}) => TokenPair(
+  accessToken: access,
+  refreshToken: refresh,
+  expiresAt: DateTime.now().add(lifetime),
+);
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
@@ -163,13 +160,17 @@ void main() {
   // ── saveTokens ──────────────────────────────────────────────────────────────
 
   group('saveTokens', () {
-    test('writes all three separate keys to secure storage', () async {
+    test('writes one atomic token-pair value to secure storage', () async {
       final pair = _makeTestPair();
       await storage.saveTokens(pair);
 
-      expect(fakeSecure._store['kayfit.access_token'], equals(pair.accessToken));
-      expect(fakeSecure._store['kayfit.refresh_token'], equals(pair.refreshToken));
-      expect(fakeSecure._store['kayfit.expires_at'], equals(pair.expiresAtIso));
+      final stored =
+          jsonDecode(fakeSecure._store['kayfit.token_pair.v2']!)
+              as Map<String, dynamic>;
+      expect(stored['access_token'], equals(pair.accessToken));
+      expect(stored['refresh_token'], equals(pair.refreshToken));
+      expect(stored['expires_at'], equals(pair.expiresAtIso));
+      expect(fakeSecure._store.keys, <String>{'kayfit.token_pair.v2'});
     });
 
     test('overwrites existing keys when called again', () async {
@@ -178,7 +179,10 @@ void main() {
       await storage.saveTokens(first);
       await storage.saveTokens(second);
 
-      expect(fakeSecure._store['kayfit.access_token'], equals('second_access'));
+      final stored =
+          jsonDecode(fakeSecure._store['kayfit.token_pair.v2']!)
+              as Map<String, dynamic>;
+      expect(stored['access_token'], equals('second_access'));
     });
   });
 
@@ -215,32 +219,37 @@ void main() {
       expect(result, isNull);
     });
 
-    test('migrates tokens from legacy SharedPreferences when SecureStorage empty',
-        () async {
-      SharedPreferences.setMockInitialValues({
-        'access_token': 'legacy_access',
-        'refresh_token': 'legacy_refresh',
-      });
+    test(
+      'migrates tokens from legacy SharedPreferences when SecureStorage empty',
+      () async {
+        SharedPreferences.setMockInitialValues({
+          'access_token': 'legacy_access',
+          'refresh_token': 'legacy_refresh',
+        });
 
-      final result = await storage.loadTokens();
+        final result = await storage.loadTokens();
 
-      expect(result, isNotNull);
-      expect(result!.accessToken, equals('legacy_access'));
-      expect(result.refreshToken, equals('legacy_refresh'));
-    });
+        expect(result, isNotNull);
+        expect(result!.accessToken, equals('legacy_access'));
+        expect(result.refreshToken, equals('legacy_refresh'));
+      },
+    );
 
-    test('removes legacy keys from SharedPreferences after migration', () async {
-      SharedPreferences.setMockInitialValues({
-        'access_token': 'legacy_access',
-        'refresh_token': 'legacy_refresh',
-      });
+    test(
+      'removes legacy keys from SharedPreferences after migration',
+      () async {
+        SharedPreferences.setMockInitialValues({
+          'access_token': 'legacy_access',
+          'refresh_token': 'legacy_refresh',
+        });
 
-      await storage.loadTokens();
+        await storage.loadTokens();
 
-      final prefs = await SharedPreferences.getInstance();
-      expect(prefs.getString('access_token'), isNull);
-      expect(prefs.getString('refresh_token'), isNull);
-    });
+        final prefs = await SharedPreferences.getInstance();
+        expect(prefs.getString('access_token'), isNull);
+        expect(prefs.getString('refresh_token'), isNull);
+      },
+    );
 
     test('saves migrated tokens into SecureStorage', () async {
       SharedPreferences.setMockInitialValues({
@@ -250,24 +259,29 @@ void main() {
 
       await storage.loadTokens();
 
-      expect(fakeSecure._store['kayfit.access_token'], equals('legacy_access'));
-      expect(fakeSecure._store['kayfit.refresh_token'], equals('legacy_refresh'));
+      final stored =
+          jsonDecode(fakeSecure._store['kayfit.token_pair.v2']!)
+              as Map<String, dynamic>;
+      expect(stored['access_token'], equals('legacy_access'));
+      expect(stored['refresh_token'], equals('legacy_refresh'));
     });
 
-    test('migrated pair is expired (triggers immediate refresh on next start)',
-        () async {
-      SharedPreferences.setMockInitialValues({
-        'access_token': 'legacy_access',
-        'refresh_token': 'legacy_refresh',
-      });
+    test(
+      'migrated pair is expired (triggers immediate refresh on next start)',
+      () async {
+        SharedPreferences.setMockInitialValues({
+          'access_token': 'legacy_access',
+          'refresh_token': 'legacy_refresh',
+        });
 
-      final result = await storage.loadTokens();
+        final result = await storage.loadTokens();
 
-      expect(result, isNotNull);
-      // expiresAt = DateTime.now() during migration; 60-second buffer makes
-      // isExpired always true immediately.
-      expect(result!.isExpired, isTrue);
-    });
+        expect(result, isNotNull);
+        // expiresAt = DateTime.now() during migration; 60-second buffer makes
+        // isExpired always true immediately.
+        expect(result!.isExpired, isTrue);
+      },
+    );
   });
 
   // ── loadAccessToken ─────────────────────────────────────────────────────────
@@ -304,7 +318,7 @@ void main() {
   // ── clearTokens ──────────────────────────────────────────────────────────────
 
   group('clearTokens', () {
-    test('deletes all three keys from secure storage', () async {
+    test('deletes atomic and legacy keys from secure storage', () async {
       await storage.saveTokens(_makeTestPair());
 
       await storage.clearTokens();
@@ -312,6 +326,7 @@ void main() {
       expect(fakeSecure._store['kayfit.access_token'], isNull);
       expect(fakeSecure._store['kayfit.refresh_token'], isNull);
       expect(fakeSecure._store['kayfit.expires_at'], isNull);
+      expect(fakeSecure._store['kayfit.token_pair.v2'], isNull);
     });
 
     test('is idempotent when storage is already empty', () async {
@@ -328,15 +343,17 @@ void main() {
   // ── H5: KeychainUnavailableException ─────────────────────────────────────────
 
   group('KeychainUnavailableException (H5)', () {
-    test('loadTokens throws KeychainUnavailableException when code is -25308',
-        () async {
-      fakeSecure.throwKeychainUnavailable = true;
+    test(
+      'loadTokens throws KeychainUnavailableException when code is -25308',
+      () async {
+        fakeSecure.throwKeychainUnavailable = true;
 
-      expect(
-        () => storage.loadTokens(),
-        throwsA(isA<KeychainUnavailableException>()),
-      );
-    });
+        expect(
+          () => storage.loadTokens(),
+          throwsA(isA<KeychainUnavailableException>()),
+        );
+      },
+    );
 
     test('loadTokens returns null for other PlatformException codes', () async {
       fakeSecure.throwOnRead = true;
@@ -347,25 +364,27 @@ void main() {
     });
 
     test(
-        'loadAccessToken throws KeychainUnavailableException when code is -25308',
-        () async {
-      fakeSecure.throwKeychainUnavailable = true;
+      'loadAccessToken throws KeychainUnavailableException when code is -25308',
+      () async {
+        fakeSecure.throwKeychainUnavailable = true;
 
-      expect(
-        () => storage.loadAccessToken(),
-        throwsA(isA<KeychainUnavailableException>()),
-      );
-    });
+        expect(
+          () => storage.loadAccessToken(),
+          throwsA(isA<KeychainUnavailableException>()),
+        );
+      },
+    );
 
     test(
-        'loadRefreshToken throws KeychainUnavailableException when code is -25308',
-        () async {
-      fakeSecure.throwKeychainUnavailable = true;
+      'loadRefreshToken throws KeychainUnavailableException when code is -25308',
+      () async {
+        fakeSecure.throwKeychainUnavailable = true;
 
-      expect(
-        () => storage.loadRefreshToken(),
-        throwsA(isA<KeychainUnavailableException>()),
-      );
-    });
+        expect(
+          () => storage.loadRefreshToken(),
+          throwsA(isA<KeychainUnavailableException>()),
+        );
+      },
+    );
   });
 }

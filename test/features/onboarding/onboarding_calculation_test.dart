@@ -50,6 +50,17 @@ void main() {
       expect(result.targetCalories, lessThan(result.tdee));
     });
 
+    test('edited source answers recalculate instead of reusing stale plan', () {
+      final before = calculateOnboardingPreview(input({'gain_muscle'}));
+      final after = calculateOnboardingPreview(
+        input({'lose_weight'}, speed: 0.25),
+      );
+
+      expect(before.targetCalories, greaterThan(before.tdee));
+      expect(after.targetCalories, lessThan(after.tdee));
+      expect(after.targetCalories, isNot(before.targetCalories));
+    });
+
     test(
       'conflicting primary goals throw instead of silently choosing loss',
       () {

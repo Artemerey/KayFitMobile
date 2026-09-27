@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/i18n/generated/app_localizations.dart';
 import '../../../core/analytics/analytics_service.dart';
+import '../../../core/auth/auth_provider.dart';
+import '../../../core/feedback/onboarding_feedback_host.dart';
 import '../../../router.dart';
 import '../../../shared/theme/app_theme.dart';
 import '../../../shared/widgets/loading_indicator.dart';
@@ -38,6 +40,9 @@ class WayToGoalScreen extends ConsumerWidget {
           child: PlanResultView(
             calc: calc,
             l10n: l10n,
+            feedbackPrompt: OnboardingFeedbackHost(
+              userId: ref.read(authNotifierProvider).valueOrNull?.id,
+            ),
             // Reserve room so the last card isn't hidden under the sticky CTA.
             bottomPadding: 96,
           ),
@@ -105,7 +110,11 @@ class _ErrorView extends StatelessWidget {
   final String message;
   final VoidCallback onRetry;
   final AppLocalizations l10n;
-  const _ErrorView({required this.message, required this.onRetry, required this.l10n});
+  const _ErrorView({
+    required this.message,
+    required this.onRetry,
+    required this.l10n,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -115,23 +124,36 @@ class _ErrorView extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.error_outline, size: 48, color: AppColors.accentOver),
+            const Icon(
+              Icons.error_outline,
+              size: 48,
+              color: AppColors.accentOver,
+            ),
             const SizedBox(height: 12),
-            Text(message,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: AppColors.textMuted)),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: AppColors.textMuted),
+            ),
             const SizedBox(height: 16),
             GestureDetector(
               onTap: onRetry,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 32,
+                  vertical: 14,
+                ),
                 decoration: BoxDecoration(
                   gradient: OBColors.gradient,
                   borderRadius: BorderRadius.circular(999),
                 ),
-                child: Text(l10n.common_retry,
-                    style: const TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.w600)),
+                child: Text(
+                  l10n.common_retry,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               ),
             ),
           ],

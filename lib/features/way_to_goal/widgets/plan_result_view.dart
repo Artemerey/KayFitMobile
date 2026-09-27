@@ -13,6 +13,10 @@ class PlanResultView extends StatelessWidget {
   final AppLocalizations l10n;
   final double? currentWeight;
   final double bottomPadding;
+  final Widget? feedbackPrompt;
+  final Widget? authHandoff;
+  final List<String> restrictionNames;
+  final VoidCallback? onEditAnswers;
 
   const PlanResultView({
     super.key,
@@ -20,6 +24,10 @@ class PlanResultView extends StatelessWidget {
     required this.l10n,
     this.currentWeight,
     this.bottomPadding = 24,
+    this.feedbackPrompt,
+    this.authHandoff,
+    this.restrictionNames = const [],
+    this.onEditAnswers,
   });
 
   bool get _isMaintain {
@@ -66,10 +74,34 @@ class PlanResultView extends StatelessWidget {
   String _goalDateLabel(bool isRu) {
     if (calc.daysToGoal == null || calc.targetWeight == null) return '';
     final goalDate = DateTime.now().add(Duration(days: calc.daysToGoal!));
-    final monthsRu = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
-                      'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
-    final monthsEn = ['January', 'February', 'March', 'April', 'May', 'June',
-                      'July', 'August', 'September', 'October', 'November', 'December'];
+    final monthsRu = [
+      'января',
+      'февраля',
+      'марта',
+      'апреля',
+      'мая',
+      'июня',
+      'июля',
+      'августа',
+      'сентября',
+      'октября',
+      'ноября',
+      'декабря',
+    ];
+    final monthsEn = [
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ];
     final months = isRu ? monthsRu : monthsEn;
     return '${goalDate.day} ${months[goalDate.month - 1]}';
   }
@@ -79,15 +111,27 @@ class PlanResultView extends StatelessWidget {
     final isRu = Localizations.localeOf(context).languageCode == 'ru';
     final maintain = _isMaintain;
 
-    final planText = (calc.personalizedPlan != null && calc.personalizedPlan!.isNotEmpty)
+    final basePlanText =
+        (calc.personalizedPlan != null && calc.personalizedPlan!.isNotEmpty)
         ? calc.personalizedPlan!
         : _localPlanFallback(isRu);
+    final planText = restrictionNames.isEmpty
+        ? basePlanText
+        : isRu
+        ? '$basePlanText Меню будет составлено без выбранных категорий.'
+        : '$basePlanText Your menu will exclude the selected categories.';
 
     final headerTitle = isRu ? 'Отлично!' : 'Great!';
-    final headerSubtitle = isRu ? 'Ваш персональный план готов' : 'Your personal plan is ready';
+    final headerSubtitle = isRu
+        ? 'Ваш персональный план готов'
+        : 'Your personal plan is ready';
 
-    final dailyRecTitle = isRu ? 'Рекомендация на день' : 'Daily recommendation';
-    final howToTitle = isRu ? 'Как достичь ваших целей:' : 'How to reach your goals:';
+    final dailyRecTitle = isRu
+        ? 'Рекомендация на день'
+        : 'Daily recommendation';
+    final howToTitle = isRu
+        ? 'Как достичь ваших целей:'
+        : 'How to reach your goals:';
     final scienceTitle = isRu
         ? 'План основан на надёжных научных исследованиях и медицинской экспертизе'
         : 'Plan based on trusted scientific research and medical expertise';
@@ -100,6 +144,11 @@ class PlanResultView extends StatelessWidget {
         // ── Personalized plan banner ──────────────────────────────────────────
         _PersonalPlanBanner(text: planText, isRu: isRu),
         const SizedBox(height: 16),
+
+        if (restrictionNames.isNotEmpty) ...[
+          _RestrictionsCard(names: restrictionNames, isRu: isRu),
+          const SizedBox(height: 16),
+        ],
 
         // ── Celebration header ────────────────────────────────────────────────
         Text(
@@ -121,7 +170,9 @@ class PlanResultView extends StatelessWidget {
         const SizedBox(height: 16),
 
         // ── Goal date card (only when losing/gaining weight with a target) ────
-        if (!maintain && calc.daysToGoal != null && calc.targetWeight != null) ...[
+        if (!maintain &&
+            calc.daysToGoal != null &&
+            calc.targetWeight != null) ...[
           _GoalDateCard(
             targetWeight: calc.targetWeight!,
             dateLabel: _goalDateLabel(isRu),
@@ -179,6 +230,14 @@ class PlanResultView extends StatelessWidget {
           badgeColor: const Color(0xFFEF4444),
           badgeInitial: l10n.macro_carbs_abbr,
         ),
+        if (onEditAnswers != null) ...[
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: onEditAnswers,
+            icon: const Icon(Icons.edit_outlined),
+            label: Text(isRu ? 'Изменить ответы' : 'Edit answers'),
+          ),
+        ],
         const SizedBox(height: 20),
 
         // ── How to reach goals ────────────────────────────────────────────────
@@ -221,12 +280,18 @@ class PlanResultView extends StatelessWidget {
             decoration: BoxDecoration(
               color: AppColors.accentSoft,
               borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: const Color(0xFF3B82F6).withValues(alpha: 0.3)),
+              border: Border.all(
+                color: const Color(0xFF3B82F6).withValues(alpha: 0.3),
+              ),
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.balance_rounded, size: 22, color: Color(0xFF3B82F6)),
+                const Icon(
+                  Icons.balance_rounded,
+                  size: 22,
+                  color: Color(0xFF3B82F6),
+                ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -234,14 +299,22 @@ class PlanResultView extends StatelessWidget {
                     children: [
                       Text(
                         isRu ? 'Поддержание веса' : 'Weight maintenance',
-                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.text),
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.text,
+                        ),
                       ),
                       const SizedBox(height: 4),
                       Text(
                         isRu
                             ? 'Текущий и целевой вес совпадают. Эти калории помогут удержать форму.'
                             : 'Your current and target weight match. These calories will keep you steady.',
-                        style: const TextStyle(fontSize: 13, color: AppColors.textMuted, height: 1.4),
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: AppColors.textMuted,
+                          height: 1.4,
+                        ),
                       ),
                     ],
                   ),
@@ -251,12 +324,90 @@ class PlanResultView extends StatelessWidget {
           ),
           const SizedBox(height: 20),
         ],
+        if (feedbackPrompt != null) ...[
+          feedbackPrompt!,
+          const SizedBox(height: 20),
+        ],
+        if (authHandoff != null) ...[authHandoff!, const SizedBox(height: 20)],
       ],
     );
   }
 }
 
 // ── Personalized AI plan banner ──────────────────────────────────────────────
+
+class _RestrictionsCard extends StatelessWidget {
+  const _RestrictionsCard({required this.names, required this.isRu});
+
+  final List<String> names;
+  final bool isRu;
+
+  @override
+  Widget build(BuildContext context) {
+    final title = isRu ? 'Учтённые ограничения' : 'Your restrictions';
+    return Semantics(
+      container: true,
+      label: title,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: OBColors.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(
+                  Icons.verified_rounded,
+                  color: Color(0xFF16A34A),
+                  size: 20,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.text,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              isRu
+                  ? 'Мы исключим эти категории из меню.'
+                  : 'We will exclude these categories from your menu.',
+              style: const TextStyle(fontSize: 13, color: AppColors.textMuted),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final name in names)
+                  Chip(
+                    avatar: const Icon(
+                      Icons.check_rounded,
+                      size: 16,
+                      color: Color(0xFF16A34A),
+                    ),
+                    label: Text(name),
+                    backgroundColor: const Color(0xFFF0FDF4),
+                    side: const BorderSide(color: Color(0xFFBBF7D0)),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class _PersonalPlanBanner extends StatelessWidget {
   final String text;
@@ -289,7 +440,11 @@ class _PersonalPlanBanner extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(Icons.auto_awesome_rounded, size: 18, color: Colors.white),
+              const Icon(
+                Icons.auto_awesome_rounded,
+                size: 18,
+                color: Colors.white,
+              ),
               const SizedBox(width: 8),
               Text(
                 label,
@@ -324,7 +479,11 @@ class _GoalDateCard extends StatelessWidget {
   final double targetWeight;
   final String dateLabel;
   final bool isRu;
-  const _GoalDateCard({required this.targetWeight, required this.dateLabel, required this.isRu});
+  const _GoalDateCard({
+    required this.targetWeight,
+    required this.dateLabel,
+    required this.isRu,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -464,17 +623,51 @@ class _HowToCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final items = isRu ? [
-      ('🍽️', 'Ешь, что любишь', 'Найдите вкусную и сытную еду, которая поможет вам достичь ваших целей.'),
-      ('📸', 'Лёгкий учёт питания', 'Щёлкните фото, оно распознаётся — и готово!'),
-      ('📊', 'Следуйте своему персональному плану калорий', 'Мы создали персональный план специально для вас на основе ваших данных.'),
-      ('⚖️', 'Поддерживайте баланс макроэлементов', 'Соблюдайте баланс белков, жиров и углеводов, чтобы оставаться на пути к цели.'),
-    ] : [
-      ('🍽️', 'Eat what you love', 'Find delicious and filling foods that help you reach your goals.'),
-      ('📸', 'Easy food tracking', 'Take a photo, it gets recognized — done!'),
-      ('📊', 'Follow your personal calorie plan', 'We built a personal plan just for you based on your data.'),
-      ('⚖️', 'Balance your macronutrients', 'Keep protein, fat, and carbs balanced to stay on track.'),
-    ];
+    final items = isRu
+        ? [
+            (
+              '🍽️',
+              'Ешь, что любишь',
+              'Найдите вкусную и сытную еду, которая поможет вам достичь ваших целей.',
+            ),
+            (
+              '📸',
+              'Лёгкий учёт питания',
+              'Щёлкните фото, оно распознаётся — и готово!',
+            ),
+            (
+              '📊',
+              'Следуйте своему персональному плану калорий',
+              'Мы создали персональный план специально для вас на основе ваших данных.',
+            ),
+            (
+              '⚖️',
+              'Поддерживайте баланс макроэлементов',
+              'Соблюдайте баланс белков, жиров и углеводов, чтобы оставаться на пути к цели.',
+            ),
+          ]
+        : [
+            (
+              '🍽️',
+              'Eat what you love',
+              'Find delicious and filling foods that help you reach your goals.',
+            ),
+            (
+              '📸',
+              'Easy food tracking',
+              'Take a photo, it gets recognized — done!',
+            ),
+            (
+              '📊',
+              'Follow your personal calorie plan',
+              'We built a personal plan just for you based on your data.',
+            ),
+            (
+              '⚖️',
+              'Balance your macronutrients',
+              'Keep protein, fat, and carbs balanced to stay on track.',
+            ),
+          ];
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -543,39 +736,49 @@ class _CitationLinks extends StatelessWidget {
   final bool isRu;
   const _CitationLinks({required this.isRu});
 
-  static const _harvardUrl = 'https://www.health.harvard.edu/diet-and-weight-loss/calorie-counting-made-easy';
+  static const _harvardUrl =
+      'https://www.health.harvard.edu/diet-and-weight-loss/calorie-counting-made-easy';
   static const _usdaUrl = 'https://www.dietaryguidelines.gov/';
   static const _mifflinUrl = 'https://pubmed.ncbi.nlm.nih.gov/2305711/';
 
   @override
   Widget build(BuildContext context) {
-    final links = isRu ? [
-      ('Подсчёт калорий стал проще - Harvard', _harvardUrl),
-      ('Рекомендации по питанию на день - USDA', _usdaUrl),
-      ('Mifflin-St Jeor для специалистов по питанию', _mifflinUrl),
-    ] : [
-      ('Calorie counting made easy - Harvard', _harvardUrl),
-      ('Daily dietary guidelines - USDA', _usdaUrl),
-      ('Mifflin-St Jeor for nutrition specialists', _mifflinUrl),
-    ];
+    final links = isRu
+        ? [
+            ('Подсчёт калорий стал проще - Harvard', _harvardUrl),
+            ('Рекомендации по питанию на день - USDA', _usdaUrl),
+            ('Mifflin-St Jeor для специалистов по питанию', _mifflinUrl),
+          ]
+        : [
+            ('Calorie counting made easy - Harvard', _harvardUrl),
+            ('Daily dietary guidelines - USDA', _usdaUrl),
+            ('Mifflin-St Jeor for nutrition specialists', _mifflinUrl),
+          ];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: links.map((link) => Padding(
-        padding: const EdgeInsets.only(bottom: 6),
-        child: GestureDetector(
-          onTap: () => launchUrl(Uri.parse(link.$2), mode: LaunchMode.externalApplication),
-          child: Text(
-            '— ${link.$1}',
-            style: const TextStyle(
-              fontSize: 13,
-              color: Color(0xFF3B82F6),
-              decoration: TextDecoration.underline,
-              height: 1.4,
+      children: links
+          .map(
+            (link) => Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: GestureDetector(
+                onTap: () => launchUrl(
+                  Uri.parse(link.$2),
+                  mode: LaunchMode.externalApplication,
+                ),
+                child: Text(
+                  '— ${link.$1}',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: Color(0xFF3B82F6),
+                    decoration: TextDecoration.underline,
+                    height: 1.4,
+                  ),
+                ),
+              ),
             ),
-          ),
-        ),
-      )).toList(),
+          )
+          .toList(),
     );
   }
 }
@@ -683,7 +886,11 @@ class _WeightChart extends StatelessWidget {
             padding: const EdgeInsets.only(left: 8, bottom: 12),
             child: Text(
               chartTitle,
-              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.text),
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                color: AppColors.text,
+              ),
             ),
           ),
           SizedBox(
@@ -706,7 +913,10 @@ class _WeightChart extends StatelessWidget {
                       reservedSize: 40,
                       getTitlesWidget: (v, meta) => Text(
                         v.toStringAsFixed(1),
-                        style: const TextStyle(fontSize: 10, color: AppColors.textMuted),
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: AppColors.textMuted,
+                        ),
                       ),
                     ),
                   ),
@@ -717,20 +927,34 @@ class _WeightChart extends StatelessWidget {
                       getTitlesWidget: (v, meta) {
                         final day = v.toInt();
                         if (day == 0) {
-                          return Text(l10n.wg_now,
-                              style: const TextStyle(fontSize: 9, color: AppColors.textMuted));
+                          return Text(
+                            l10n.wg_now,
+                            style: const TextStyle(
+                              fontSize: 9,
+                              color: AppColors.textMuted,
+                            ),
+                          );
                         }
                         final maxDay = spots.last.x.toInt();
                         if (day == maxDay) {
-                          return Text('${day}d',
-                              style: const TextStyle(fontSize: 9, color: AppColors.textMuted));
+                          return Text(
+                            '${day}d',
+                            style: const TextStyle(
+                              fontSize: 9,
+                              color: AppColors.textMuted,
+                            ),
+                          );
                         }
                         return const SizedBox.shrink();
                       },
                     ),
                   ),
-                  topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                  rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  topTitles: const AxisTitles(
+                    sideTitles: SideTitles(showTitles: false),
+                  ),
+                  rightTitles: const AxisTitles(
+                    sideTitles: SideTitles(showTitles: false),
+                  ),
                 ),
                 lineBarsData: [
                   LineChartBarData(

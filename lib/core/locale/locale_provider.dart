@@ -1,5 +1,4 @@
-import 'dart:ui';
-
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -12,12 +11,10 @@ class LocaleNotifier extends StateNotifier<Locale> {
   static const _explicitKey = 'app_locale_user_set';
   static const _supportedCodes = {'ru', 'en'};
 
-  static Locale _deviceLocale() {
-    final lang = PlatformDispatcher.instance.locale.languageCode;
-    return _supportedCodes.contains(lang) ? Locale(lang) : const Locale('en');
-  }
-
-  LocaleNotifier() : super(_deviceLocale()) {
+  // Product default: every fresh install starts in English. The device locale
+  // must not silently switch onboarding to Russian; RU is applied only after
+  // an explicit user choice persisted under [_explicitKey].
+  LocaleNotifier() : super(const Locale('en')) {
     _load();
   }
 
@@ -29,7 +26,7 @@ class LocaleNotifier extends StateNotifier<Locale> {
     if (userSet && code != null && _supportedCodes.contains(code)) {
       state = Locale(code);
     }
-    // else: keep device locale default
+    // Otherwise keep the product default (English).
   }
 
   Future<void> setLocale(Locale locale) async {

@@ -40,6 +40,9 @@ class Kf2ResultPage extends ConsumerWidget {
         ingredients: args.items,
         mealDate: null,
         originalText: null,
+        feedbackSource: args.feedbackSource,
+        recognitionDuration: args.recognitionDuration,
+        clarification: args.clarification,
         onSaved: args.onSaved,
       ),
     );

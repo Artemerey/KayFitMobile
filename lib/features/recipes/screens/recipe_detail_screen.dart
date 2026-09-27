@@ -1,10 +1,16 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/analytics/analytics_service.dart';
-import '../../../core/api/api_client.dart';
+import '../../../core/auth/auth_provider.dart';
+import '../../../core/feedback/feedback_models.dart';
+import '../../../core/feedback/feedback_presenter.dart';
+import '../../../core/meal_logging/meal_log_operation.dart';
+import '../../../core/meal_logging/meal_log_operation_provider.dart';
 import '../../../features/dashboard/providers/dashboard_provider.dart';
 import '../../../features/journal/screens/journal_screen.dart'
     show journalDayMealsProvider;
@@ -45,29 +51,35 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
 
   Future<void> _addToDiary(RecipeDetail detail) async {
     if (_saving) return;
+    final operation = ref
+        .read(mealLogOperationProvider.notifier)
+        .start(MealLogSource.recipe);
     setState(() => _saving = true);
     HapticFeedback.mediumImpact();
     final isRu = Localizations.localeOf(context).languageCode == 'ru';
     final r = detail.recipe;
 
     try {
-      await apiDio.post(
-        '/api/meals/add_selected',
-        data: {
-          'items': [
-            {
-              'name': r.title,
-              'calories': r.kcal,
-              'protein': r.proteinG,
-              'fat': r.fatG,
-              'carbs': r.carbG,
-              'source': 'recipe',
-              'source_url': r.slug,
+      final result = await ref
+          .read(mealLogOperationProvider.notifier)
+          .saveSelected(
+            operationId: operation.id,
+            expectedItems: 1,
+            payload: {
+              'items': [
+                {
+                  'name': r.title,
+                  'calories': r.kcal,
+                  'protein': r.proteinG,
+                  'fat': r.fatG,
+                  'carbs': r.carbG,
+                  'source': 'recipe',
+                  'source_url': r.slug,
+                },
+              ],
+              if (r.mealType != null) 'meal_type': r.mealType,
             },
-          ],
-          if (r.mealType != null) 'meal_type': r.mealType,
-        },
-      );
+          );
 
       AnalyticsService.mealSaved(
         itemCount: 1,
@@ -89,6 +101,22 @@ class _RecipeDetailScreenState extends ConsumerState<RecipeDetailScreen> {
           backgroundColor: K2Colors.accent,
         ),
       );
+      ref.read(mealLogOperationProvider.notifier).successRendered(operation.id);
+      final userId = ref.read(authNotifierProvider).valueOrNull?.id;
+      if (result.canRequestFeedback && userId != null) {
+        unawaited(
+          showMealFeedbackPrompt(
+            context: context,
+            targetId: result.feedbackTargetId!,
+            source: FeedbackSource.recipe,
+            userId: userId,
+            aggregateContext: {
+              'item_count': result.added,
+              'total_calories_rounded': r.kcal,
+            },
+          ),
+        );
+      }
     } on Object {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

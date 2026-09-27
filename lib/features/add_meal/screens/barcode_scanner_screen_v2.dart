@@ -7,6 +7,7 @@ import 'package:kayfit/core/i18n/generated/app_localizations.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../../core/api/api_client.dart';
+import '../../../core/feedback/feedback_models.dart';
 import '../../../shared/models/ingredient_v2.dart';
 import '../../../shared/models/nutrients_v2.dart';
 import '../../../shared/theme/app_theme.dart';
@@ -50,10 +51,7 @@ class _BarcodeScannerScreenV2State extends State<BarcodeScannerScreenV2>
       duration: const Duration(milliseconds: 1800),
     )..repeat(reverse: true);
 
-    _laserAnim = CurvedAnimation(
-      parent: _laserCtrl,
-      curve: Curves.easeInOut,
-    );
+    _laserAnim = CurvedAnimation(parent: _laserCtrl, curve: Curves.easeInOut);
   }
 
   @override
@@ -87,11 +85,13 @@ class _BarcodeScannerScreenV2State extends State<BarcodeScannerScreenV2>
       );
       final data = resp.data;
       if (data == null) {
-        throw Exception(mounted
-            ? (Localizations.localeOf(context).languageCode == 'ru'
-                ? 'Пустой ответ сервера'
-                : 'Empty server response')
-            : 'Empty server response');
+        throw Exception(
+          mounted
+              ? (Localizations.localeOf(context).languageCode == 'ru'
+                    ? 'Пустой ответ сервера'
+                    : 'Empty server response')
+              : 'Empty server response',
+        );
       }
 
       if (data['error'] != null) {
@@ -159,6 +159,7 @@ class _BarcodeScannerScreenV2State extends State<BarcodeScannerScreenV2>
           builder: (_, scrollController) => RecognitionResultSheetKF2(
             dishName: productName,
             ingredients: [ingV2],
+            feedbackSource: FeedbackSource.barcode,
           ),
         ),
       );
@@ -233,10 +234,7 @@ class _BarcodeScannerScreenV2State extends State<BarcodeScannerScreenV2>
         fit: StackFit.expand,
         children: [
           // ── Camera ─────────────────────────────────────────────────────────
-          MobileScanner(
-            controller: _controller,
-            onDetect: _onBarcodeDetected,
-          ),
+          MobileScanner(controller: _controller, onDetect: _onBarcodeDetected),
 
           // ── Overlay ────────────────────────────────────────────────────────
           CustomPaint(
@@ -437,53 +435,64 @@ class _CornerBracketsPainter extends CustomPainter {
     final h = size.height;
 
     // Top-left
-    canvas.drawLine(
-        Offset(_radius, 0), Offset(_radius + _len, 0), paint);
-    canvas.drawLine(
-        Offset(0, _radius), Offset(0, _radius + _len), paint);
+    canvas.drawLine(Offset(_radius, 0), Offset(_radius + _len, 0), paint);
+    canvas.drawLine(Offset(0, _radius), Offset(0, _radius + _len), paint);
     canvas.drawArc(
-        Rect.fromLTWH(0, 0, _radius * 2, _radius * 2),
-        pi,
-        pi / 2,
-        false,
-        paint);
+      Rect.fromLTWH(0, 0, _radius * 2, _radius * 2),
+      pi,
+      pi / 2,
+      false,
+      paint,
+    );
 
     // Top-right
     canvas.drawLine(
-        Offset(w - _radius - _len, 0), Offset(w - _radius, 0), paint);
-    canvas.drawLine(
-        Offset(w, _radius), Offset(w, _radius + _len), paint);
+      Offset(w - _radius - _len, 0),
+      Offset(w - _radius, 0),
+      paint,
+    );
+    canvas.drawLine(Offset(w, _radius), Offset(w, _radius + _len), paint);
     canvas.drawArc(
-        Rect.fromLTWH(w - _radius * 2, 0, _radius * 2, _radius * 2),
-        pi * 1.5,
-        pi / 2,
-        false,
-        paint);
+      Rect.fromLTWH(w - _radius * 2, 0, _radius * 2, _radius * 2),
+      pi * 1.5,
+      pi / 2,
+      false,
+      paint,
+    );
 
     // Bottom-left
+    canvas.drawLine(Offset(_radius, h), Offset(_radius + _len, h), paint);
     canvas.drawLine(
-        Offset(_radius, h), Offset(_radius + _len, h), paint);
-    canvas.drawLine(
-        Offset(0, h - _radius - _len), Offset(0, h - _radius), paint);
+      Offset(0, h - _radius - _len),
+      Offset(0, h - _radius),
+      paint,
+    );
     canvas.drawArc(
-        Rect.fromLTWH(0, h - _radius * 2, _radius * 2, _radius * 2),
-        pi / 2,
-        pi / 2,
-        false,
-        paint);
+      Rect.fromLTWH(0, h - _radius * 2, _radius * 2, _radius * 2),
+      pi / 2,
+      pi / 2,
+      false,
+      paint,
+    );
 
     // Bottom-right
     canvas.drawLine(
-        Offset(w - _radius - _len, h), Offset(w - _radius, h), paint);
+      Offset(w - _radius - _len, h),
+      Offset(w - _radius, h),
+      paint,
+    );
     canvas.drawLine(
-        Offset(w, h - _radius - _len), Offset(w, h - _radius), paint);
+      Offset(w, h - _radius - _len),
+      Offset(w, h - _radius),
+      paint,
+    );
     canvas.drawArc(
-        Rect.fromLTWH(w - _radius * 2, h - _radius * 2, _radius * 2,
-            _radius * 2),
-        0,
-        pi / 2,
-        false,
-        paint);
+      Rect.fromLTWH(w - _radius * 2, h - _radius * 2, _radius * 2, _radius * 2),
+      0,
+      pi / 2,
+      false,
+      paint,
+    );
   }
 
   @override
@@ -512,10 +521,7 @@ class _TopBar extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [
-            Colors.black.withValues(alpha: 0.6),
-            Colors.transparent,
-          ],
+          colors: [Colors.black.withValues(alpha: 0.6), Colors.transparent],
         ),
       ),
       child: Row(
@@ -539,7 +545,9 @@ class _TopBar extends StatelessWidget {
           IconButton(
             onPressed: onTorch,
             icon: Icon(
-              torchOn ? Icons.flashlight_on_rounded : Icons.flashlight_off_rounded,
+              torchOn
+                  ? Icons.flashlight_on_rounded
+                  : Icons.flashlight_off_rounded,
               color: torchOn ? const Color(0xFF38BDF8) : Colors.white,
             ),
           ),
@@ -567,58 +575,56 @@ class _StatusText extends StatelessWidget {
     final l10n = AppLocalizations.of(context)!;
     return switch (state) {
       _ScanState.scanning => Text(
-          l10n.barcode_scan_hint,
-          textAlign: TextAlign.center,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 15,
-            fontWeight: FontWeight.w500,
-          ),
+        l10n.barcode_scan_hint,
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 15,
+          fontWeight: FontWeight.w500,
         ),
+      ),
       _ScanState.loading => Text(
-          l10n.barcode_loading,
-          textAlign: TextAlign.center,
-          style: const TextStyle(
-            color: Color(0xFF38BDF8),
-            fontSize: 15,
-            fontWeight: FontWeight.w500,
-          ),
+        l10n.barcode_loading,
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          color: Color(0xFF38BDF8),
+          fontSize: 15,
+          fontWeight: FontWeight.w500,
         ),
+      ),
       _ScanState.error => Column(
-          children: [
-            Text(
-              errorText,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: Color(0xFFFF6B6B),
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-              ),
+        children: [
+          Text(
+            errorText,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Color(0xFFFF6B6B),
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
             ),
-            const SizedBox(height: 12),
-            GestureDetector(
-              onTap: onRetry,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 20, vertical: 9),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.3)),
-                ),
-                child: Text(
-                  l10n.common_retry,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                  ),
+          ),
+          const SizedBox(height: 12),
+          GestureDetector(
+            onTap: onRetry,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 9),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
+              ),
+              child: Text(
+                l10n.common_retry,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
             ),
-          ],
-        ),
+          ),
+        ],
+      ),
     };
   }
 }
@@ -643,8 +649,7 @@ class _ManualEntryButton extends StatelessWidget {
             decoration: BoxDecoration(
               color: Colors.white.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(AppRadius.md),
-              border:
-                  Border.all(color: Colors.white.withValues(alpha: 0.25)),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.25)),
             ),
             alignment: Alignment.center,
             child: Text(
@@ -669,10 +674,7 @@ class _ManualEntrySheet extends StatelessWidget {
   final TextEditingController controller;
   final void Function(String code) onSearch;
 
-  const _ManualEntrySheet({
-    required this.controller,
-    required this.onSearch,
-  });
+  const _ManualEntrySheet({required this.controller, required this.onSearch});
 
   @override
   Widget build(BuildContext context) {
@@ -710,10 +712,7 @@ class _ManualEntrySheet extends StatelessWidget {
           const SizedBox(height: 4),
           const Text(
             'EAN-8, EAN-13, UPC-A and other formats',
-            style: TextStyle(
-              color: AppColors.textMuted,
-              fontSize: 13,
-            ),
+            style: TextStyle(color: AppColors.textMuted, fontSize: 13),
           ),
           const SizedBox(height: 16),
           TextField(
@@ -740,7 +739,9 @@ class _ManualEntrySheet extends StatelessWidget {
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(AppRadius.sm),
                 borderSide: const BorderSide(
-                    color: Color(0xFF0284C7), width: 2),
+                  color: Color(0xFF0284C7),
+                  width: 2,
+                ),
               ),
               filled: true,
               fillColor: AppColors.bg,

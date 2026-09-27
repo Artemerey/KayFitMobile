@@ -8,9 +8,8 @@ import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
 import '../../../core/analytics/analytics_service.dart';
 import '../../../core/auth/auth_provider.dart';
-import '../../../core/auth/onboarding_sync.dart';
+import '../../../core/auth/auth_handoff_coordinator.dart';
 import '../../../core/auth/social_auth_service.dart';
-import 'package:kayfit/router.dart';
 import '../../../core/i18n/generated/app_localizations.dart';
 import '../../../core/locale/locale_provider.dart';
 import '../../../shared/theme/app_theme.dart';
@@ -51,28 +50,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   // Auth actions
   // ---------------------------------------------------------------------------
 
-  Future<void> _afterLogin(Map<String, dynamic> tokens) async {
-    await ref.read(authNotifierProvider.notifier).loginWithTokens(
-          tokens['access_token'] as String,
-          tokens['refresh_token'] as String,
-        );
-    if (!mounted) return;
-    await syncOnboardingPending();
-    // The Apple sign-in path used to stop here — so it never marked onboarding
-    // done (risking the Keychain-survives-reinstall redirect loop). The email
-    // path in EmailAuthScreen already marks it; mirror it so every auth method
-    // lands the same way.
-    await markOnboardingDone(ref);
-    if (!mounted) return;
-    await ref.read(authNotifierProvider.notifier).refreshUser();
-  }
-
   Future<void> _signInApple() async {
     AnalyticsService.loginMethodSelected('apple');
     setState(() => _loading = true);
     try {
-      final tokens = await SocialAuthService.signInWithApple();
-      await _afterLogin(tokens);
+      await ref
+          .read(authHandoffCoordinatorProvider.notifier)
+          .signInWithApple(source: AuthHandoffSource.appleLogin);
     } on SignInCancelledException {
       // user cancelled — no error shown
     } catch (e) {
@@ -340,11 +324,11 @@ class _TermsTextState extends State<_TermsText> {
     super.initState();
     _recognizer = TapGestureRecognizer()
       ..onTap = () => Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) =>
-                  const DocumentScreen(type: DocumentType.termsOfService),
-            ),
-          );
+        MaterialPageRoute(
+          builder: (_) =>
+              const DocumentScreen(type: DocumentType.termsOfService),
+        ),
+      );
   }
 
   @override

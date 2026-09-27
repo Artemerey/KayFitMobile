@@ -511,6 +511,12 @@ class AppLocalizationsRu extends AppLocalizations {
   String get auth_apple => 'Войти через Apple';
 
   @override
+  String get auth_apple_register => 'Зарегистрироваться через Apple';
+
+  @override
+  String get auth_or_email => 'или по email';
+
+  @override
   String get auth_email => 'Войти по email';
 
   @override
@@ -1332,4 +1338,142 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get session_expired => 'Сессия истекла. Войдите снова.';
+
+  @override
+  String get feedback_onboarding_question =>
+      'Насколько вам подходит этот план?';
+
+  @override
+  String get feedback_meal_question => 'Всё распознано верно?';
+
+  @override
+  String feedback_meal_subject_question(String subject) {
+    return 'Правильно распознали $subject?';
+  }
+
+  @override
+  String get feedback_like => 'Да, верно';
+
+  @override
+  String get feedback_dislike => 'Нет, исправить';
+
+  @override
+  String get feedback_improve => 'Что можно улучшить?';
+
+  @override
+  String get feedback_comment => 'Комментарий (необязательно)';
+
+  @override
+  String get feedback_other_explanation => 'Краткое пояснение (обязательно)';
+
+  @override
+  String get feedback_privacy_hint =>
+      'Не указывайте личные данные, пароли или секреты.';
+
+  @override
+  String get feedback_privacy_error =>
+      'Удалите личные данные или секреты перед отправкой.';
+
+  @override
+  String get feedback_send => 'Отправить отзыв';
+
+  @override
+  String get feedback_dismiss => 'Не сейчас';
+
+  @override
+  String get feedback_thanks => 'Спасибо за обратную связь!';
+
+  @override
+  String get feedback_recognition_question => 'Всё распознано верно?';
+
+  @override
+  String get feedback_recognition_saved => 'Спасибо, отзыв сохранён';
+
+  @override
+  String get feedback_recognition_dislike => 'Распознано неверно';
+
+  @override
+  String get feedback_recognition_like => 'Распознано верно';
+
+  @override
+  String get feedback_error =>
+      'Не удалось сохранить отзыв. Попробуйте ещё раз.';
+
+  @override
+  String get feedback_semantics_prompt => 'Форма обратной связи';
+
+  @override
+  String get feedback_reason_too_few_calories => 'Слишком мало калорий';
+
+  @override
+  String get feedback_reason_too_many_calories => 'Слишком много калорий';
+
+  @override
+  String get feedback_reason_wrong_goal => 'Неверная цель';
+
+  @override
+  String get feedback_reason_wrong_macros => 'Неверные КБЖУ';
+
+  @override
+  String get feedback_reason_answers_not_considered => 'Мои ответы не учтены';
+
+  @override
+  String get feedback_reason_other => 'Другое';
+
+  @override
+  String get feedback_reason_wrong_food => 'Неверное блюдо';
+
+  @override
+  String get feedback_reason_missing_item => 'Не хватает продукта';
+
+  @override
+  String get feedback_reason_extra_item => 'Лишний продукт';
+
+  @override
+  String get feedback_reason_wrong_weight => 'Неверный вес';
+
+  @override
+  String get feedback_reason_wrong_calories => 'Неверные калории';
+
+  @override
+  String get feedback_reason_recognition_too_slow =>
+      'Слишком долгое распознавание';
+
+  @override
+  String get recognition_uncertainty_portion => 'Проверьте размер порции';
+
+  @override
+  String get recognition_uncertainty_calories => 'Проверьте калорийность';
+
+  @override
+  String get recognition_uncertainty_zero_calories =>
+      'Калорийность выглядит необычно низкой';
+
+  @override
+  String get recognition_uncertainty_macros =>
+      'Проверьте белки, жиры и углеводы';
+
+  @override
+  String get recognition_uncertainty_macro_mass =>
+      'Сумма белков, жиров и углеводов выглядит некорректно';
+
+  @override
+  String get recognition_uncertainty_energy_macros =>
+      'Калории не совпадают с составом продукта';
+
+  @override
+  String get recognition_uncertainty_low_confidence =>
+      'Не удалось уверенно определить блюдо';
+
+  @override
+  String get recognition_uncertainty_provider =>
+      'Нужно проверить распознанные данные';
+
+  @override
+  String get recognition_uncertainty_energy_unit =>
+      'Не удалось уверенно прочитать единицу энергии';
+
+  @override
+  String get recognition_uncertainty_fallback =>
+      'Проверьте распознанные данные';
 }

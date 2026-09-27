@@ -5,15 +5,23 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/analytics/analytics_service.dart';
 import '../../../core/api/api_client.dart';
+import '../../../core/auth/auth_provider.dart';
+import '../../../core/feedback/feedback_models.dart';
+import '../../../core/feedback/recognition_feedback_bar.dart';
 import '../../../core/i18n/generated/app_localizations.dart';
+import '../../../core/meal_logging/meal_log_operation.dart';
+import '../../../core/meal_logging/meal_log_operation_provider.dart';
 import '../../../features/dashboard/providers/dashboard_provider.dart';
-import '../../../features/journal/screens/journal_screen.dart' show journalDayMealsProvider;
+import '../../../features/journal/screens/journal_screen.dart'
+    show journalDayMealsProvider;
 import '../../../shared/models/ingredient_v2.dart';
 import '../../../shared/models/nutrients_v2.dart';
+import '../../../shared/models/recognition_clarification.dart';
 import '../../../shared/theme/app_theme.dart';
 import '../../../shared/theme/kayfit2_theme.dart';
 import '../../../shared/utils/nutrient_parser.dart';
 import '../../../shared/widgets/dismissible_sheet_wrapper.dart';
+import '../../../shared/widgets/recognition_clarification_card.dart';
 import '../widgets/ingredient_search_sheet.dart';
 import '../widgets/kf2_ai_correct_section.dart';
 import '../widgets/kf2_hero_total.dart';
@@ -97,16 +105,8 @@ class _PreviewEditState {
     return withItemAt(index, items[index].withWeight(w));
   }
 
-  _PreviewEditState withMacrosAt(
-    int index,
-    double p,
-    double f,
-    double c,
-  ) {
-    return withItemAt(
-      index,
-      rebuildIngredientMacros(items[index], p, f, c),
-    );
+  _PreviewEditState withMacrosAt(int index, double p, double f, double c) {
+    return withItemAt(index, rebuildIngredientMacros(items[index], p, f, c));
   }
 
   _PreviewEditState withCaloriesAt(int index, double kcal) {
@@ -154,12 +154,19 @@ class RecognitionResultSheetKF2 extends ConsumerStatefulWidget {
     this.mealDate,
     this.originalText,
     this.onSaved,
+    this.feedbackSource = FeedbackSource.photo,
+    this.recognitionDuration,
+    this.clarification,
   });
 
   final String dishName;
   final List<IngredientV2> ingredients;
   final DateTime? mealDate;
   final String? originalText;
+  final FeedbackSource feedbackSource;
+  final Duration? recognitionDuration;
+  final RecognitionClarification? clarification;
+
   /// Called with [dishName] immediately before Navigator.pop(true).
   final void Function(String dishName)? onSaved;
 
@@ -173,14 +180,43 @@ class _RecognitionResultSheetKF2State
   static const _theme = K2Theme.light;
 
   late _PreviewEditState _state;
+  String? _operationId;
+  late bool _clarificationConfirmed;
+  late List<GlobalKey<KF2ItemTileState>> _itemKeys;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _ensureOperation();
+    });
     _state = _PreviewEditState(
       items: List.from(widget.ingredients),
       mealType: _inferMealType(),
     );
+    _clarificationConfirmed = widget.clarification == null;
+    _itemKeys = List.generate(
+      widget.ingredients.length,
+      (_) => GlobalKey<KF2ItemTileState>(),
+    );
+  }
+
+  String _ensureOperation() {
+    if (_operationId case final id?) return id;
+    final operation = ref.read(mealLogOperationProvider.notifier).start(
+      switch (widget.feedbackSource) {
+        FeedbackSource.voice => MealLogSource.voice,
+        FeedbackSource.text => MealLogSource.text,
+        FeedbackSource.manual => MealLogSource.manual,
+        FeedbackSource.barcode => MealLogSource.barcode,
+        _ => MealLogSource.photo,
+      },
+    );
+    _operationId = operation.id;
+    ref
+        .read(mealLogOperationProvider.notifier)
+        .advance(operation.id, MealLogStage.recognitionCompleted);
+    return operation.id;
   }
 
   String _inferMealType() {
@@ -189,6 +225,15 @@ class _RecognitionResultSheetKF2State
     if (hour < 15) return 'lunch';
     if (hour < 18) return 'snack';
     return 'dinner';
+  }
+
+  void _editClarificationField(RecognitionUncertainField field) {
+    if (_itemKeys.isEmpty) return;
+    setState(() => _clarificationConfirmed = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _itemKeys.first.currentState?.focusUncertainField(field);
+    });
   }
 
   // ── Mutations ──────────────────────────────────────────────────────────────
@@ -209,7 +254,10 @@ class _RecognitionResultSheetKF2State
 
   void _delete(int index) {
     HapticFeedback.lightImpact();
-    setState(() => _state = _state.removeAt(index));
+    setState(() {
+      _state = _state.removeAt(index);
+      _itemKeys.removeAt(index);
+    });
   }
 
   Future<void> _addIngredient() async {
@@ -220,12 +268,16 @@ class _RecognitionResultSheetKF2State
       isDismissible: true,
       enableDrag: true,
       showDragHandle: false,
-      builder: (_) => DismissibleSheetWrapper(
-        child: const IngredientSearchSheet(),
-      ),
+      builder: (_) =>
+          DismissibleSheetWrapper(child: const IngredientSearchSheet()),
     );
     if (result != null && result.isNotEmpty && mounted) {
-      setState(() => _state = _state.addItems(result));
+      setState(() {
+        _state = _state.addItems(result);
+        _itemKeys.addAll(
+          List.generate(result.length, (_) => GlobalKey<KF2ItemTileState>()),
+        );
+      });
     }
   }
 
@@ -245,8 +297,7 @@ class _RecognitionResultSheetKF2State
               .toList(),
           'correction': correctionText,
           'language': lang,
-          if (widget.originalText != null)
-            'original_text': widget.originalText,
+          if (widget.originalText != null) 'original_text': widget.originalText,
         },
         // Claude vision/text reasoning + FatSecret enrichment routinely
         // takes 40-60 s on a free-tier Claude account. The global 30 s
@@ -257,7 +308,8 @@ class _RecognitionResultSheetKF2State
           sendTimeout: const Duration(seconds: 30),
         ),
       );
-      final rawItems = (resp.data['items'] as List<dynamic>?)
+      final rawItems =
+          (resp.data['items'] as List<dynamic>?)
               ?.map((e) => e as Map<String, dynamic>)
               .toList() ??
           [];
@@ -273,9 +325,15 @@ class _RecognitionResultSheetKF2State
       return null;
     } on DioException catch (e) {
       final status = e.response?.statusCode;
-      if (status == 401) return 'Session expired. Please restart the app and log in again.';
-      if (status == 422) return 'Invalid request. Please try a different correction.';
-      if (status != null) return 'Server error ($status). Try again in a moment.';
+      if (status == 401) {
+        return 'Session expired. Please restart the app and log in again.';
+      }
+      if (status == 422) {
+        return 'Invalid request. Please try a different correction.';
+      }
+      if (status != null) {
+        return 'Server error ($status). Try again in a moment.';
+      }
       return 'Network error. Check your connection and try again.';
     } on Exception catch (e) {
       return e.toString();
@@ -285,11 +343,15 @@ class _RecognitionResultSheetKF2State
   // ── Save ───────────────────────────────────────────────────────────────────
 
   Future<void> _save() async {
-    if (_state.saving || _state.items.isEmpty) return;
+    // Shared repository endpoint: '/api/meals/add_selected'.
+    if (_state.saving || _state.items.isEmpty || !_clarificationConfirmed) {
+      return;
+    }
     setState(() => _state = _state.withSaving(true));
     HapticFeedback.mediumImpact();
 
     try {
+      final operationId = _ensureOperation();
       final items = _state.items.map((item) {
         final n = item.nutrientsTotal;
         final mono = n.monounsaturatedFat ?? 0;
@@ -321,16 +383,23 @@ class _RecognitionResultSheetKF2State
         };
       }).toList();
 
-      await apiDio.post('/api/meals/add_selected', data: {
-        'items': items,
-        'dish_name': widget.dishName,
-        'meal_type': _state.mealType,
-        if (widget.mealDate != null)
-          'date':
-              '${widget.mealDate!.year.toString().padLeft(4, '0')}-'
-              '${widget.mealDate!.month.toString().padLeft(2, '0')}-'
-              '${widget.mealDate!.day.toString().padLeft(2, '0')}',
-      });
+      await ref
+          .read(mealLogOperationProvider.notifier)
+          .saveSelected(
+            operationId: operationId,
+            expectedItems: items.length,
+            payload: {
+              'items': items,
+              'dish_name': widget.dishName,
+              'meal_type': _state.mealType,
+              if (widget.mealDate != null)
+                'date':
+                    '${widget.mealDate!.year.toString().padLeft(4, '0')}-'
+                    '${widget.mealDate!.month.toString().padLeft(2, '0')}-'
+                    '${widget.mealDate!.day.toString().padLeft(2, '0')}',
+            },
+          );
+      ref.read(mealLogOperationProvider.notifier).successRendered(operationId);
 
       AnalyticsService.mealSaved(
         itemCount: _state.items.length,
@@ -347,7 +416,8 @@ class _RecognitionResultSheetKF2State
       ref.invalidate(dailyKcalHistoryProvider);
       // Journal V2 watches per-day meals — invalidate today's key.
       final today = widget.mealDate ?? DateTime.now();
-      final todayIso = '${today.year.toString().padLeft(4, '0')}-'
+      final todayIso =
+          '${today.year.toString().padLeft(4, '0')}-'
           '${today.month.toString().padLeft(2, '0')}-'
           '${today.day.toString().padLeft(2, '0')}';
       ref.invalidate(journalDayMealsProvider(todayIso));
@@ -377,7 +447,8 @@ class _RecognitionResultSheetKF2State
             behavior: SnackBarBehavior.floating,
             backgroundColor: AppColors.accentOver,
             shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppRadius.sm)),
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+            ),
           ),
         );
       }
@@ -393,12 +464,12 @@ class _RecognitionResultSheetKF2State
     final t = _theme;
     final totals = _state.totals;
     final isEmpty = _state.items.isEmpty;
+    final userId = ref.watch(authNotifierProvider).valueOrNull?.id;
 
     return Container(
       decoration: BoxDecoration(
         color: t.bg,
-        borderRadius:
-            const BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
       ),
       child: SafeArea(
         top: false,
@@ -479,14 +550,12 @@ class _RecognitionResultSheetKF2State
                     SliverList(
                       delegate: SliverChildBuilderDelegate(
                         (ctx, i) => KF2ItemTile(
-                          key: ValueKey(
-                              '${_state.items[i].name}_$i'),
+                          key: _itemKeys[i],
                           item: _state.items[i],
                           onWeightChanged: (w) => _updateWeight(i, w),
                           onMacrosChanged: (p, f, c) =>
                               _updateMacros(i, p, f, c),
-                          onCaloriesChanged: (kcal) =>
-                              _updateCalories(i, kcal),
+                          onCaloriesChanged: (kcal) => _updateCalories(i, kcal),
                           onDelete: () => _delete(i),
                           theme: t,
                         ),
@@ -494,12 +563,40 @@ class _RecognitionResultSheetKF2State
                       ),
                     ),
 
+                  // Recognition quality belongs to the preview, not to save.
+                  // Keep it directly beside the edit/add controls and always
+                  // visible, even while auth state is restoring from Keychain.
+                  SliverToBoxAdapter(
+                    child: RecognitionFeedbackBar(
+                      source: widget.feedbackSource,
+                      userId: userId,
+                      contextData: {
+                        'item_count': _state.items.length,
+                        'total_calories_rounded': totals.calories.round(),
+                        'recognition_mode': 'kf2',
+                        if (widget.recognitionDuration != null)
+                          'recognition_duration_ms': widget
+                              .recognitionDuration!
+                              .inMilliseconds
+                              .clamp(1, 600000),
+                      },
+                    ),
+                  ),
+
+                  if (widget.clarification case final clarification?)
+                    SliverToBoxAdapter(
+                      child: RecognitionClarificationCard(
+                        clarification: clarification,
+                        confirmed: _clarificationConfirmed,
+                        onConfirm: () =>
+                            setState(() => _clarificationConfirmed = true),
+                        onEdit: _editClarificationField,
+                      ),
+                    ),
+
                   // Add item row
                   SliverToBoxAdapter(
-                    child: _AddItemRow(
-                      onTap: _addIngredient,
-                      theme: t,
-                    ),
+                    child: _AddItemRow(onTap: _addIngredient, theme: t),
                   ),
 
                   // AI correct section
@@ -529,17 +626,20 @@ class _RecognitionResultSheetKF2State
                 width: double.infinity,
                 height: 52,
                 child: GestureDetector(
-                  onTap: (_state.saving || isEmpty) ? null : () {
-                    // Dismiss keyboard and flush any pending weight edits
-                    // before saving — the weight text field debounce may not
-                    // have fired yet if the user typed and immediately tapped Save.
-                    FocusScope.of(context).unfocus();
-                    _save();
-                  },
+                  onTap: (_state.saving || isEmpty || !_clarificationConfirmed)
+                      ? null
+                      : () {
+                          // Dismiss keyboard and flush any pending weight edits
+                          // before saving — the weight text field debounce may not
+                          // have fired yet if the user typed and immediately tapped Save.
+                          FocusScope.of(context).unfocus();
+                          _save();
+                        },
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 150),
                     decoration: BoxDecoration(
-                      color: (_state.saving || isEmpty)
+                      color:
+                          (_state.saving || isEmpty || !_clarificationConfirmed)
                           ? t.fg.withValues(alpha: 0.3)
                           : t.fg,
                       borderRadius: BorderRadius.circular(12),
@@ -555,7 +655,9 @@ class _RecognitionResultSheetKF2State
                               ),
                             )
                           : Text(
-                              AppLocalizations.of(context)!.recognition_save_to_journal,
+                              AppLocalizations.of(
+                                context,
+                              )!.recognition_save_to_journal,
                               style: TextStyle(
                                 fontFamily: K2Fonts.sans,
                                 fontSize: 14,
@@ -578,10 +680,7 @@ class _RecognitionResultSheetKF2State
 // ── Sub-widgets ───────────────────────────────────────────────────────────────
 
 class _KF2SheetHeader extends StatelessWidget {
-  const _KF2SheetHeader({
-    required this.onClose,
-    required this.theme,
-  });
+  const _KF2SheetHeader({required this.onClose, required this.theme});
 
   final VoidCallback onClose;
   final K2Theme theme;
@@ -690,9 +789,7 @@ class _DashedRectPainter extends CustomPainter {
     final radius = BorderRadius.circular(8);
 
     final path = Path()
-      ..addRRect(
-        radius.toRRect(Rect.fromLTWH(0, 0, size.width, size.height)),
-      );
+      ..addRRect(radius.toRRect(Rect.fromLTWH(0, 0, size.width, size.height)));
 
     final dashPath = Path();
     double distance = 0;

@@ -3,6 +3,11 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/analytics/analytics_service.dart';
+import '../../../core/auth/auth_provider.dart';
+import '../../../core/feedback/feedback_models.dart';
+import '../../../core/feedback/recognition_feedback_bar.dart';
+import '../../../core/meal_logging/meal_log_operation.dart';
+import '../../../core/meal_logging/meal_log_operation_provider.dart';
 import '../../../shared/models/ingredient.dart';
 import '../../../shared/utils/nutrient_parser.dart';
 import '../../../shared/theme/app_theme.dart';
@@ -17,6 +22,8 @@ class RecognitionResultSheet extends ConsumerStatefulWidget {
   final double totalWeight;
   final int? glycemicIndex;
   final DateTime? mealDate;
+  final FeedbackSource feedbackSource;
+  final Duration? recognitionDuration;
 
   const RecognitionResultSheet({
     super.key,
@@ -26,6 +33,8 @@ class RecognitionResultSheet extends ConsumerStatefulWidget {
     required this.totalWeight,
     this.glycemicIndex,
     this.mealDate,
+    this.feedbackSource = FeedbackSource.photo,
+    this.recognitionDuration,
   });
 
   @override
@@ -38,18 +47,42 @@ class _RecognitionResultSheetState
   late List<Ingredient> _ingredients;
   late String _mealType;
   bool _saving = false;
+  String? _operationId;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _ensureOperation();
+    });
     _ingredients = List.from(widget.ingredients);
     _mealType = _inferMealType();
     // DEBUG
     debugPrint('🍽 RecognitionResultSheet: dishName=${widget.dishName}');
     debugPrint('🍽 ingredients count: ${_ingredients.length}');
     for (final i in _ingredients) {
-      debugPrint('🍽 ${i.name}: cal=${i.calories}, p=${i.protein}, f=${i.fat}, c=${i.carbs}, net=${i.netCarbs}, w=${i.weightGrams}');
+      debugPrint(
+        '🍽 ${i.name}: cal=${i.calories}, p=${i.protein}, f=${i.fat}, c=${i.carbs}, net=${i.netCarbs}, w=${i.weightGrams}',
+      );
     }
+  }
+
+  String _ensureOperation() {
+    if (_operationId case final id?) return id;
+    final operation = ref.read(mealLogOperationProvider.notifier).start(
+      switch (widget.feedbackSource) {
+        FeedbackSource.voice => MealLogSource.voice,
+        FeedbackSource.text => MealLogSource.text,
+        FeedbackSource.manual => MealLogSource.manual,
+        FeedbackSource.barcode => MealLogSource.barcode,
+        _ => MealLogSource.photo,
+      },
+    );
+    _operationId = operation.id;
+    ref
+        .read(mealLogOperationProvider.notifier)
+        .advance(operation.id, MealLogStage.recognitionCompleted);
+    return operation.id;
   }
 
   String _inferMealType() {
@@ -64,20 +97,13 @@ class _RecognitionResultSheetState
   List<Ingredient> get _selected =>
       _ingredients.where((i) => i.selected).toList();
 
-  double get _totalCal =>
-      _selected.fold(0.0, (s, i) => s + i.calories);
-  double get _totalProtein =>
-      _selected.fold(0.0, (s, i) => s + i.protein);
-  double get _totalFat =>
-      _selected.fold(0.0, (s, i) => s + i.fat);
-  double get _totalCarbs =>
-      _selected.fold(0.0, (s, i) => s + i.carbs);
-  double get _totalSugar =>
-      _selected.fold(0.0, (s, i) => s + i.sugar);
-  double get _totalNetCarbs =>
-      _selected.fold(0.0, (s, i) => s + i.netCarbs);
-  double get _totalSatFat =>
-      _selected.fold(0.0, (s, i) => s + i.saturatedFat);
+  double get _totalCal => _selected.fold(0.0, (s, i) => s + i.calories);
+  double get _totalProtein => _selected.fold(0.0, (s, i) => s + i.protein);
+  double get _totalFat => _selected.fold(0.0, (s, i) => s + i.fat);
+  double get _totalCarbs => _selected.fold(0.0, (s, i) => s + i.carbs);
+  double get _totalSugar => _selected.fold(0.0, (s, i) => s + i.sugar);
+  double get _totalNetCarbs => _selected.fold(0.0, (s, i) => s + i.netCarbs);
+  double get _totalSatFat => _selected.fold(0.0, (s, i) => s + i.saturatedFat);
   double get _totalUnsatFat =>
       _selected.fold(0.0, (s, i) => s + i.unsaturatedFat);
 
@@ -144,34 +170,45 @@ class _RecognitionResultSheetState
   }
 
   Future<void> _save() async {
+    // Shared repository endpoint: '/api/meals/add_selected'.
     if (_saving || _selected.isEmpty) return;
     setState(() => _saving = true);
     HapticFeedback.mediumImpact();
 
     try {
+      final operationId = _ensureOperation();
       final items = _selected
-          .map((i) => {
-                'name': i.name,
-                'calories': i.calories,
-                'protein': i.protein,
-                'fat': i.fat,
-                'carbs': i.carbs,
-                'weight': i.weightGrams,
-                'fiber': i.fiber,
-                'sugar': i.sugar,
-                'sugar_alcohols': i.sugarAlcohols,
-                'net_carbs': i.netCarbs,
-                'glycemic_index': i.glycemicIndex,
-                'saturated_fat': i.saturatedFat,
-                'unsaturated_fat': i.unsaturatedFat,
-              })
+          .map(
+            (i) => {
+              'name': i.name,
+              'calories': i.calories,
+              'protein': i.protein,
+              'fat': i.fat,
+              'carbs': i.carbs,
+              'weight': i.weightGrams,
+              'fiber': i.fiber,
+              'sugar': i.sugar,
+              'sugar_alcohols': i.sugarAlcohols,
+              'net_carbs': i.netCarbs,
+              'glycemic_index': i.glycemicIndex,
+              'saturated_fat': i.saturatedFat,
+              'unsaturated_fat': i.unsaturatedFat,
+            },
+          )
           .toList();
 
-      await apiDio.post('/api/meals/add_selected', data: {
-        'items': items,
-        'dish_name': widget.dishName,
-        'meal_type': _mealType,
-      });
+      await ref
+          .read(mealLogOperationProvider.notifier)
+          .saveSelected(
+            operationId: operationId,
+            expectedItems: items.length,
+            payload: {
+              'items': items,
+              'dish_name': widget.dishName,
+              'meal_type': _mealType,
+            },
+          );
+      ref.read(mealLogOperationProvider.notifier).successRendered(operationId);
 
       AnalyticsService.mealSaved(
         itemCount: _selected.length,
@@ -182,12 +219,14 @@ class _RecognitionResultSheetState
       ref.invalidate(todayStatsProvider);
       ref.invalidate(todayMealsProvider);
 
-      if (mounted) Navigator.of(context).pop(true);
+      if (mounted) {
+        Navigator.of(context).pop(true);
+      }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to save: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to save: $e')));
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -196,12 +235,15 @@ class _RecognitionResultSheetState
 
   @override
   Widget build(BuildContext context) {
-    final mealLabel = {
-      'breakfast': 'breakfast',
-      'lunch': 'lunch',
-      'dinner': 'dinner',
-      'snack': 'snack',
-    }[_mealType] ?? 'meal';
+    final userId = ref.watch(authNotifierProvider).valueOrNull?.id;
+    final mealLabel =
+        {
+          'breakfast': 'breakfast',
+          'lunch': 'lunch',
+          'dinner': 'dinner',
+          'snack': 'snack',
+        }[_mealType] ??
+        'meal';
 
     return Container(
       decoration: const BoxDecoration(
@@ -212,7 +254,8 @@ class _RecognitionResultSheetState
         top: false,
         child: SingleChildScrollView(
           padding: EdgeInsets.only(
-              bottom: MediaQuery.of(context).viewInsets.bottom + 20),
+            bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -249,7 +292,9 @@ class _RecognitionResultSheetState
                     const SizedBox(height: 6),
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 4),
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
                       decoration: BoxDecoration(
                         color: Colors.black38,
                         borderRadius: BorderRadius.circular(8),
@@ -269,9 +314,10 @@ class _RecognitionResultSheetState
                           const Text(
                             'Dish recognized',
                             style: TextStyle(
-                                color: Colors.white70,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w500),
+                              color: Colors.white70,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
                         ],
                       ),
@@ -324,21 +370,33 @@ class _RecognitionResultSheetState
                     const SizedBox(height: 10),
                     Row(
                       children: [
-                        _MacroCard('Calories',
-                            '${_totalCal.toStringAsFixed(0)}',
-                            NutrientColors.kcal, NutrientColors.kcalSoft),
+                        _MacroCard(
+                          'Calories',
+                          '${_totalCal.toStringAsFixed(0)}',
+                          NutrientColors.kcal,
+                          NutrientColors.kcalSoft,
+                        ),
                         const SizedBox(width: 8),
-                        _MacroCard('Protein',
-                            '${_totalProtein.toStringAsFixed(0)}g',
-                            NutrientColors.protein, NutrientColors.proteinSoft),
+                        _MacroCard(
+                          'Protein',
+                          '${_totalProtein.toStringAsFixed(0)}g',
+                          NutrientColors.protein,
+                          NutrientColors.proteinSoft,
+                        ),
                         const SizedBox(width: 8),
-                        _MacroCard('Fat',
-                            '${_totalFat.toStringAsFixed(0)}g',
-                            NutrientColors.fatGood, NutrientColors.fatGoodSoft),
+                        _MacroCard(
+                          'Fat',
+                          '${_totalFat.toStringAsFixed(0)}g',
+                          NutrientColors.fatGood,
+                          NutrientColors.fatGoodSoft,
+                        ),
                         const SizedBox(width: 8),
-                        _MacroCard('Carbs',
-                            '${_totalCarbs.toStringAsFixed(0)}g',
-                            NutrientColors.netCarbs, NutrientColors.netCarbsSoft),
+                        _MacroCard(
+                          'Carbs',
+                          '${_totalCarbs.toStringAsFixed(0)}g',
+                          NutrientColors.netCarbs,
+                          NutrientColors.netCarbsSoft,
+                        ),
                       ],
                     ),
                   ],
@@ -363,21 +421,33 @@ class _RecognitionResultSheetState
                     const SizedBox(height: 10),
                     Row(
                       children: [
-                        _MacroCard('Sugar',
-                            '${_totalSugar.toStringAsFixed(0)}g',
-                            NutrientColors.sugar, NutrientColors.sugarSoft),
+                        _MacroCard(
+                          'Sugar',
+                          '${_totalSugar.toStringAsFixed(0)}g',
+                          NutrientColors.sugar,
+                          NutrientColors.sugarSoft,
+                        ),
                         const SizedBox(width: 8),
-                        _MacroCard('Net carbs',
-                            '${_totalNetCarbs.toStringAsFixed(0)}g',
-                            NutrientColors.netCarbs, NutrientColors.netCarbsSoft),
+                        _MacroCard(
+                          'Net carbs',
+                          '${_totalNetCarbs.toStringAsFixed(0)}g',
+                          NutrientColors.netCarbs,
+                          NutrientColors.netCarbsSoft,
+                        ),
                         const SizedBox(width: 8),
-                        _MacroCard('Good fats',
-                            '${_totalUnsatFat.toStringAsFixed(0)}g',
-                            NutrientColors.fatGood, NutrientColors.fatGoodSoft),
+                        _MacroCard(
+                          'Good fats',
+                          '${_totalUnsatFat.toStringAsFixed(0)}g',
+                          NutrientColors.fatGood,
+                          NutrientColors.fatGoodSoft,
+                        ),
                         const SizedBox(width: 8),
-                        _MacroCard('Sat. fats',
-                            '${_totalSatFat.toStringAsFixed(0)}g',
-                            NutrientColors.fatBad, NutrientColors.fatBadSoft),
+                        _MacroCard(
+                          'Sat. fats',
+                          '${_totalSatFat.toStringAsFixed(0)}g',
+                          NutrientColors.fatBad,
+                          NutrientColors.fatBadSoft,
+                        ),
                       ],
                     ),
                   ],
@@ -427,6 +497,21 @@ class _RecognitionResultSheetState
                 ),
               ),
 
+              RecognitionFeedbackBar(
+                source: widget.feedbackSource,
+                userId: userId,
+                contextData: {
+                  'item_count': _selected.length,
+                  'total_calories_rounded': _totalCal.round(),
+                  'recognition_mode': 'legacy',
+                  if (widget.recognitionDuration != null)
+                    'recognition_duration_ms': widget
+                        .recognitionDuration!
+                        .inMilliseconds
+                        .clamp(1, 600000),
+                },
+              ),
+
               // ── Meal type picker ──
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
@@ -472,12 +557,17 @@ class _RecognitionResultSheetState
                             width: 18,
                             height: 18,
                             child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white))
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
                         : const Icon(Icons.add_rounded, size: 20),
                     label: Text(
                       'Add to $mealLabel',
                       style: const TextStyle(
-                          fontSize: 16, fontWeight: FontWeight.w700),
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                 ),
@@ -513,15 +603,23 @@ class _MacroCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(value,
-                style: TextStyle(
-                    fontSize: 18, fontWeight: FontWeight.w800, color: color)),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                color: color,
+              ),
+            ),
             const SizedBox(height: 2),
-            Text(label,
-                style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w500,
-                    color: color.withValues(alpha: 0.65))),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w500,
+                color: color.withValues(alpha: 0.65),
+              ),
+            ),
           ],
         ),
       ),
@@ -534,8 +632,12 @@ class _IconBtn extends StatelessWidget {
   final Color? color;
   final Color? bg;
   final VoidCallback onTap;
-  const _IconBtn(
-      {required this.icon, this.color, this.bg, required this.onTap});
+  const _IconBtn({
+    required this.icon,
+    this.color,
+    this.bg,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -548,8 +650,7 @@ class _IconBtn extends StatelessWidget {
           color: bg ?? NutrientColors.bg,
           borderRadius: BorderRadius.circular(8),
         ),
-        child: Icon(icon,
-            size: 16, color: color ?? NutrientColors.secondary),
+        child: Icon(icon, size: 16, color: color ?? NutrientColors.secondary),
       ),
     );
   }
@@ -581,7 +682,8 @@ class _IngredientRowState extends State<_IngredientRow> {
   void initState() {
     super.initState();
     _weightCtrl = TextEditingController(
-        text: widget.ingredient.weightGrams.toStringAsFixed(0));
+      text: widget.ingredient.weightGrams.toStringAsFixed(0),
+    );
   }
 
   @override
@@ -609,7 +711,9 @@ class _IngredientRowState extends State<_IngredientRow> {
       padding: const EdgeInsets.symmetric(vertical: 10),
       decoration: BoxDecoration(
         border: Border(
-          bottom: BorderSide(color: NutrientColors.border.withValues(alpha: 0.5)),
+          bottom: BorderSide(
+            color: NutrientColors.border.withValues(alpha: 0.5),
+          ),
         ),
       ),
       child: Row(
@@ -624,7 +728,9 @@ class _IngredientRowState extends State<_IngredientRow> {
               height: 22,
               margin: const EdgeInsets.only(top: 2),
               decoration: BoxDecoration(
-                color: i.selected ? NutrientColors.netCarbs : Colors.transparent,
+                color: i.selected
+                    ? NutrientColors.netCarbs
+                    : Colors.transparent,
                 borderRadius: BorderRadius.circular(7),
                 border: Border.all(
                   color: i.selected
@@ -634,8 +740,11 @@ class _IngredientRowState extends State<_IngredientRow> {
                 ),
               ),
               child: i.selected
-                  ? const Icon(Icons.check_rounded,
-                      size: 14, color: Colors.white)
+                  ? const Icon(
+                      Icons.check_rounded,
+                      size: 14,
+                      color: Colors.white,
+                    )
                   : null,
             ),
           ),
@@ -652,14 +761,22 @@ class _IngredientRowState extends State<_IngredientRow> {
                   child: Row(
                     children: [
                       Flexible(
-                        child: Text(i.name,
-                            style: const TextStyle(
-                                fontSize: 13, fontWeight: FontWeight.w600),
-                            maxLines: 2, overflow: TextOverflow.ellipsis),
+                        child: Text(
+                          i.name,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                       const SizedBox(width: 4),
-                      Icon(Icons.swap_horiz_rounded,
-                          size: 14, color: NutrientColors.netCarbs),
+                      Icon(
+                        Icons.swap_horiz_rounded,
+                        size: 14,
+                        color: NutrientColors.netCarbs,
+                      ),
                     ],
                   ),
                 ),
@@ -684,11 +801,15 @@ class _IngredientRowState extends State<_IngredientRow> {
                           contentPadding: EdgeInsets.zero,
                           border: UnderlineInputBorder(
                             borderSide: BorderSide(
-                                color: NutrientColors.netCarbs, width: 1.5),
+                              color: NutrientColors.netCarbs,
+                              width: 1.5,
+                            ),
                           ),
                           enabledBorder: UnderlineInputBorder(
                             borderSide: BorderSide(
-                                color: NutrientColors.netCarbs, width: 1.5),
+                              color: NutrientColors.netCarbs,
+                              width: 1.5,
+                            ),
                           ),
                           filled: false,
                         ),
@@ -698,12 +819,19 @@ class _IngredientRowState extends State<_IngredientRow> {
                         },
                       ),
                     ),
-                    Text(' g',
-                        style: TextStyle(
-                            fontSize: 11, color: NutrientColors.tertiary)),
+                    Text(
+                      ' g',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: NutrientColors.tertiary,
+                      ),
+                    ),
                     const SizedBox(width: 4),
-                    Icon(Icons.edit_rounded,
-                        size: 12, color: NutrientColors.tertiary),
+                    Icon(
+                      Icons.edit_rounded,
+                      size: 12,
+                      color: NutrientColors.tertiary,
+                    ),
                   ],
                 ),
                 const SizedBox(height: 4),
@@ -713,16 +841,28 @@ class _IngredientRowState extends State<_IngredientRow> {
                   runSpacing: 4,
                   children: [
                     if (i.protein > 0)
-                      _Tag('P ${i.protein.toStringAsFixed(0)}g',
-                          NutrientColors.protein, NutrientColors.proteinSoft),
+                      _Tag(
+                        'P ${i.protein.toStringAsFixed(0)}g',
+                        NutrientColors.protein,
+                        NutrientColors.proteinSoft,
+                      ),
                     if (i.fat > 0)
-                      _Tag('F ${i.fat.toStringAsFixed(0)}g',
-                          NutrientColors.fatGood, NutrientColors.fatGoodSoft),
-                    _Tag('Net ${i.netCarbs.toStringAsFixed(0)}g',
-                        NutrientColors.netCarbs, NutrientColors.netCarbsSoft),
+                      _Tag(
+                        'F ${i.fat.toStringAsFixed(0)}g',
+                        NutrientColors.fatGood,
+                        NutrientColors.fatGoodSoft,
+                      ),
+                    _Tag(
+                      'Net ${i.netCarbs.toStringAsFixed(0)}g',
+                      NutrientColors.netCarbs,
+                      NutrientColors.netCarbsSoft,
+                    ),
                     if (i.glycemicIndex != null)
-                      _Tag('GI ${i.glycemicIndex}',
-                          NutrientColors.sugar, NutrientColors.sugarSoft),
+                      _Tag(
+                        'GI ${i.glycemicIndex}',
+                        NutrientColors.sugar,
+                        NutrientColors.sugarSoft,
+                      ),
                   ],
                 ),
               ],
@@ -744,8 +884,11 @@ class _IngredientRowState extends State<_IngredientRow> {
               const SizedBox(height: 4),
               GestureDetector(
                 onTap: onDelete,
-                child: Icon(Icons.close_rounded,
-                    size: 16, color: NutrientColors.tertiary),
+                child: Icon(
+                  Icons.close_rounded,
+                  size: 16,
+                  color: NutrientColors.tertiary,
+                ),
               ),
             ],
           ),
@@ -769,9 +912,14 @@ class _Tag extends StatelessWidget {
         color: bg,
         borderRadius: BorderRadius.circular(4),
       ),
-      child: Text(text,
-          style:
-              TextStyle(fontSize: 9, fontWeight: FontWeight.w600, color: color)),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 9,
+          fontWeight: FontWeight.w600,
+          color: color,
+        ),
+      ),
     );
   }
 }
@@ -815,25 +963,26 @@ class _IngredientSearchSheetState extends State<_IngredientSearchSheet> {
     setState(() => _loading = true);
     try {
       final lang = Localizations.localeOf(context).languageCode;
-      final resp = await apiDio.post('/api/parse_meal_suggestions', data: {
-        'text': text,
-        'language': lang,
-      });
-      final items = (resp.data['items'] as List<dynamic>?)
+      final resp = await apiDio.post(
+        '/api/parse_meal_suggestions',
+        data: {'text': text, 'language': lang},
+      );
+      final items =
+          (resp.data['items'] as List<dynamic>?)
               ?.map((e) => e as Map<String, dynamic>)
               .toList() ??
           [];
       if (mounted) setState(() => _results = items);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('$e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$e')));
       }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -851,7 +1000,8 @@ class _IngredientSearchSheetState extends State<_IngredientSearchSheet> {
           // Handle
           Center(
             child: Container(
-              width: 36, height: 4,
+              width: 36,
+              height: 4,
               margin: const EdgeInsets.only(top: 12, bottom: 12),
               decoration: BoxDecoration(
                 color: NutrientColors.border,
@@ -862,11 +1012,14 @@ class _IngredientSearchSheetState extends State<_IngredientSearchSheet> {
           // Title
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Text('Search ingredient',
-                style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: NutrientColors.secondary)),
+            child: Text(
+              'Search ingredient',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: NutrientColors.secondary,
+              ),
+            ),
           ),
           const SizedBox(height: 12),
           // Search field
@@ -889,7 +1042,9 @@ class _IngredientSearchSheetState extends State<_IngredientSearchSheet> {
                         borderSide: BorderSide.none,
                       ),
                       contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 12),
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
                     ),
                   ),
                 ),
@@ -897,7 +1052,8 @@ class _IngredientSearchSheetState extends State<_IngredientSearchSheet> {
                 GestureDetector(
                   onTap: _search,
                   child: Container(
-                    width: 44, height: 44,
+                    width: 44,
+                    height: 44,
                     decoration: BoxDecoration(
                       color: NutrientColors.netCarbs,
                       borderRadius: BorderRadius.circular(12),
@@ -906,9 +1062,15 @@ class _IngredientSearchSheetState extends State<_IngredientSearchSheet> {
                         ? const Padding(
                             padding: EdgeInsets.all(12),
                             child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white))
-                        : const Icon(Icons.search_rounded,
-                            color: Colors.white, size: 22),
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(
+                            Icons.search_rounded,
+                            color: Colors.white,
+                            size: 22,
+                          ),
                   ),
                 ),
               ],
@@ -918,7 +1080,8 @@ class _IngredientSearchSheetState extends State<_IngredientSearchSheet> {
           // Results
           ConstrainedBox(
             constraints: BoxConstraints(
-                maxHeight: MediaQuery.of(context).size.height * 0.4),
+              maxHeight: MediaQuery.of(context).size.height * 0.4,
+            ),
             child: ListView.builder(
               shrinkWrap: true,
               itemCount: _results.length,
@@ -927,19 +1090,31 @@ class _IngredientSearchSheetState extends State<_IngredientSearchSheet> {
                 final r = _results[i];
                 final name = r['name'] as String? ?? '';
                 final w = (r['weight_grams'] as num?)?.toDouble() ?? 100;
-                final cal = (r['calories_per_100g'] as num?)?.toDouble()
-                    ?? (r['calories'] as num?)?.toDouble() ?? 0;
+                final cal =
+                    (r['calories_per_100g'] as num?)?.toDouble() ??
+                    (r['calories'] as num?)?.toDouble() ??
+                    0;
                 return ListTile(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
-                  title: Text(name,
-                      style: const TextStyle(
-                          fontSize: 14, fontWeight: FontWeight.w600)),
-                  subtitle: Text('${w.toStringAsFixed(0)}g · ${cal.toStringAsFixed(0)} kcal',
-                      style: TextStyle(
-                          fontSize: 12, color: NutrientColors.secondary)),
-                  trailing: Icon(Icons.add_circle_outline_rounded,
-                      color: NutrientColors.netCarbs),
+                  title: Text(
+                    name,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  subtitle: Text(
+                    '${w.toStringAsFixed(0)}g · ${cal.toStringAsFixed(0)} kcal',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: NutrientColors.secondary,
+                    ),
+                  ),
+                  trailing: Icon(
+                    Icons.add_circle_outline_rounded,
+                    color: NutrientColors.netCarbs,
+                  ),
                   onTap: () {
                     HapticFeedback.selectionClick();
                     Navigator.pop(context, ingredientFromJson(r));
@@ -954,4 +1129,3 @@ class _IngredientSearchSheetState extends State<_IngredientSearchSheet> {
     );
   }
 }
-

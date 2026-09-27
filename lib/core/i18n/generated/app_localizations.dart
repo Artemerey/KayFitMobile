@@ -1046,6 +1046,18 @@ abstract class AppLocalizations {
   /// **'Войти через Apple'**
   String get auth_apple;
 
+  /// No description provided for @auth_apple_register.
+  ///
+  /// In ru, this message translates to:
+  /// **'Зарегистрироваться через Apple'**
+  String get auth_apple_register;
+
+  /// No description provided for @auth_or_email.
+  ///
+  /// In ru, this message translates to:
+  /// **'или по email'**
+  String get auth_or_email;
+
   /// No description provided for @auth_email.
   ///
   /// In ru, this message translates to:
@@ -2635,6 +2647,252 @@ abstract class AppLocalizations {
   /// In ru, this message translates to:
   /// **'Сессия истекла. Войдите снова.'**
   String get session_expired;
+
+  /// No description provided for @feedback_onboarding_question.
+  ///
+  /// In ru, this message translates to:
+  /// **'Насколько вам подходит этот план?'**
+  String get feedback_onboarding_question;
+
+  /// No description provided for @feedback_meal_question.
+  ///
+  /// In ru, this message translates to:
+  /// **'Всё распознано верно?'**
+  String get feedback_meal_question;
+
+  /// No description provided for @feedback_meal_subject_question.
+  ///
+  /// In ru, this message translates to:
+  /// **'Правильно распознали {subject}?'**
+  String feedback_meal_subject_question(String subject);
+
+  /// No description provided for @feedback_like.
+  ///
+  /// In ru, this message translates to:
+  /// **'Да, верно'**
+  String get feedback_like;
+
+  /// No description provided for @feedback_dislike.
+  ///
+  /// In ru, this message translates to:
+  /// **'Нет, исправить'**
+  String get feedback_dislike;
+
+  /// No description provided for @feedback_improve.
+  ///
+  /// In ru, this message translates to:
+  /// **'Что можно улучшить?'**
+  String get feedback_improve;
+
+  /// No description provided for @feedback_comment.
+  ///
+  /// In ru, this message translates to:
+  /// **'Комментарий (необязательно)'**
+  String get feedback_comment;
+
+  /// No description provided for @feedback_other_explanation.
+  ///
+  /// In ru, this message translates to:
+  /// **'Краткое пояснение (обязательно)'**
+  String get feedback_other_explanation;
+
+  /// No description provided for @feedback_privacy_hint.
+  ///
+  /// In ru, this message translates to:
+  /// **'Не указывайте личные данные, пароли или секреты.'**
+  String get feedback_privacy_hint;
+
+  /// No description provided for @feedback_privacy_error.
+  ///
+  /// In ru, this message translates to:
+  /// **'Удалите личные данные или секреты перед отправкой.'**
+  String get feedback_privacy_error;
+
+  /// No description provided for @feedback_send.
+  ///
+  /// In ru, this message translates to:
+  /// **'Отправить отзыв'**
+  String get feedback_send;
+
+  /// No description provided for @feedback_dismiss.
+  ///
+  /// In ru, this message translates to:
+  /// **'Не сейчас'**
+  String get feedback_dismiss;
+
+  /// No description provided for @feedback_thanks.
+  ///
+  /// In ru, this message translates to:
+  /// **'Спасибо за обратную связь!'**
+  String get feedback_thanks;
+
+  /// No description provided for @feedback_recognition_question.
+  ///
+  /// In ru, this message translates to:
+  /// **'Всё распознано верно?'**
+  String get feedback_recognition_question;
+
+  /// No description provided for @feedback_recognition_saved.
+  ///
+  /// In ru, this message translates to:
+  /// **'Спасибо, отзыв сохранён'**
+  String get feedback_recognition_saved;
+
+  /// No description provided for @feedback_recognition_dislike.
+  ///
+  /// In ru, this message translates to:
+  /// **'Распознано неверно'**
+  String get feedback_recognition_dislike;
+
+  /// No description provided for @feedback_recognition_like.
+  ///
+  /// In ru, this message translates to:
+  /// **'Распознано верно'**
+  String get feedback_recognition_like;
+
+  /// No description provided for @feedback_error.
+  ///
+  /// In ru, this message translates to:
+  /// **'Не удалось сохранить отзыв. Попробуйте ещё раз.'**
+  String get feedback_error;
+
+  /// No description provided for @feedback_semantics_prompt.
+  ///
+  /// In ru, this message translates to:
+  /// **'Форма обратной связи'**
+  String get feedback_semantics_prompt;
+
+  /// No description provided for @feedback_reason_too_few_calories.
+  ///
+  /// In ru, this message translates to:
+  /// **'Слишком мало калорий'**
+  String get feedback_reason_too_few_calories;
+
+  /// No description provided for @feedback_reason_too_many_calories.
+  ///
+  /// In ru, this message translates to:
+  /// **'Слишком много калорий'**
+  String get feedback_reason_too_many_calories;
+
+  /// No description provided for @feedback_reason_wrong_goal.
+  ///
+  /// In ru, this message translates to:
+  /// **'Неверная цель'**
+  String get feedback_reason_wrong_goal;
+
+  /// No description provided for @feedback_reason_wrong_macros.
+  ///
+  /// In ru, this message translates to:
+  /// **'Неверные КБЖУ'**
+  String get feedback_reason_wrong_macros;
+
+  /// No description provided for @feedback_reason_answers_not_considered.
+  ///
+  /// In ru, this message translates to:
+  /// **'Мои ответы не учтены'**
+  String get feedback_reason_answers_not_considered;
+
+  /// No description provided for @feedback_reason_other.
+  ///
+  /// In ru, this message translates to:
+  /// **'Другое'**
+  String get feedback_reason_other;
+
+  /// No description provided for @feedback_reason_wrong_food.
+  ///
+  /// In ru, this message translates to:
+  /// **'Неверное блюдо'**
+  String get feedback_reason_wrong_food;
+
+  /// No description provided for @feedback_reason_missing_item.
+  ///
+  /// In ru, this message translates to:
+  /// **'Не хватает продукта'**
+  String get feedback_reason_missing_item;
+
+  /// No description provided for @feedback_reason_extra_item.
+  ///
+  /// In ru, this message translates to:
+  /// **'Лишний продукт'**
+  String get feedback_reason_extra_item;
+
+  /// No description provided for @feedback_reason_wrong_weight.
+  ///
+  /// In ru, this message translates to:
+  /// **'Неверный вес'**
+  String get feedback_reason_wrong_weight;
+
+  /// No description provided for @feedback_reason_wrong_calories.
+  ///
+  /// In ru, this message translates to:
+  /// **'Неверные калории'**
+  String get feedback_reason_wrong_calories;
+
+  /// No description provided for @feedback_reason_recognition_too_slow.
+  ///
+  /// In ru, this message translates to:
+  /// **'Слишком долгое распознавание'**
+  String get feedback_reason_recognition_too_slow;
+
+  /// No description provided for @recognition_uncertainty_portion.
+  ///
+  /// In ru, this message translates to:
+  /// **'Проверьте размер порции'**
+  String get recognition_uncertainty_portion;
+
+  /// No description provided for @recognition_uncertainty_calories.
+  ///
+  /// In ru, this message translates to:
+  /// **'Проверьте калорийность'**
+  String get recognition_uncertainty_calories;
+
+  /// No description provided for @recognition_uncertainty_zero_calories.
+  ///
+  /// In ru, this message translates to:
+  /// **'Калорийность выглядит необычно низкой'**
+  String get recognition_uncertainty_zero_calories;
+
+  /// No description provided for @recognition_uncertainty_macros.
+  ///
+  /// In ru, this message translates to:
+  /// **'Проверьте белки, жиры и углеводы'**
+  String get recognition_uncertainty_macros;
+
+  /// No description provided for @recognition_uncertainty_macro_mass.
+  ///
+  /// In ru, this message translates to:
+  /// **'Сумма белков, жиров и углеводов выглядит некорректно'**
+  String get recognition_uncertainty_macro_mass;
+
+  /// No description provided for @recognition_uncertainty_energy_macros.
+  ///
+  /// In ru, this message translates to:
+  /// **'Калории не совпадают с составом продукта'**
+  String get recognition_uncertainty_energy_macros;
+
+  /// No description provided for @recognition_uncertainty_low_confidence.
+  ///
+  /// In ru, this message translates to:
+  /// **'Не удалось уверенно определить блюдо'**
+  String get recognition_uncertainty_low_confidence;
+
+  /// No description provided for @recognition_uncertainty_provider.
+  ///
+  /// In ru, this message translates to:
+  /// **'Нужно проверить распознанные данные'**
+  String get recognition_uncertainty_provider;
+
+  /// No description provided for @recognition_uncertainty_energy_unit.
+  ///
+  /// In ru, this message translates to:
+  /// **'Не удалось уверенно прочитать единицу энергии'**
+  String get recognition_uncertainty_energy_unit;
+
+  /// No description provided for @recognition_uncertainty_fallback.
+  ///
+  /// In ru, this message translates to:
+  /// **'Проверьте распознанные данные'**
+  String get recognition_uncertainty_fallback;
 }
 
 class _AppLocalizationsDelegate

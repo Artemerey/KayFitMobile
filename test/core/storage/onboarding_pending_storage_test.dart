@@ -49,6 +49,7 @@ void main() {
       healthConditions: ['none'],
       dietType: 'vegetarian',
       foodRestrictions: 'nuts',
+      restrictionTagIds: ['nuts', 'gluten'],
       goals: ['lose_weight'],
       weightLossSpeedKgPerWeek: 0.5,
     );
@@ -58,11 +59,29 @@ void main() {
 
     expect(restored?.age, 35);
     expect(restored?.foodRestrictions, 'nuts');
+    expect(restored?.restrictionTagIds, ['nuts', 'gluten']);
     expect(restored?.weightLossSpeedKgPerWeek, 0.5);
 
     await OnboardingPendingStorage.clear();
     expect(await OnboardingPendingStorage.read(), isNull);
   });
+
+  test(
+    'repeated saves preserve stable submission ID and selected IDs',
+    () async {
+      await OnboardingPendingStorage.save(
+        const OnboardingPendingData(restrictionTagIds: ['nuts']),
+      );
+      final first = await OnboardingPendingStorage.read();
+      await OnboardingPendingStorage.save(
+        const OnboardingPendingData(restrictionTagIds: ['nuts', 'gluten']),
+      );
+      final second = await OnboardingPendingStorage.read();
+
+      expect(second?.submissionId, first?.submissionId);
+      expect(second?.restrictionTagIds, ['nuts', 'gluten']);
+    },
+  );
 
   test('read returns null for corrupted pending JSON', () async {
     SharedPreferences.setMockInitialValues({'onboarding_pending': '{not-json'});

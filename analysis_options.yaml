@@ -10,6 +10,8 @@
 include: package:flutter_lints/flutter.yaml
 
 analyzer:
+  exclude:
+    - build/**
   errors:
     # freezed puts @JsonKey on factory constructor parameters — valid pattern,
     # but the analyzer flags it as invalid_annotation_target (false positive).

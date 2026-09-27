@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:firebase_core/firebase_core.dart';
@@ -11,12 +12,23 @@ import 'core/ai_consent/ai_consent_provider.dart';
 import 'core/analytics/analytics_service.dart';
 import 'core/api/api_client.dart';
 import 'core/auth/auth_provider.dart';
+import 'core/auth/auth_handoff_coordinator.dart';
+import 'core/feedback/feedback_coordinator.dart';
+import 'core/feedback/feedback_repository.dart';
+import 'core/feedback/feedback_metadata.dart';
+import 'core/meal_logging/meal_log_incident_reporter.dart';
 import 'core/notifications/notification_service.dart';
+import 'features/chat/screens/chat_v2_screen.dart';
 import 'router.dart';
 import 'shared/models/user_profile.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  if (const bool.fromEnvironment('QA_PENDING_MEAL_PREVIEW')) {
+    runApp(const PendingMealCardSimulatorPreview());
+    return;
+  }
   await Future.wait([
     initializeDateFormatting('ru'),
     initializeDateFormatting('en'),
@@ -27,13 +39,20 @@ void main() async {
 
   // ── 2. Parallel: Dio setup + prefs + Analytics + FCM setup ───────────────
   final results = await Future.wait([
-    initApiClient(),                    // pure Dio — no network calls
-    SharedPreferences.getInstance(),    // local disk
-    AnalyticsService.init(),            // Firebase already up
+    initApiClient(), // pure Dio — no network calls
+    SharedPreferences.getInstance(), // local disk
+    AnalyticsService.init(), // Firebase already up
     NotificationService.initAfterFirebase(), // Firebase already up
+    FeedbackMetadata.initialize(),
   ]);
 
   final prefs = results[1] as SharedPreferences;
+  await FeedbackRuntime.initialize(
+    preferences: prefs,
+    repository: FeedbackRepository(apiDio),
+  );
+  await MealLogIncidentRuntime.initialize(prefs, apiDio);
+  await FeedbackRuntime.coordinator?.flushAnonymous();
   final onboardingDone = prefs.getBool('onboarding_done') ?? false;
 
   // Read the cached consent synchronously so the router never sees null
@@ -90,10 +109,16 @@ class _AppInitState extends ConsumerState<_AppInit>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final notifier = ref.read(authNotifierProvider.notifier);
-      if (widget.cachedUser != null) {
-        notifier.restoreFromCache(widget.cachedUser!);
-      }
-      notifier.checkSession(backgroundRefresh: widget.cachedUser != null);
+      final coordinator = ref.read(authHandoffCoordinatorProvider.notifier);
+      unawaited(
+        coordinator.resumePending().then((resumed) {
+          if (resumed) return;
+          if (widget.cachedUser != null) {
+            notifier.restoreFromCache(widget.cachedUser!);
+          }
+          notifier.checkSession(backgroundRefresh: widget.cachedUser != null);
+        }),
+      );
     });
   }
 
@@ -106,10 +131,15 @@ class _AppInitState extends ConsumerState<_AppInit>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      unawaited(MealLogIncidentRuntime.reporter?.flush());
+      FeedbackRuntime.coordinator?.flushAnonymous();
       // backgroundRefresh: true — user sees the existing UI, no loading flash.
-      ref
-          .read(authNotifierProvider.notifier)
-          .checkSession(backgroundRefresh: true);
+      final handoff = ref.read(authHandoffCoordinatorProvider);
+      if (!handoff.authCompleting) {
+        ref
+            .read(authNotifierProvider.notifier)
+            .checkSession(backgroundRefresh: true);
+      }
     }
   }
 

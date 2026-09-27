@@ -11,6 +11,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/ingredient_v2.dart';
+import '../../../core/feedback/feedback_models.dart';
 
 /// Snapshot of the "pending meal confirm" UI shown at the bottom of the chat.
 ///
@@ -23,11 +24,17 @@ class PendingMealState {
     this.items,
     this.mealType = 'snack',
     this.isAdding = false,
+    this.feedbackSource = FeedbackSource.text,
+    this.recognitionDuration,
+    this.operationId,
   });
 
   final List<IngredientV2>? items;
   final String mealType;
   final bool isAdding;
+  final FeedbackSource feedbackSource;
+  final Duration? recognitionDuration;
+  final String? operationId;
 
   bool get isActive => items != null && items!.isNotEmpty;
 
@@ -35,6 +42,9 @@ class PendingMealState {
     Object? items = _sentinel,
     String? mealType,
     bool? isAdding,
+    FeedbackSource? feedbackSource,
+    Duration? recognitionDuration,
+    Object? operationId = _sentinel,
   }) {
     return PendingMealState(
       items: identical(items, _sentinel)
@@ -42,6 +52,11 @@ class PendingMealState {
           : items as List<IngredientV2>?,
       mealType: mealType ?? this.mealType,
       isAdding: isAdding ?? this.isAdding,
+      feedbackSource: feedbackSource ?? this.feedbackSource,
+      recognitionDuration: recognitionDuration ?? this.recognitionDuration,
+      operationId: identical(operationId, _sentinel)
+          ? this.operationId
+          : operationId as String?,
     );
   }
 
@@ -54,16 +69,25 @@ class PendingMealNotifier extends Notifier<PendingMealState> {
   @override
   PendingMealState build() => const PendingMealState();
 
-  void setMeal(List<IngredientV2> items, String mealType) {
+  void setMeal(
+    List<IngredientV2> items,
+    String mealType, {
+    FeedbackSource feedbackSource = FeedbackSource.text,
+    Duration? recognitionDuration,
+    String? operationId,
+  }) {
     state = state.copyWith(
       items: items,
       mealType: mealType,
       isAdding: false,
+      feedbackSource: feedbackSource,
+      recognitionDuration: recognitionDuration,
+      operationId: operationId,
     );
   }
 
   void clear() {
-    state = state.copyWith(items: null, isAdding: false);
+    state = state.copyWith(items: null, isAdding: false, operationId: null);
   }
 
   void setMealType(String mealType) {
@@ -88,5 +112,5 @@ class PendingMealNotifier extends Notifier<PendingMealState> {
 
 final pendingMealProvider =
     NotifierProvider<PendingMealNotifier, PendingMealState>(
-  PendingMealNotifier.new,
-);
+      PendingMealNotifier.new,
+    );

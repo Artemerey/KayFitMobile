@@ -9,15 +9,36 @@ import 'package:kayfit/core/i18n/generated/app_localizations.dart';
 
 import '../../../core/analytics/analytics_service.dart';
 import '../../../core/api/api_client.dart';
+import '../../../core/auth/auth_provider.dart';
+import '../../../core/feedback/feedback_models.dart';
+import '../../../core/feedback/recognition_feedback_bar.dart';
+import '../../../core/meal_logging/meal_log_operation.dart';
+import '../../../core/meal_logging/meal_log_operation_provider.dart';
 import '../../../features/dashboard/providers/dashboard_provider.dart';
 import '../../../shared/models/ingredient_v2.dart';
 import '../../../shared/models/nutrients_v2.dart';
+import '../../../shared/models/recognition_clarification.dart';
 import '../../../shared/theme/app_theme.dart';
 import '../../../shared/utils/nutrient_parser.dart';
 import '../../../shared/widgets/dismissible_sheet_wrapper.dart';
 import '../../../shared/widgets/keyboard_dismisser.dart';
 import '../../../shared/widgets/meal_type_picker.dart';
 import '../../../shared/widgets/nutrient_detail_sheet.dart';
+import '../../../shared/widgets/recognition_clarification_card.dart';
+
+class LegacyRecognitionEditController {
+  void Function(RecognitionUncertainField field)? _focusHandler;
+
+  void attach(void Function(RecognitionUncertainField field) handler) {
+    _focusHandler = handler;
+  }
+
+  void detach(void Function(RecognitionUncertainField field) handler) {
+    if (_focusHandler == handler) _focusHandler = null;
+  }
+
+  void focus(RecognitionUncertainField field) => _focusHandler?.call(field);
+}
 
 /// Full-screen bottom sheet shown after v2 AI recognition (photo / text / voice).
 ///
@@ -29,6 +50,9 @@ class RecognitionResultSheetV2 extends ConsumerStatefulWidget {
   final List<IngredientV2> ingredients;
   final DateTime? mealDate;
   final String? originalText;
+  final FeedbackSource feedbackSource;
+  final Duration? recognitionDuration;
+  final RecognitionClarification? clarification;
 
   const RecognitionResultSheetV2({
     super.key,
@@ -36,6 +60,9 @@ class RecognitionResultSheetV2 extends ConsumerStatefulWidget {
     required this.ingredients,
     this.mealDate,
     this.originalText,
+    this.feedbackSource = FeedbackSource.photo,
+    this.recognitionDuration,
+    this.clarification,
   });
 
   @override
@@ -47,8 +74,10 @@ class _RecognitionResultSheetV2State
     extends ConsumerState<RecognitionResultSheetV2>
     with SingleTickerProviderStateMixin {
   late List<IngredientV2> _items;
+  String? _operationId;
   late String _mealType;
   bool _saving = false;
+  late bool _clarificationConfirmed;
   // Which ingredient index is expanded, null = none.
   int? _expandedIndex;
 
@@ -56,15 +85,38 @@ class _RecognitionResultSheetV2State
   bool _correctionLoading = false;
   final _correctionCtrl = TextEditingController();
   final _correctionFocus = FocusNode();
+  final _legacyEditController = LegacyRecognitionEditController();
 
   String _dishName = '';
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _ensureOperation();
+    });
     _items = List.from(widget.ingredients);
     _dishName = widget.dishName;
     _mealType = _inferMealType();
+    _clarificationConfirmed = widget.clarification == null;
+  }
+
+  String _ensureOperation() {
+    if (_operationId case final id?) return id;
+    final operation = ref.read(mealLogOperationProvider.notifier).start(
+      switch (widget.feedbackSource) {
+        FeedbackSource.voice => MealLogSource.voice,
+        FeedbackSource.text => MealLogSource.text,
+        FeedbackSource.manual => MealLogSource.manual,
+        FeedbackSource.barcode => MealLogSource.barcode,
+        _ => MealLogSource.photo,
+      },
+    );
+    _operationId = operation.id;
+    ref
+        .read(mealLogOperationProvider.notifier)
+        .advance(operation.id, MealLogStage.recognitionCompleted);
+    return operation.id;
   }
 
   @override
@@ -84,8 +136,7 @@ class _RecognitionResultSheetV2State
 
   // ── Computed totals ──────────────────────────────────────────────────────
 
-  List<IngredientV2> get _selected =>
-      _items.where((i) => i.selected).toList();
+  List<IngredientV2> get _selected => _items.where((i) => i.selected).toList();
 
   NutrientsV2 get _totals {
     if (_selected.isEmpty) {
@@ -159,6 +210,39 @@ class _RecognitionResultSheetV2State
     });
   }
 
+  void _updateCalories(int index, double calories) {
+    if (calories < 0) return;
+    setState(() {
+      final item = _items[index];
+      final ratio = item.weightGrams / 100;
+      _items[index] = item.copyWith(
+        nutrientsTotal: item.nutrientsTotal.copyWith(calories: calories),
+        nutrientsPer100g: item.nutrientsPer100g.copyWith(
+          calories: ratio > 0 ? calories / ratio : calories,
+        ),
+      );
+    });
+  }
+
+  void _updateMacros(int index, double protein, double fat, double carbs) {
+    setState(() {
+      final item = _items[index];
+      final ratio = item.weightGrams / 100;
+      _items[index] = item.copyWith(
+        nutrientsTotal: item.nutrientsTotal.copyWith(
+          protein: protein,
+          fat: fat,
+          carbs: carbs,
+        ),
+        nutrientsPer100g: item.nutrientsPer100g.copyWith(
+          protein: ratio > 0 ? protein / ratio : protein,
+          fat: ratio > 0 ? fat / ratio : fat,
+          carbs: ratio > 0 ? carbs / ratio : carbs,
+        ),
+      );
+    });
+  }
+
   void _delete(int index) {
     HapticFeedback.lightImpact();
     setState(() {
@@ -175,9 +259,8 @@ class _RecognitionResultSheetV2State
       isDismissible: true,
       enableDrag: true,
       showDragHandle: false,
-      builder: (_) => DismissibleSheetWrapper(
-        child: const _V2IngredientSearchSheet(),
-      ),
+      builder: (_) =>
+          DismissibleSheetWrapper(child: const _V2IngredientSearchSheet()),
     );
     if (result != null && result.isNotEmpty && mounted) {
       setState(() => _items.addAll(result));
@@ -211,7 +294,8 @@ class _RecognitionResultSheetV2State
           sendTimeout: const Duration(seconds: 30),
         ),
       );
-      final rawItems = (resp.data['items'] as List<dynamic>?)
+      final rawItems =
+          (resp.data['items'] as List<dynamic>?)
               ?.map((e) => e as Map<String, dynamic>)
               .toList() ??
           [];
@@ -246,11 +330,14 @@ class _RecognitionResultSheetV2State
   // ── Save ─────────────────────────────────────────────────────────────────
 
   Future<void> _save() async {
+    // Shared repository endpoint: '/api/meals/add_selected'.
+    if (!_clarificationConfirmed) return;
     if (_saving || _selected.isEmpty) return;
     setState(() => _saving = true);
     HapticFeedback.mediumImpact();
 
     try {
+      final operationId = _ensureOperation();
       final items = _selected.map((item) {
         final n = item.nutrientsTotal;
         final mono = n.monounsaturatedFat ?? 0;
@@ -284,16 +371,23 @@ class _RecognitionResultSheetV2State
         };
       }).toList();
 
-      await apiDio.post('/api/meals/add_selected', data: {
-        'items': items,
-        'dish_name': widget.dishName,
-        'meal_type': _mealType,
-        if (widget.mealDate != null)
-          'date':
-              '${widget.mealDate!.year.toString().padLeft(4, '0')}-'
-              '${widget.mealDate!.month.toString().padLeft(2, '0')}-'
-              '${widget.mealDate!.day.toString().padLeft(2, '0')}',
-      });
+      await ref
+          .read(mealLogOperationProvider.notifier)
+          .saveSelected(
+            operationId: operationId,
+            expectedItems: items.length,
+            payload: {
+              'items': items,
+              'dish_name': widget.dishName,
+              'meal_type': _mealType,
+              if (widget.mealDate != null)
+                'date':
+                    '${widget.mealDate!.year.toString().padLeft(4, '0')}-'
+                    '${widget.mealDate!.month.toString().padLeft(2, '0')}-'
+                    '${widget.mealDate!.day.toString().padLeft(2, '0')}',
+            },
+          );
+      ref.read(mealLogOperationProvider.notifier).successRendered(operationId);
 
       AnalyticsService.mealSaved(
         itemCount: _selected.length,
@@ -304,7 +398,9 @@ class _RecognitionResultSheetV2State
       ref.invalidate(todayStatsProvider);
       ref.invalidate(todayMealsProvider);
 
-      if (mounted) Navigator.of(context).pop(true);
+      if (mounted) {
+        Navigator.of(context).pop(true);
+      }
     } catch (_) {
       if (mounted) {
         final l10n = AppLocalizations.of(context)!;
@@ -314,7 +410,8 @@ class _RecognitionResultSheetV2State
             behavior: SnackBarBehavior.floating,
             backgroundColor: AppColors.accentOver,
             shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppRadius.sm)),
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+            ),
           ),
         );
       }
@@ -329,6 +426,7 @@ class _RecognitionResultSheetV2State
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final totals = _totals;
+    final userId = ref.watch(authNotifierProvider).valueOrNull?.id;
 
     return Container(
       decoration: const BoxDecoration(
@@ -340,228 +438,282 @@ class _RecognitionResultSheetV2State
         child: Stack(
           children: [
             CustomScrollView(
-          slivers: [
-            SliverToBoxAdapter(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Handle
-                  Center(
-                    child: Container(
-                      width: 36,
-                      height: 4,
-                      margin: const EdgeInsets.only(top: 12),
-                      decoration: BoxDecoration(
-                        color: NutrientColors.border,
-                        borderRadius: BorderRadius.circular(2),
+              slivers: [
+                SliverToBoxAdapter(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Handle
+                      Center(
+                        child: Container(
+                          width: 36,
+                          height: 4,
+                          margin: const EdgeInsets.only(top: 12),
+                          decoration: BoxDecoration(
+                            color: NutrientColors.border,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
 
-                  // ── Header: dish name + total cal ──
-                  _HeaderSection(
-                    dishName: _dishName,
-                    totals: totals,
-                    items: _selected,
-                    l10n: l10n,
-                  ),
+                      // ── Header: dish name + total cal ──
+                      _HeaderSection(
+                        dishName: _dishName,
+                        totals: totals,
+                        items: _selected,
+                        l10n: l10n,
+                      ),
 
-                  // ── Macro donut + totals row ──
-                  _MacroSummaryRow(totals: totals, l10n: l10n),
+                      // ── Macro donut + totals row ──
+                      _MacroSummaryRow(totals: totals, l10n: l10n),
 
-                  // ── Composition label + add button ──
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-                    child: Row(
-                      children: [
-                        Text(
-                          l10n.recogV2_composition,
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: NutrientColors.tertiary,
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                        const Spacer(),
-                        _IconBtn(
-                          icon: Icons.add_rounded,
-                          color: NutrientColors.netCarbs,
-                          bg: NutrientColors.netCarbsSoft,
-                          onTap: _addIngredient,
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // ── Ingredient list (sliver so it scrolls with the sheet) ──
-            SliverPadding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              sliver: SliverList(
-                delegate: SliverChildBuilderDelegate(
-                  (ctx, i) => _IngredientTile(
-                    key: ValueKey(_items[i].name + i.toString()),
-                    item: _items[i],
-                    isExpanded: _expandedIndex == i,
-                    onTap: () => setState(() {
-                      _expandedIndex = _expandedIndex == i ? null : i;
-                    }),
-                    onToggle: () => _toggle(i),
-                    onWeightChanged: (w) => _updateWeight(i, w),
-                    onDelete: () => _delete(i),
-                    l10n: l10n,
-                  ),
-                  childCount: _items.length,
-                ),
-              ),
-            ),
-
-            SliverToBoxAdapter(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // ── Meal type picker ──
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          l10n.recogV2_meal_type,
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: NutrientColors.tertiary,
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        MealTypePicker(
-                          selected: _mealType,
-                          onChanged: (t) => setState(() => _mealType = t),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  // ── Correction button ──
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-                    child: GestureDetector(
-                      onTap: () {
-                        setState(() => _correcting = !_correcting);
-                        if (!_correcting) return;
-                        Future.delayed(const Duration(milliseconds: 350), () {
-                          if (mounted) _correctionFocus.requestFocus();
-                        });
-                      },
-                      child: Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF0FDF4),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color(0xFF86EFAC), width: 1.5),
-                        ),
+                      // ── Composition label + add button ──
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
                         child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            const Icon(Icons.edit_note_rounded, size: 18, color: Color(0xFF059669)),
-                            const SizedBox(width: 8),
                             Text(
-                              l10n.recogV2_correct_btn,
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFF059669),
+                              l10n.recogV2_composition,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: NutrientColors.tertiary,
+                                letterSpacing: 0.5,
                               ),
+                            ),
+                            const Spacer(),
+                            _IconBtn(
+                              icon: Icons.add_rounded,
+                              color: NutrientColors.netCarbs,
+                              bg: NutrientColors.netCarbsSoft,
+                              onTap: _addIngredient,
                             ),
                           ],
                         ),
                       ),
+                    ],
+                  ),
+                ),
+
+                // ── Ingredient list (sliver so it scrolls with the sheet) ──
+                SliverPadding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  sliver: SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (ctx, i) => _IngredientTile(
+                        key: ValueKey(_items[i].name + i.toString()),
+                        item: _items[i],
+                        isExpanded: _expandedIndex == i,
+                        onTap: () => setState(() {
+                          _expandedIndex = _expandedIndex == i ? null : i;
+                        }),
+                        onToggle: () => _toggle(i),
+                        onWeightChanged: (w) => _updateWeight(i, w),
+                        onCaloriesChanged: (value) => _updateCalories(i, value),
+                        onMacrosChanged: (protein, fat, carbs) =>
+                            _updateMacros(i, protein, fat, carbs),
+                        editController: i == 0 ? _legacyEditController : null,
+                        onDelete: () => _delete(i),
+                        l10n: l10n,
+                      ),
+                      childCount: _items.length,
                     ),
                   ),
+                ),
 
-                  // ── Save CTA ──
-                  Padding(
-                    padding: EdgeInsets.fromLTRB(
-                      20,
-                      20,
-                      20,
-                      MediaQuery.of(context).viewInsets.bottom + 20,
-                    ),
-                    child: SizedBox(
-                      width: double.infinity,
-                      height: 52,
-                      child: ElevatedButton.icon(
-                        onPressed: (_saving || _selected.isEmpty) ? null : _save,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: NutrientColors.netCarbs,
-                          foregroundColor: Colors.white,
-                          disabledBackgroundColor:
-                              NutrientColors.netCarbs.withValues(alpha: 0.4),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14)),
-                          elevation: 0,
-                        ),
-                        icon: _saving
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2, color: Colors.white))
-                            : const Icon(Icons.add_rounded, size: 20),
-                        label: Text(
-                          _saving
-                              ? l10n.recogV2_saving
-                              : _saveBtnLabel(l10n),
-                          style: const TextStyle(
-                              fontSize: 16, fontWeight: FontWeight.w700),
+                SliverToBoxAdapter(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // ── Meal type picker ──
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              l10n.recogV2_meal_type,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: NutrientColors.tertiary,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            MealTypePicker(
+                              selected: _mealType,
+                              onChanged: (t) => setState(() => _mealType = t),
+                            ),
+                          ],
                         ),
                       ),
-                    ),
+
+                      // ── Correction button ──
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                        child: GestureDetector(
+                          onTap: () {
+                            setState(() => _correcting = !_correcting);
+                            if (!_correcting) return;
+                            Future.delayed(
+                              const Duration(milliseconds: 350),
+                              () {
+                                if (mounted) _correctionFocus.requestFocus();
+                              },
+                            );
+                          },
+                          child: Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF0FDF4),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: const Color(0xFF86EFAC),
+                                width: 1.5,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(
+                                  Icons.edit_note_rounded,
+                                  size: 18,
+                                  color: Color(0xFF059669),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  l10n.recogV2_correct_btn,
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFF059669),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      RecognitionFeedbackBar(
+                        source: widget.feedbackSource,
+                        userId: userId,
+                        contextData: {
+                          'item_count': _selected.length,
+                          'total_calories_rounded': totals.calories.round(),
+                          'recognition_mode': 'v2',
+                          if (widget.recognitionDuration != null)
+                            'recognition_duration_ms': widget
+                                .recognitionDuration!
+                                .inMilliseconds
+                                .clamp(1, 600000),
+                        },
+                      ),
+
+                      if (widget.clarification case final clarification?)
+                        RecognitionClarificationCard(
+                          clarification: clarification,
+                          confirmed: _clarificationConfirmed,
+                          onConfirm: () =>
+                              setState(() => _clarificationConfirmed = true),
+                          onEdit: (field) {
+                            setState(() {
+                              _clarificationConfirmed = true;
+                            });
+                            _legacyEditController.focus(field);
+                          },
+                        ),
+
+                      // ── Save CTA ──
+                      Padding(
+                        padding: EdgeInsets.fromLTRB(
+                          20,
+                          20,
+                          20,
+                          MediaQuery.of(context).viewInsets.bottom + 20,
+                        ),
+                        child: SizedBox(
+                          width: double.infinity,
+                          height: 52,
+                          child: ElevatedButton.icon(
+                            onPressed:
+                                (_saving ||
+                                    _selected.isEmpty ||
+                                    !_clarificationConfirmed)
+                                ? null
+                                : _save,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: NutrientColors.netCarbs,
+                              foregroundColor: Colors.white,
+                              disabledBackgroundColor: NutrientColors.netCarbs
+                                  .withValues(alpha: 0.4),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              elevation: 0,
+                            ),
+                            icon: _saving
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : const Icon(Icons.add_rounded, size: 20),
+                            label: Text(
+                              _saving
+                                  ? l10n.recogV2_saving
+                                  : _saveBtnLabel(l10n),
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ],
+                ),
+              ],
+            ),
+            // ── Correction panel overlay ──
+            AnimatedPositioned(
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeOutCubic,
+              bottom: _correcting ? 0 : -200,
+              left: 0,
+              right: 0,
+              child: _CorrectionPanel(
+                ctrl: _correctionCtrl,
+                focus: _correctionFocus,
+                loading: _correctionLoading,
+                onSend: _applyCorrection,
+                onClose: () => setState(() {
+                  _correcting = false;
+                  _correctionCtrl.clear();
+                }),
+                l10n: l10n,
+              ),
+            ),
+
+            // ── Close (X) button ──────────────────────────────────────────
+            Positioned(
+              top: 20,
+              right: 8,
+              child: IconButton(
+                icon: const Icon(Icons.close_rounded),
+                iconSize: 20,
+                color: AppColors.textMuted,
+                tooltip: 'Close',
+                onPressed: () => Navigator.of(context).pop(false),
               ),
             ),
           ],
-        ),
-        // ── Correction panel overlay ──
-        AnimatedPositioned(
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOutCubic,
-          bottom: _correcting ? 0 : -200,
-          left: 0,
-          right: 0,
-          child: _CorrectionPanel(
-            ctrl: _correctionCtrl,
-            focus: _correctionFocus,
-            loading: _correctionLoading,
-            onSend: _applyCorrection,
-            onClose: () => setState(() {
-              _correcting = false;
-              _correctionCtrl.clear();
-            }),
-            l10n: l10n,
-          ),
-        ),
-
-        // ── Close (X) button ──────────────────────────────────────────
-        Positioned(
-          top: 20,
-          right: 8,
-          child: IconButton(
-            icon: const Icon(Icons.close_rounded),
-            iconSize: 20,
-            color: AppColors.textMuted,
-            tooltip: 'Close',
-            onPressed: () => Navigator.of(context).pop(false),
-          ),
-        ),
-      ],
         ),
       ),
     );
@@ -762,17 +914,23 @@ class _MacroPill extends StatelessWidget {
           decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
         const SizedBox(width: 6),
-        Text(label,
-            style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w500,
-                color: NutrientColors.secondary)),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+            color: NutrientColors.secondary,
+          ),
+        ),
         const Spacer(),
-        Text(value,
-            style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: color)),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: color,
+          ),
+        ),
       ],
     );
   }
@@ -788,6 +946,9 @@ class _IngredientTile extends StatefulWidget {
   final VoidCallback onTap;
   final VoidCallback onToggle;
   final ValueChanged<double> onWeightChanged;
+  final ValueChanged<double> onCaloriesChanged;
+  final void Function(double protein, double fat, double carbs) onMacrosChanged;
+  final LegacyRecognitionEditController? editController;
   final VoidCallback onDelete;
   final AppLocalizations l10n;
 
@@ -798,6 +959,9 @@ class _IngredientTile extends StatefulWidget {
     required this.onTap,
     required this.onToggle,
     required this.onWeightChanged,
+    required this.onCaloriesChanged,
+    required this.onMacrosChanged,
+    this.editController,
     required this.onDelete,
     required this.l10n,
   });
@@ -810,6 +974,15 @@ class _IngredientTileState extends State<_IngredientTile>
     with SingleTickerProviderStateMixin {
   late final TextEditingController _weightCtrl;
   late final FocusNode _weightFocus;
+  late final TextEditingController _caloriesCtrl;
+  late final TextEditingController _proteinCtrl;
+  late final TextEditingController _fatCtrl;
+  late final TextEditingController _carbsCtrl;
+  late final FocusNode _caloriesFocus;
+  late final FocusNode _proteinFocus;
+  late final FocusNode _fatFocus;
+  late final FocusNode _carbsFocus;
+  bool _editingNutrition = false;
   late final AnimationController _expandCtrl;
   late final Animation<double> _expandAnim;
 
@@ -817,18 +990,37 @@ class _IngredientTileState extends State<_IngredientTile>
   void initState() {
     super.initState();
     _weightCtrl = TextEditingController(
-        text: widget.item.weightGrams.toStringAsFixed(0));
+      text: widget.item.weightGrams.toStringAsFixed(0),
+    );
     // Apply weight when the field loses focus (tap outside, keyboard dismiss).
     // Without this `onSubmitted` only fires on the Return key — most users
     // never press Return on a numeric keyboard, so calories never updated.
     _weightFocus = FocusNode()..addListener(_onWeightFocusChange);
+    final nutrients = widget.item.nutrientsTotal;
+    _caloriesCtrl = TextEditingController(
+      text: nutrients.calories.toStringAsFixed(0),
+    );
+    _proteinCtrl = TextEditingController(
+      text: nutrients.protein.toStringAsFixed(1),
+    );
+    _fatCtrl = TextEditingController(text: nutrients.fat.toStringAsFixed(1));
+    _carbsCtrl = TextEditingController(
+      text: nutrients.carbs.toStringAsFixed(1),
+    );
+    _caloriesFocus = FocusNode();
+    _proteinFocus = FocusNode();
+    _fatFocus = FocusNode();
+    _carbsFocus = FocusNode();
+    widget.editController?.attach(_focusUncertainField);
     _expandCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 280),
       value: widget.isExpanded ? 1.0 : 0.0,
     );
-    _expandAnim =
-        CurvedAnimation(parent: _expandCtrl, curve: Curves.easeOutCubic);
+    _expandAnim = CurvedAnimation(
+      parent: _expandCtrl,
+      curve: Curves.easeOutCubic,
+    );
   }
 
   void _onWeightFocusChange() {
@@ -860,12 +1052,68 @@ class _IngredientTileState extends State<_IngredientTile>
 
   @override
   void dispose() {
+    widget.editController?.detach(_focusUncertainField);
     _weightFocus
       ..removeListener(_onWeightFocusChange)
       ..dispose();
     _weightCtrl.dispose();
+    _caloriesCtrl.dispose();
+    _proteinCtrl.dispose();
+    _fatCtrl.dispose();
+    _carbsCtrl.dispose();
+    _caloriesFocus.dispose();
+    _proteinFocus.dispose();
+    _fatFocus.dispose();
+    _carbsFocus.dispose();
     _expandCtrl.dispose();
     super.dispose();
+  }
+
+  void _focusUncertainField(RecognitionUncertainField field) {
+    if (field == RecognitionUncertainField.weight) {
+      _weightFocus.requestFocus();
+      return;
+    }
+    setState(() => _editingNutrition = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      switch (field) {
+        case RecognitionUncertainField.weight:
+          _weightFocus.requestFocus();
+        case RecognitionUncertainField.calories:
+          _caloriesFocus.requestFocus();
+        case RecognitionUncertainField.macros:
+          _proteinFocus.requestFocus();
+      }
+    });
+  }
+
+  void _applyMacros() {
+    widget.onMacrosChanged(
+      double.tryParse(_proteinCtrl.text) ?? 0,
+      double.tryParse(_fatCtrl.text) ?? 0,
+      double.tryParse(_carbsCtrl.text) ?? 0,
+    );
+  }
+
+  Widget _nutritionField({
+    required Key key,
+    required String label,
+    required TextEditingController controller,
+    required FocusNode focusNode,
+    required ValueChanged<String> onChanged,
+  }) {
+    return SizedBox(
+      width: 68,
+      child: TextField(
+        key: key,
+        controller: controller,
+        focusNode: focusNode,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        decoration: InputDecoration(labelText: label, isDense: true),
+        onChanged: onChanged,
+      ),
+    );
   }
 
   void _showDetailSheet(BuildContext context) {
@@ -900,7 +1148,8 @@ class _IngredientTileState extends State<_IngredientTile>
       decoration: BoxDecoration(
         border: Border(
           bottom: BorderSide(
-              color: NutrientColors.border.withValues(alpha: 0.5)),
+            color: NutrientColors.border.withValues(alpha: 0.5),
+          ),
         ),
       ),
       child: Column(
@@ -936,8 +1185,11 @@ class _IngredientTileState extends State<_IngredientTile>
                         ),
                       ),
                       child: item.selected
-                          ? const Icon(Icons.check_rounded,
-                              size: 14, color: Colors.white)
+                          ? const Icon(
+                              Icons.check_rounded,
+                              size: 14,
+                              color: Colors.white,
+                            )
                           : null,
                     ),
                   ),
@@ -951,7 +1203,9 @@ class _IngredientTileState extends State<_IngredientTile>
                         Text(
                           item.name,
                           style: const TextStyle(
-                              fontSize: 13, fontWeight: FontWeight.w600),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -968,6 +1222,7 @@ class _IngredientTileState extends State<_IngredientTile>
                               width: 44,
                               height: 22,
                               child: TextField(
+                                key: const ValueKey('legacy_weight_field'),
                                 controller: _weightCtrl,
                                 focusNode: _weightFocus,
                                 keyboardType: TextInputType.number,
@@ -982,13 +1237,15 @@ class _IngredientTileState extends State<_IngredientTile>
                                   contentPadding: EdgeInsets.zero,
                                   border: UnderlineInputBorder(
                                     borderSide: BorderSide(
-                                        color: NutrientColors.netCarbs,
-                                        width: 1.5),
+                                      color: NutrientColors.netCarbs,
+                                      width: 1.5,
+                                    ),
                                   ),
                                   enabledBorder: UnderlineInputBorder(
                                     borderSide: BorderSide(
-                                        color: NutrientColors.netCarbs,
-                                        width: 1.5),
+                                      color: NutrientColors.netCarbs,
+                                      width: 1.5,
+                                    ),
                                   ),
                                   filled: false,
                                 ),
@@ -998,7 +1255,8 @@ class _IngredientTileState extends State<_IngredientTile>
                                 // safety nets but this is the primary path.
                                 onChanged: (v) {
                                   final w = double.tryParse(v.trim());
-                                  if (w != null && w > 0 &&
+                                  if (w != null &&
+                                      w > 0 &&
                                       w != widget.item.weightGrams) {
                                     widget.onWeightChanged(w);
                                   }
@@ -1011,12 +1269,57 @@ class _IngredientTileState extends State<_IngredientTile>
                                 },
                               ),
                             ),
-                            Text(' ${l10n.macro_g}',
-                                style: TextStyle(
-                                    fontSize: 11,
-                                    color: NutrientColors.tertiary)),
+                            Text(
+                              ' ${l10n.macro_g}',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: NutrientColors.tertiary,
+                              ),
+                            ),
                           ],
                         ),
+                        if (_editingNutrition) ...[
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: [
+                              _nutritionField(
+                                key: const ValueKey('legacy_calories_field'),
+                                label: l10n.macro_kcal,
+                                controller: _caloriesCtrl,
+                                focusNode: _caloriesFocus,
+                                onChanged: (value) {
+                                  final parsed = double.tryParse(value);
+                                  if (parsed != null) {
+                                    widget.onCaloriesChanged(parsed);
+                                  }
+                                },
+                              ),
+                              _nutritionField(
+                                key: const ValueKey('legacy_protein_field'),
+                                label: l10n.macro_protein_abbr,
+                                controller: _proteinCtrl,
+                                focusNode: _proteinFocus,
+                                onChanged: (_) => _applyMacros(),
+                              ),
+                              _nutritionField(
+                                key: const ValueKey('legacy_fat_field'),
+                                label: l10n.macro_fat_abbr,
+                                controller: _fatCtrl,
+                                focusNode: _fatFocus,
+                                onChanged: (_) => _applyMacros(),
+                              ),
+                              _nutritionField(
+                                key: const ValueKey('legacy_carbs_field'),
+                                label: l10n.macro_carbs_abbr,
+                                controller: _carbsCtrl,
+                                focusNode: _carbsFocus,
+                                onChanged: (_) => _applyMacros(),
+                              ),
+                            ],
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -1036,16 +1339,22 @@ class _IngredientTileState extends State<_IngredientTile>
                       const SizedBox(height: 4),
                       GestureDetector(
                         onTap: widget.onDelete,
-                        child: Icon(Icons.close_rounded,
-                            size: 16, color: NutrientColors.tertiary),
+                        child: Icon(
+                          Icons.close_rounded,
+                          size: 16,
+                          color: NutrientColors.tertiary,
+                        ),
                       ),
                       const SizedBox(height: 4),
                       AnimatedBuilder(
                         animation: _expandAnim,
                         builder: (_, __) => Transform.rotate(
                           angle: _expandAnim.value * pi,
-                          child: Icon(Icons.keyboard_arrow_down_rounded,
-                              size: 18, color: NutrientColors.tertiary),
+                          child: Icon(
+                            Icons.keyboard_arrow_down_rounded,
+                            size: 18,
+                            color: NutrientColors.tertiary,
+                          ),
                         ),
                       ),
                     ],
@@ -1069,7 +1378,6 @@ class _IngredientTileState extends State<_IngredientTile>
     );
   }
 }
-
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Nutrient breakdown card (shown when ingredient is expanded)
@@ -1108,32 +1416,36 @@ class _NutrientBreakdownCard extends StatelessWidget {
           Row(
             children: [
               _NutrientCell(
-                  label: l10n.macro_calories,
-                  value: '${n.calories.toStringAsFixed(0)} ${l10n.macro_kcal}',
-                  color: NutrientColors.kcal,
-                  icon: Icons.local_fire_department_rounded),
+                label: l10n.macro_calories,
+                value: '${n.calories.toStringAsFixed(0)} ${l10n.macro_kcal}',
+                color: NutrientColors.kcal,
+                icon: Icons.local_fire_department_rounded,
+              ),
               const SizedBox(width: 6),
               _NutrientCell(
-                  label: l10n.macro_protein,
-                  value: '${n.protein.toStringAsFixed(1)}${l10n.macro_g}',
-                  color: NutrientColors.protein,
-                  icon: Icons.fitness_center_rounded),
+                label: l10n.macro_protein,
+                value: '${n.protein.toStringAsFixed(1)}${l10n.macro_g}',
+                color: NutrientColors.protein,
+                icon: Icons.fitness_center_rounded,
+              ),
             ],
           ),
           const SizedBox(height: 6),
           Row(
             children: [
               _NutrientCell(
-                  label: l10n.macro_fat,
-                  value: '${n.fat.toStringAsFixed(1)}${l10n.macro_g}',
-                  color: NutrientColors.fatGood,
-                  icon: Icons.water_drop_rounded),
+                label: l10n.macro_fat,
+                value: '${n.fat.toStringAsFixed(1)}${l10n.macro_g}',
+                color: NutrientColors.fatGood,
+                icon: Icons.water_drop_rounded,
+              ),
               const SizedBox(width: 6),
               _NutrientCell(
-                  label: l10n.macro_carbs,
-                  value: '${n.carbs.toStringAsFixed(1)}${l10n.macro_g}',
-                  color: NutrientColors.netCarbs,
-                  icon: Icons.grain_rounded),
+                label: l10n.macro_carbs,
+                value: '${n.carbs.toStringAsFixed(1)}${l10n.macro_g}',
+                color: NutrientColors.netCarbs,
+                icon: Icons.grain_rounded,
+              ),
             ],
           ),
 
@@ -1147,87 +1459,98 @@ class _NutrientBreakdownCard extends StatelessWidget {
           if (n.netCarbs != null ||
               n.fiber != null ||
               n.sugar != null ||
-              n.sugarAlcohols != null)
-            ...[
+              n.sugarAlcohols != null) ...[
             const SizedBox(height: 12),
             _SectionLabel(l10n.recogV2_carbs_detail),
             const SizedBox(height: 6),
             if (n.netCarbs != null)
               _NutrientRow(
-                  label: l10n.recogV2_net_carbs,
-                  value: '${n.netCarbs!.toStringAsFixed(1)}${l10n.macro_g}',
-                  color: NutrientColors.netCarbs,
-                  fraction: n.carbs > 0 ? n.netCarbs! / n.carbs : 0),
+                label: l10n.recogV2_net_carbs,
+                value: '${n.netCarbs!.toStringAsFixed(1)}${l10n.macro_g}',
+                color: NutrientColors.netCarbs,
+                fraction: n.carbs > 0 ? n.netCarbs! / n.carbs : 0,
+              ),
             if (n.fiber != null)
               _NutrientRow(
-                  label: l10n.recogV2_fiber,
-                  value: '${n.fiber!.toStringAsFixed(1)}${l10n.macro_g}',
-                  color: NutrientColors.fiber,
-                  fraction: n.carbs > 0 ? n.fiber! / n.carbs : 0),
+                label: l10n.recogV2_fiber,
+                value: '${n.fiber!.toStringAsFixed(1)}${l10n.macro_g}',
+                color: NutrientColors.fiber,
+                fraction: n.carbs > 0 ? n.fiber! / n.carbs : 0,
+              ),
             if (n.sugar != null)
               _NutrientRow(
-                  label: Localizations.localeOf(context).languageCode == 'ru'
-                      ? 'Сахар'
-                      : 'Sugar',
-                  value: '${n.sugar!.toStringAsFixed(1)}${l10n.macro_g}',
-                  color: NutrientColors.sugar,
-                  fraction: n.carbs > 0 ? n.sugar! / n.carbs : 0),
+                label: Localizations.localeOf(context).languageCode == 'ru'
+                    ? 'Сахар'
+                    : 'Sugar',
+                value: '${n.sugar!.toStringAsFixed(1)}${l10n.macro_g}',
+                color: NutrientColors.sugar,
+                fraction: n.carbs > 0 ? n.sugar! / n.carbs : 0,
+              ),
             if (n.sugarAlcohols != null)
               _NutrientRow(
-                  label: l10n.recogV2_sugar_alcohols,
-                  value: '${n.sugarAlcohols!.toStringAsFixed(1)}${l10n.macro_g}',
-                  color: NutrientColors.sugar,
-                  fraction: n.carbs > 0 ? n.sugarAlcohols! / n.carbs : 0),
+                label: l10n.recogV2_sugar_alcohols,
+                value: '${n.sugarAlcohols!.toStringAsFixed(1)}${l10n.macro_g}',
+                color: NutrientColors.sugar,
+                fraction: n.carbs > 0 ? n.sugarAlcohols! / n.carbs : 0,
+              ),
           ],
 
           // ── Fats detail ──
           if (n.saturatedFat != null ||
               n.monounsaturatedFat != null ||
-              n.polyunsaturatedFat != null)
-            ...[
+              n.polyunsaturatedFat != null) ...[
             const SizedBox(height: 12),
             _SectionLabel(l10n.recogV2_fats_detail),
             const SizedBox(height: 6),
             if (n.saturatedFat != null)
               _NutrientRow(
-                  label: l10n.recogV2_sat_fat,
-                  value: '${n.saturatedFat!.toStringAsFixed(1)}${l10n.macro_g}',
-                  color: NutrientColors.fatBad,
-                  fraction: n.fat > 0 ? n.saturatedFat! / n.fat : 0),
+                label: l10n.recogV2_sat_fat,
+                value: '${n.saturatedFat!.toStringAsFixed(1)}${l10n.macro_g}',
+                color: NutrientColors.fatBad,
+                fraction: n.fat > 0 ? n.saturatedFat! / n.fat : 0,
+              ),
             if (n.monounsaturatedFat != null)
               _NutrientRow(
-                  label: l10n.recogV2_mono_fat,
-                  value:
-                      '${n.monounsaturatedFat!.toStringAsFixed(1)}${l10n.macro_g}',
-                  color: NutrientColors.fatGood,
-                  fraction: n.fat > 0 ? n.monounsaturatedFat! / n.fat : 0),
+                label: l10n.recogV2_mono_fat,
+                value:
+                    '${n.monounsaturatedFat!.toStringAsFixed(1)}${l10n.macro_g}',
+                color: NutrientColors.fatGood,
+                fraction: n.fat > 0 ? n.monounsaturatedFat! / n.fat : 0,
+              ),
             if (n.polyunsaturatedFat != null)
               _NutrientRow(
-                  label: l10n.recogV2_poly_fat,
-                  value:
-                      '${n.polyunsaturatedFat!.toStringAsFixed(1)}${l10n.macro_g}',
-                  color: NutrientColors.fiber,
-                  fraction: n.fat > 0 ? n.polyunsaturatedFat! / n.fat : 0),
+                label: l10n.recogV2_poly_fat,
+                value:
+                    '${n.polyunsaturatedFat!.toStringAsFixed(1)}${l10n.macro_g}',
+                color: NutrientColors.fiber,
+                fraction: n.fat > 0 ? n.polyunsaturatedFat! / n.fat : 0,
+              ),
           ],
 
           // ── Micronutrients ──
-          if (n.sodiumMg != null || n.cholesterolMg != null || n.potassiumMg != null)
-            ...[
+          if (n.sodiumMg != null ||
+              n.cholesterolMg != null ||
+              n.potassiumMg != null) ...[
             const SizedBox(height: 12),
             _SectionLabel(l10n.recogV2_micro),
             const SizedBox(height: 6),
             if (n.sodiumMg != null)
               _MicroRow(
-                  label: l10n.recogV2_sodium,
-                  value: '${n.sodiumMg!.toStringAsFixed(0)} ${l10n.recogV2_mg}'),
+                label: l10n.recogV2_sodium,
+                value: '${n.sodiumMg!.toStringAsFixed(0)} ${l10n.recogV2_mg}',
+              ),
             if (n.cholesterolMg != null)
               _MicroRow(
-                  label: l10n.recogV2_cholesterol,
-                  value: '${n.cholesterolMg!.toStringAsFixed(0)} ${l10n.recogV2_mg}'),
+                label: l10n.recogV2_cholesterol,
+                value:
+                    '${n.cholesterolMg!.toStringAsFixed(0)} ${l10n.recogV2_mg}',
+              ),
             if (n.potassiumMg != null)
               _MicroRow(
-                  label: l10n.recogV2_potassium,
-                  value: '${n.potassiumMg!.toStringAsFixed(0)} ${l10n.recogV2_mg}'),
+                label: l10n.recogV2_potassium,
+                value:
+                    '${n.potassiumMg!.toStringAsFixed(0)} ${l10n.recogV2_mg}',
+              ),
           ],
         ],
       ),
@@ -1258,11 +1581,12 @@ class _NutrientCell extends StatelessWidget {
   final String value;
   final Color color;
   final IconData icon;
-  const _NutrientCell(
-      {required this.label,
-      required this.value,
-      required this.color,
-      required this.icon});
+  const _NutrientCell({
+    required this.label,
+    required this.value,
+    required this.color,
+    required this.icon,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1281,16 +1605,22 @@ class _NutrientCell extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(value,
-                      style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w800,
-                          color: color)),
-                  Text(label,
-                      style: TextStyle(
-                          fontSize: 9,
-                          color: color.withValues(alpha: 0.7),
-                          fontWeight: FontWeight.w500)),
+                  Text(
+                    value,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      color: color,
+                    ),
+                  ),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 9,
+                      color: color.withValues(alpha: 0.7),
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -1322,17 +1652,23 @@ class _NutrientRow extends StatelessWidget {
         children: [
           Row(
             children: [
-              Text(label,
-                  style: TextStyle(
-                      fontSize: 11,
-                      color: NutrientColors.secondary,
-                      fontWeight: FontWeight.w500)),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: NutrientColors.secondary,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
               const Spacer(),
-              Text(value,
-                  style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: color)),
+              Text(
+                value,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: color,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 3),
@@ -1362,17 +1698,23 @@ class _MicroRow extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 4),
       child: Row(
         children: [
-          Text(label,
-              style: TextStyle(
-                  fontSize: 11,
-                  color: NutrientColors.secondary,
-                  fontWeight: FontWeight.w500)),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              color: NutrientColors.secondary,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
           const Spacer(),
-          Text(value,
-              style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: NutrientColors.secondary)),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: NutrientColors.secondary,
+            ),
+          ),
         ],
       ),
     );
@@ -1387,41 +1729,56 @@ class _GiBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cat = category ?? (gi < 55 ? 'low' : gi < 70 ? 'medium' : 'high');
+    final cat =
+        category ??
+        (gi < 55
+            ? 'low'
+            : gi < 70
+            ? 'medium'
+            : 'high');
     final (color, bg, label) = switch (cat) {
       'low' => (
-          const Color(0xFF16A34A),
-          const Color(0xFFDCFCE7),
-          l10n.recogV2_gi_low
-        ),
+        const Color(0xFF16A34A),
+        const Color(0xFFDCFCE7),
+        l10n.recogV2_gi_low,
+      ),
       'medium' => (
-          const Color(0xFFD97706),
-          const Color(0xFFFEF3C7),
-          l10n.recogV2_gi_medium
-        ),
+        const Color(0xFFD97706),
+        const Color(0xFFFEF3C7),
+        l10n.recogV2_gi_medium,
+      ),
       _ => (
-          const Color(0xFFDC2626),
-          const Color(0xFFFEE2E2),
-          l10n.recogV2_gi_high
-        ),
+        const Color(0xFFDC2626),
+        const Color(0xFFFEE2E2),
+        l10n.recogV2_gi_high,
+      ),
     };
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(6)),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(6),
+      ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
             '${l10n.recogV2_gi_label} $gi',
             style: TextStyle(
-                fontSize: 11, fontWeight: FontWeight.w800, color: color),
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              color: color,
+            ),
           ),
           const SizedBox(width: 5),
           Text(
             '· $label',
             style: TextStyle(
-                fontSize: 10, fontWeight: FontWeight.w500, color: color),
+              fontSize: 10,
+              fontWeight: FontWeight.w500,
+              color: color,
+            ),
           ),
         ],
       ),
@@ -1438,8 +1795,12 @@ class _IconBtn extends StatelessWidget {
   final Color? color;
   final Color? bg;
   final VoidCallback onTap;
-  const _IconBtn(
-      {required this.icon, this.color, this.bg, required this.onTap});
+  const _IconBtn({
+    required this.icon,
+    this.color,
+    this.bg,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1514,7 +1875,10 @@ class _V2IngredientSearchSheetState extends State<_V2IngredientSearchSheet> {
     final text = _ctrl.text.trim();
     if (text.isEmpty) return;
     _focus.unfocus();
-    setState(() { _loading = true; _groups = []; });
+    setState(() {
+      _loading = true;
+      _groups = [];
+    });
     try {
       final lang = Localizations.localeOf(context).languageCode;
       final resp = await apiDio.post(
@@ -1522,20 +1886,24 @@ class _V2IngredientSearchSheetState extends State<_V2IngredientSearchSheet> {
         data: {'text': text, 'language': lang},
       );
       final rawGroups = (resp.data['groups'] as List<dynamic>?) ?? [];
-      final groups = rawGroups.map((g) {
-        final variants = ((g['variants'] as List<dynamic>?) ?? [])
-            .map((v) => v as Map<String, dynamic>)
-            .toList();
-        return _VariantGroup(
-          food: g['food'] as String? ?? '',
-          variants: variants,
-        );
-      }).where((g) => g.variants.isNotEmpty).toList();
+      final groups = rawGroups
+          .map((g) {
+            final variants = ((g['variants'] as List<dynamic>?) ?? [])
+                .map((v) => v as Map<String, dynamic>)
+                .toList();
+            return _VariantGroup(
+              food: g['food'] as String? ?? '',
+              variants: variants,
+            );
+          })
+          .where((g) => g.variants.isNotEmpty)
+          .toList();
       if (mounted) setState(() => _groups = groups);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('$e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$e')));
       }
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -1562,216 +1930,232 @@ class _V2IngredientSearchSheetState extends State<_V2IngredientSearchSheet> {
 
     return KeyboardDismisser(
       child: Container(
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      padding: EdgeInsets.only(bottom: keyboardPad),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Handle
-          Center(
-            child: Container(
-              width: 36, height: 4,
-              margin: const EdgeInsets.only(top: 12, bottom: 12),
-              decoration: BoxDecoration(
-                color: NutrientColors.border,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Text(
-              l10n.recogV2_search_ingredient,
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: NutrientColors.secondary,
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          // Search bar
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _ctrl,
-                    focusNode: _focus,
-                    textInputAction: TextInputAction.search,
-                    onSubmitted: (_) => _search(),
-                    decoration: InputDecoration(
-                      hintText: l10n.recogV2_search_hint,
-                      filled: true,
-                      fillColor: NutrientColors.bg,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none,
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 12),
-                    ),
-                  ),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        padding: EdgeInsets.only(bottom: keyboardPad),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Handle
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                margin: const EdgeInsets.only(top: 12, bottom: 12),
+                decoration: BoxDecoration(
+                  color: NutrientColors.border,
+                  borderRadius: BorderRadius.circular(2),
                 ),
-                const SizedBox(width: 8),
-                GestureDetector(
-                  onTap: _search,
-                  child: Container(
-                    width: 44, height: 44,
-                    decoration: BoxDecoration(
-                      color: NutrientColors.netCarbs,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: _loading
-                        ? const Padding(
-                            padding: EdgeInsets.all(12),
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white),
-                          )
-                        : const Icon(Icons.search_rounded,
-                            color: Colors.white, size: 22),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-          // Variant groups
-          if (_groups.isNotEmpty)
-            ConstrainedBox(
-              constraints: BoxConstraints(
-                maxHeight: MediaQuery.of(context).size.height * 0.5,
               ),
-              child: ListView.builder(
-                shrinkWrap: true,
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                itemCount: _groups.length,
-                itemBuilder: (_, gi) {
-                  final group = _groups[gi];
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          group.food,
-                          style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.text,
-                          ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Text(
+                l10n.recogV2_search_ingredient,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: NutrientColors.secondary,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            // Search bar
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _ctrl,
+                      focusNode: _focus,
+                      textInputAction: TextInputAction.search,
+                      onSubmitted: (_) => _search(),
+                      decoration: InputDecoration(
+                        hintText: l10n.recogV2_search_hint,
+                        filled: true,
+                        fillColor: NutrientColors.bg,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
                         ),
-                        const SizedBox(height: 6),
-                        ...group.variants.asMap().entries.map((entry) {
-                          final vi = entry.key;
-                          final v = entry.value;
-                          final isSelected = group.selectedIndex == vi;
-                          final name = v['name'] as String? ?? '';
-                          final per100 = v['nutrients_per_100g']
-                              as Map<String, dynamic>? ?? {};
-                          final cal =
-                              (per100['calories'] as num?)?.toDouble() ?? 0;
-                          final w =
-                              (v['weight_grams'] as num?)?.toDouble() ?? 100;
-                          return GestureDetector(
-                            onTap: () => setState(
-                                () => group.selectedIndex = vi),
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 150),
-                              margin: const EdgeInsets.only(bottom: 6),
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 14, vertical: 10),
-                              decoration: BoxDecoration(
-                                color: isSelected
-                                    ? NutrientColors.netCarbsSoft
-                                    : NutrientColors.bg,
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: _search,
+                    child: Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: NutrientColors.netCarbs,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: _loading
+                          ? const Padding(
+                              padding: EdgeInsets.all(12),
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(
+                              Icons.search_rounded,
+                              color: Colors.white,
+                              size: 22,
+                            ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            // Variant groups
+            if (_groups.isNotEmpty)
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.5,
+                ),
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  itemCount: _groups.length,
+                  itemBuilder: (_, gi) {
+                    final group = _groups[gi];
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            group.food,
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.text,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          ...group.variants.asMap().entries.map((entry) {
+                            final vi = entry.key;
+                            final v = entry.value;
+                            final isSelected = group.selectedIndex == vi;
+                            final name = v['name'] as String? ?? '';
+                            final per100 =
+                                v['nutrients_per_100g']
+                                    as Map<String, dynamic>? ??
+                                {};
+                            final cal =
+                                (per100['calories'] as num?)?.toDouble() ?? 0;
+                            final w =
+                                (v['weight_grams'] as num?)?.toDouble() ?? 100;
+                            return GestureDetector(
+                              onTap: () =>
+                                  setState(() => group.selectedIndex = vi),
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 150),
+                                margin: const EdgeInsets.only(bottom: 6),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 10,
+                                ),
+                                decoration: BoxDecoration(
                                   color: isSelected
-                                      ? NutrientColors.netCarbs
-                                      : NutrientColors.border,
-                                  width: isSelected ? 1.5 : 1,
+                                      ? NutrientColors.netCarbsSoft
+                                      : NutrientColors.bg,
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(
+                                    color: isSelected
+                                        ? NutrientColors.netCarbs
+                                        : NutrientColors.border,
+                                    width: isSelected ? 1.5 : 1,
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            name,
+                                            style: TextStyle(
+                                              fontSize: 13,
+                                              fontWeight: isSelected
+                                                  ? FontWeight.w600
+                                                  : FontWeight.w500,
+                                              color: isSelected
+                                                  ? NutrientColors.netCarbs
+                                                  : AppColors.text,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            '${cal.toStringAsFixed(0)} ${l10n.macro_kcal}/100${l10n.macro_g}  ·  '
+                                            '${w.toStringAsFixed(0)}${l10n.macro_g}',
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              color: NutrientColors.secondary,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    if (isSelected)
+                                      Icon(
+                                        Icons.check_circle_rounded,
+                                        color: NutrientColors.netCarbs,
+                                        size: 18,
+                                      ),
+                                  ],
                                 ),
                               ),
-                              child: Row(
-                                children: [
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          name,
-                                          style: TextStyle(
-                                            fontSize: 13,
-                                            fontWeight: isSelected
-                                                ? FontWeight.w600
-                                                : FontWeight.w500,
-                                            color: isSelected
-                                                ? NutrientColors.netCarbs
-                                                : AppColors.text,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 2),
-                                        Text(
-                                          '${cal.toStringAsFixed(0)} ${l10n.macro_kcal}/100${l10n.macro_g}  ·  '
-                                          '${w.toStringAsFixed(0)}${l10n.macro_g}',
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            color: NutrientColors.secondary,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  if (isSelected)
-                                    Icon(Icons.check_circle_rounded,
-                                        color: NutrientColors.netCarbs,
-                                        size: 18),
-                                ],
-                              ),
-                            ),
-                          );
-                        }),
-                      ],
-                    ),
-                  );
-                },
+                            );
+                          }),
+                        ],
+                      ),
+                    );
+                  },
+                ),
               ),
-            ),
-          // Add button
-          if (_groups.isNotEmpty)
-            Padding(
-              padding: EdgeInsets.fromLTRB(20, 4, 20, bottomPad + 16),
-              child: SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _addSelected,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: NutrientColors.netCarbs,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+            // Add button
+            if (_groups.isNotEmpty)
+              Padding(
+                padding: EdgeInsets.fromLTRB(20, 4, 20, bottomPad + 16),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _addSelected,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: NutrientColors.netCarbs,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      elevation: 0,
                     ),
-                    elevation: 0,
-                  ),
-                  child: Text(
-                    isRu ? 'Добавить выбранные' : 'Add selected',
-                    style: const TextStyle(
-                        fontSize: 15, fontWeight: FontWeight.w700),
+                    child: Text(
+                      isRu ? 'Добавить выбранные' : 'Add selected',
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ),
                 ),
               ),
-            ),
-          if (_groups.isEmpty && !_loading)
-            SizedBox(height: bottomPad + 16),
-        ],
-      ),
+            if (_groups.isEmpty && !_loading) SizedBox(height: bottomPad + 16),
+          ],
+        ),
       ),
     );
   }
@@ -1825,7 +2209,11 @@ class _CorrectionPanel extends StatelessWidget {
           // Header
           Row(
             children: [
-              const Icon(Icons.edit_note_rounded, size: 18, color: Color(0xFF059669)),
+              const Icon(
+                Icons.edit_note_rounded,
+                size: 18,
+                color: Color(0xFF059669),
+              ),
               const SizedBox(width: 8),
               Text(
                 l10n.recogV2_correct_title,
@@ -1838,7 +2226,11 @@ class _CorrectionPanel extends StatelessWidget {
               const Spacer(),
               GestureDetector(
                 onTap: onClose,
-                child: const Icon(Icons.close_rounded, size: 20, color: AppColors.textMuted),
+                child: const Icon(
+                  Icons.close_rounded,
+                  size: 20,
+                  color: AppColors.textMuted,
+                ),
               ),
             ],
           ),
@@ -1857,14 +2249,20 @@ class _CorrectionPanel extends StatelessWidget {
                   onSubmitted: (_) => onSend(),
                   decoration: InputDecoration(
                     hintText: l10n.recogV2_correct_hint,
-                    hintStyle: TextStyle(fontSize: 13, color: NutrientColors.tertiary),
+                    hintStyle: TextStyle(
+                      fontSize: 13,
+                      color: NutrientColors.tertiary,
+                    ),
                     filled: true,
                     fillColor: NutrientColors.bg,
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
                       borderSide: BorderSide.none,
                     ),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
                   ),
                 ),
               ),
@@ -1885,10 +2283,15 @@ class _CorrectionPanel extends StatelessWidget {
                       ? const Padding(
                           padding: EdgeInsets.all(12),
                           child: CircularProgressIndicator(
-                              strokeWidth: 2, color: Colors.white),
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
                         )
-                      : const Icon(Icons.send_rounded,
-                          color: Colors.white, size: 20),
+                      : const Icon(
+                          Icons.send_rounded,
+                          color: Colors.white,
+                          size: 20,
+                        ),
                 ),
               ),
             ],

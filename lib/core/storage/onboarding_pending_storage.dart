@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../feedback/secure_uuid.dart';
 
 class OnboardingPendingData {
   final int? age;
@@ -11,8 +12,11 @@ class OnboardingPendingData {
   final List<String> healthConditions;
   final String dietType;
   final String? foodRestrictions;
+  final List<String> restrictionTagIds;
   final List<String> goals;
   final double? weightLossSpeedKgPerWeek;
+  final String? submissionId;
+  final String? feedbackTargetId;
 
   const OnboardingPendingData({
     this.age,
@@ -24,8 +28,11 @@ class OnboardingPendingData {
     this.healthConditions = const ['none'],
     this.dietType = 'none',
     this.foodRestrictions,
+    this.restrictionTagIds = const [],
     this.goals = const [],
     this.weightLossSpeedKgPerWeek,
+    this.submissionId,
+    this.feedbackTargetId,
   });
 
   OnboardingPendingData copyWith({
@@ -38,8 +45,11 @@ class OnboardingPendingData {
     List<String>? healthConditions,
     String? dietType,
     String? foodRestrictions,
+    List<String>? restrictionTagIds,
     List<String>? goals,
     double? weightLossSpeedKgPerWeek,
+    String? submissionId,
+    String? feedbackTargetId,
   }) => OnboardingPendingData(
     age: age ?? this.age,
     height: height ?? this.height,
@@ -50,9 +60,12 @@ class OnboardingPendingData {
     healthConditions: healthConditions ?? this.healthConditions,
     dietType: dietType ?? this.dietType,
     foodRestrictions: foodRestrictions ?? this.foodRestrictions,
+    restrictionTagIds: restrictionTagIds ?? this.restrictionTagIds,
     goals: goals ?? this.goals,
     weightLossSpeedKgPerWeek:
         weightLossSpeedKgPerWeek ?? this.weightLossSpeedKgPerWeek,
+    submissionId: submissionId ?? this.submissionId,
+    feedbackTargetId: feedbackTargetId ?? this.feedbackTargetId,
   );
 
   Map<String, dynamic> toJson() => {
@@ -66,12 +79,20 @@ class OnboardingPendingData {
     'diet_type': dietType,
     if (foodRestrictions != null && foodRestrictions!.isNotEmpty)
       'food_restrictions': foodRestrictions,
+    'restriction_tag_ids': restrictionTagIds,
     'goals': goals,
     if (weightLossSpeedKgPerWeek != null)
       'weight_loss_speed': weightLossSpeedKgPerWeek,
+    if (submissionId != null) 'submission_id': submissionId,
+    if (feedbackTargetId != null) 'feedback_target_id': feedbackTargetId,
   };
 
-  Map<String, dynamic> toRequestBody() => toJson();
+  Map<String, dynamic> toRequestBody() {
+    final body = toJson();
+    body.remove('feedback_target_id');
+    body.remove('restriction_tag_ids');
+    return body;
+  }
 
   factory OnboardingPendingData.fromJson(
     Map<String, dynamic> json,
@@ -89,19 +110,41 @@ class OnboardingPendingData {
         const ['none'],
     dietType: json['diet_type'] as String? ?? 'none',
     foodRestrictions: json['food_restrictions'] as String?,
+    restrictionTagIds:
+        (json['restriction_tag_ids'] as List<dynamic>?)
+            ?.map((e) => e as String)
+            .toList() ??
+        const [],
     goals:
         (json['goals'] as List<dynamic>?)?.map((e) => e as String).toList() ??
         const [],
     weightLossSpeedKgPerWeek: (json['weight_loss_speed'] as num?)?.toDouble(),
+    submissionId: json['submission_id'] as String?,
+    feedbackTargetId: json['feedback_target_id'] as String?,
   );
 }
 
 class OnboardingPendingStorage {
   static const _key = 'onboarding_pending';
+  static const _lastServerTargetKey = 'onboarding_last_server_target';
 
   static Future<void> save(OnboardingPendingData data) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_key, jsonEncode(data.toJson()));
+    String? existingSubmissionId;
+    final existingRaw = prefs.getString(_key);
+    if (existingRaw != null) {
+      try {
+        existingSubmissionId =
+            (jsonDecode(existingRaw) as Map<String, dynamic>)['submission_id']
+                as String?;
+      } catch (_) {
+        // Replace corrupt data with a fresh stable submission identifier.
+      }
+    }
+    final stable = data.submissionId == null
+        ? data.copyWith(submissionId: existingSubmissionId ?? SecureUuid.v4())
+        : data;
+    await prefs.setString(_key, jsonEncode(stable.toJson()));
   }
 
   static Future<OnboardingPendingData?> read() async {
@@ -120,5 +163,20 @@ class OnboardingPendingStorage {
   static Future<void> clear() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_key);
+  }
+
+  static Future<void> saveLastServerTarget(String id) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_lastServerTargetKey, id);
+  }
+
+  static Future<void> saveFeedbackTarget(String id) async {
+    final pending = await read();
+    if (pending != null) await save(pending.copyWith(feedbackTargetId: id));
+  }
+
+  static Future<String?> readLastServerTarget() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_lastServerTargetKey);
   }
 }

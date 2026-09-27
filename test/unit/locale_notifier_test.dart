@@ -33,48 +33,49 @@ void main() {
       expect(notifier.state, equals(const Locale('en')));
     });
 
-    test('init_fallback_en — unsupported code in SP falls back to "en"',
-        () async {
-      // An unsupported code (e.g. leftover garbage) should not crash and must
-      // fall back to EN (the constructor default).  The system locale check
-      // cannot be mocked in unit tests without a Flutter engine, so this test
-      // validates the SP-unsupported branch specifically.
-      SharedPreferences.setMockInitialValues({'app_locale': 'fr'});
+    test(
+      'init_fallback_en — unsupported code in SP falls back to "en"',
+      () async {
+        // An unsupported code (e.g. leftover garbage) should not crash and must
+        // fall back to EN (the constructor default).  The system locale check
+        // cannot be mocked in unit tests without a Flutter engine, so this test
+        // validates the SP-unsupported branch specifically.
+        SharedPreferences.setMockInitialValues({'app_locale': 'fr'});
 
-      final notifier = LocaleNotifier();
-      await Future<void>.delayed(Duration.zero);
+        final notifier = LocaleNotifier();
+        await Future<void>.delayed(Duration.zero);
 
-      // 'fr' is not in _supportedCodes → remains at the constructor default.
-      expect(notifier.state, equals(const Locale('en')));
-    });
+        // 'fr' is not in _supportedCodes → remains at the constructor default.
+        expect(notifier.state, equals(const Locale('en')));
+      },
+    );
 
-    test('no_sp_entry — stays at constructor default "en" when SP is empty',
-        () async {
-      SharedPreferences.setMockInitialValues({});
+    test(
+      'no_sp_entry — stays at constructor default "en" when SP is empty',
+      () async {
+        SharedPreferences.setMockInitialValues({});
 
-      final notifier = LocaleNotifier();
-      await Future<void>.delayed(Duration.zero);
+        final notifier = LocaleNotifier();
+        await Future<void>.delayed(Duration.zero);
 
-      // PlatformDispatcher.instance.locale is 'en' in the test environment,
-      // so result is 'en' either by system-locale match or by fallback.
-      expect(
-        notifier.state.languageCode,
-        anyOf('en', 'ru'), // depends on test-runner system locale
-      );
-    });
+        expect(notifier.state, equals(const Locale('en')));
+      },
+    );
 
-    test('setLocale_saves_to_sp — persists chosen locale to SharedPreferences',
-        () async {
-      SharedPreferences.setMockInitialValues({});
-      final notifier = LocaleNotifier();
-      await Future<void>.delayed(Duration.zero);
+    test(
+      'setLocale_saves_to_sp — persists chosen locale to SharedPreferences',
+      () async {
+        SharedPreferences.setMockInitialValues({});
+        final notifier = LocaleNotifier();
+        await Future<void>.delayed(Duration.zero);
 
-      await notifier.setLocale(const Locale('ru'));
+        await notifier.setLocale(const Locale('ru'));
 
-      final prefs = await SharedPreferences.getInstance();
-      expect(prefs.getString('app_locale'), equals('ru'));
-      expect(notifier.state, equals(const Locale('ru')));
-    });
+        final prefs = await SharedPreferences.getInstance();
+        expect(prefs.getString('app_locale'), equals('ru'));
+        expect(notifier.state, equals(const Locale('ru')));
+      },
+    );
 
     test('setLocale_en — persists "en" to SharedPreferences', () async {
       SharedPreferences.setMockInitialValues({'app_locale': 'ru'});
@@ -88,23 +89,27 @@ void main() {
       expect(notifier.state, equals(const Locale('en')));
     });
 
-    test('setLocale_triggers_rebuild — listener is called on state change',
-        () async {
-      SharedPreferences.setMockInitialValues({});
+    test(
+      'setLocale_triggers_rebuild — listener is called on state change',
+      () async {
+        SharedPreferences.setMockInitialValues({});
 
-      final container = ProviderContainer();
-      addTearDown(container.dispose);
+        final container = ProviderContainer();
+        addTearDown(container.dispose);
 
-      int callCount = 0;
-      container.listen<Locale>(localeProvider, (_, __) => callCount++);
+        int callCount = 0;
+        container.listen<Locale>(localeProvider, (_, __) => callCount++);
 
-      // Allow the async _load() to complete before we trigger a change.
-      await Future<void>.delayed(Duration.zero);
+        // Allow the async _load() to complete before we trigger a change.
+        await Future<void>.delayed(Duration.zero);
 
-      await container.read(localeProvider.notifier).setLocale(const Locale('ru'));
+        await container
+            .read(localeProvider.notifier)
+            .setLocale(const Locale('ru'));
 
-      expect(callCount, greaterThanOrEqualTo(1));
-      expect(container.read(localeProvider), equals(const Locale('ru')));
-    });
+        expect(callCount, greaterThanOrEqualTo(1));
+        expect(container.read(localeProvider), equals(const Locale('ru')));
+      },
+    );
   });
 }

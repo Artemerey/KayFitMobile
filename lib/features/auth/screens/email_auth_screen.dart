@@ -1,14 +1,11 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:kayfit/core/analytics/analytics_service.dart';
-import 'package:kayfit/core/api/api_client.dart';
-import 'package:kayfit/core/auth/auth_provider.dart';
-import 'package:kayfit/core/auth/onboarding_sync.dart';
+import 'package:kayfit/core/auth/auth_handoff_coordinator.dart';
+import 'package:kayfit/core/auth/social_auth_service.dart';
 import 'package:kayfit/core/i18n/generated/app_localizations.dart';
-import 'package:kayfit/features/dashboard/providers/dashboard_provider.dart';
-import 'package:kayfit/features/way_to_goal/providers/way_to_goal_provider.dart';
-import 'package:kayfit/router.dart';
 import 'package:kayfit/shared/theme/app_theme.dart';
 
 // ─── Screen ────────────────────────────────────────────────────────────────────
@@ -168,14 +165,22 @@ class _TabToggle extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _TabChip(label: AppLocalizations.of(context)!.auth_tab_login, active: isLogin, onTap: () {
-            AnalyticsService.authTabSwitched('login');
-            onToggle(true);
-          }),
-          _TabChip(label: AppLocalizations.of(context)!.auth_tab_register, active: !isLogin, onTap: () {
-            AnalyticsService.authTabSwitched('register');
-            onToggle(false);
-          }),
+          _TabChip(
+            label: AppLocalizations.of(context)!.auth_tab_login,
+            active: isLogin,
+            onTap: () {
+              AnalyticsService.authTabSwitched('login');
+              onToggle(true);
+            },
+          ),
+          _TabChip(
+            label: AppLocalizations.of(context)!.auth_tab_register,
+            active: !isLogin,
+            onTap: () {
+              AnalyticsService.authTabSwitched('register');
+              onToggle(false);
+            },
+          ),
         ],
       ),
     );
@@ -187,7 +192,11 @@ class _TabChip extends StatelessWidget {
   final bool active;
   final VoidCallback onTap;
 
-  const _TabChip({required this.label, required this.active, required this.onTap});
+  const _TabChip({
+    required this.label,
+    required this.active,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -293,14 +302,19 @@ class _OBTextFieldState extends State<_OBTextField> {
         suffixIcon: widget.onToggleObscure != null
             ? IconButton(
                 icon: Icon(
-                  widget.obscure ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+                  widget.obscure
+                      ? Icons.visibility_off_rounded
+                      : Icons.visibility_rounded,
                   color: AppColors.textMuted,
                   size: 20,
                 ),
                 onPressed: widget.onToggleObscure,
               )
             : null,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 16,
+        ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
           borderSide: const BorderSide(color: OBColors.border, width: 1.5),
@@ -408,21 +422,14 @@ class _LoginFormState extends ConsumerState<_LoginForm> {
     setState(() => _loading = true);
     AnalyticsService.loginAttempted('email');
     try {
-      final resp = await apiDio.post(
-        '/api/v1/auth/login',
-        data: {
-          'email': _emailCtrl.text.trim(),
-          'password': _passwordCtrl.text,
-        },
-      );
-      final data = resp.data as Map<String, dynamic>;
-      await secureTokenStorage.saveTokens(TokenPair(
-        accessToken: data['access_token'] as String,
-        refreshToken: data['refresh_token'] as String,
-        expiresAt: DateTime.now(), // unknown — trigger immediate refresh
-      ));
+      await ref
+          .read(authHandoffCoordinatorProvider.notifier)
+          .authenticateWithEmail(
+            source: AuthHandoffSource.emailLogin,
+            email: _emailCtrl.text.trim(),
+            password: _passwordCtrl.text,
+          );
       AnalyticsService.loginSuccess('email');
-      await _afterLogin();
     } on DioException catch (e) {
       final reason = _extractDetail(e);
       AnalyticsService.loginFailed('email', reason);
@@ -435,32 +442,16 @@ class _LoginFormState extends ConsumerState<_LoginForm> {
     }
   }
 
-  Future<void> _afterLogin() async {
-    final token = await secureTokenStorage.loadAccessToken();
-    if (token == null || !mounted) return;
-    final hadPending = await syncOnboardingPending();
-    await markOnboardingDone(ref);
-    if (!mounted) return;
-    if (hadPending) {
-      // User just finished onboarding and saw the plan there — do NOT redirect
-      // to /way-to-goal (caused duplicate "Your plan is ready" screens).
-      // Only invalidate caches so the dashboard reflects fresh server data.
-      ref.invalidate(calculationResultProvider);
-      ref.invalidate(todayStatsProvider);
-    }
-    await ref.read(authNotifierProvider.notifier).refreshUser();
-    AnalyticsService.setUserId(_emailCtrl.text.trim());
-    AnalyticsService.setUserProfile(email: _emailCtrl.text.trim());
-  }
-
   void _showError(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg),
-      backgroundColor: AppColors.accentOver,
-      behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-    ));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: AppColors.accentOver,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
   }
 
   @override
@@ -549,15 +540,15 @@ class _RegisterFormState extends ConsumerState<_RegisterForm> {
       final username = _usernameCtrl.text.trim();
       if (username.isNotEmpty) body['username'] = username;
 
-      final resp = await apiDio.post('/api/v1/auth/register', data: body);
-      final data = resp.data as Map<String, dynamic>;
-      await secureTokenStorage.saveTokens(TokenPair(
-        accessToken: data['access_token'] as String,
-        refreshToken: data['refresh_token'] as String,
-        expiresAt: DateTime.now(), // unknown — trigger immediate refresh
-      ));
+      await ref
+          .read(authHandoffCoordinatorProvider.notifier)
+          .authenticateWithEmail(
+            source: AuthHandoffSource.emailRegistration,
+            email: _emailCtrl.text.trim(),
+            password: _passwordCtrl.text,
+            username: username,
+          );
       AnalyticsService.registerSuccess();
-      await _afterLogin();
     } on DioException catch (e) {
       final reason = _extractDetail(e);
       AnalyticsService.registerFailed(reason);
@@ -570,35 +561,42 @@ class _RegisterFormState extends ConsumerState<_RegisterForm> {
     }
   }
 
-  Future<void> _afterLogin() async {
-    final token = await secureTokenStorage.loadAccessToken();
-    if (token == null || !mounted) return;
-    final hadPending = await syncOnboardingPending();
-    await markOnboardingDone(ref);
-    if (!mounted) return;
-    if (hadPending) {
-      // User just finished onboarding and saw the plan there — do NOT redirect
-      // to /way-to-goal (caused duplicate "Your plan is ready" screens).
-      // Only invalidate caches so the dashboard reflects fresh server data.
-      ref.invalidate(calculationResultProvider);
-      ref.invalidate(todayStatsProvider);
+  Future<void> _registerWithApple() async {
+    if (_loading) return;
+    setState(() => _loading = true);
+    AnalyticsService.registerAttempted();
+    AnalyticsService.loginMethodSelected('apple_registration');
+    try {
+      // The backend Apple endpoint is an authenticated upsert: a new Apple
+      // subject creates an account, while a returning subject signs in.
+      await ref
+          .read(authHandoffCoordinatorProvider.notifier)
+          .signInWithApple(source: AuthHandoffSource.appleRegistration);
+      AnalyticsService.registerSuccess();
+    } on SignInCancelledException {
+      // Cancellation is not a failed registration.
+    } on DioException catch (e) {
+      final reason = _extractDetail(e);
+      AnalyticsService.registerFailed(reason);
+      _showError(reason);
+    } catch (e) {
+      AnalyticsService.registerFailed('$e');
+      _showError('$e');
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
-    await ref.read(authNotifierProvider.notifier).refreshUser();
-    AnalyticsService.setUserId(_emailCtrl.text.trim());
-    AnalyticsService.setUserProfile(
-      email: _emailCtrl.text.trim(),
-      name: _usernameCtrl.text.trim().isNotEmpty ? _usernameCtrl.text.trim() : null,
-    );
   }
 
   void _showError(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg),
-      backgroundColor: AppColors.accentOver,
-      behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-    ));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: AppColors.accentOver,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
   }
 
   @override
@@ -609,6 +607,31 @@ class _RegisterFormState extends ConsumerState<_RegisterForm> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (Theme.of(context).platform == TargetPlatform.iOS) ...[
+            SignInWithAppleButton(
+              key: const Key('register_with_apple'),
+              onPressed: _loading ? () {} : _registerWithApple,
+              text: l10n.auth_apple_register,
+              height: 54,
+              borderRadius: const BorderRadius.all(Radius.circular(12)),
+              style: SignInWithAppleButtonStyle.black,
+            ),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                const Expanded(child: Divider()),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Text(
+                    l10n.auth_or_email,
+                    style: const TextStyle(color: AppColors.textMuted),
+                  ),
+                ),
+                const Expanded(child: Divider()),
+              ],
+            ),
+            const SizedBox(height: 20),
+          ],
           _OBTextField(
             controller: _emailCtrl,
             label: 'Email',
@@ -646,11 +669,13 @@ class _RegisterFormState extends ConsumerState<_RegisterForm> {
             icon: Icons.lock_outline_rounded,
             textInputAction: TextInputAction.done,
             obscure: _obscureConfirm,
-            onToggleObscure: () => setState(() => _obscureConfirm = !_obscureConfirm),
+            onToggleObscure: () =>
+                setState(() => _obscureConfirm = !_obscureConfirm),
             onEditingComplete: _submit,
             validator: (v) {
               if (v == null || v.isEmpty) return l10n.auth_err_confirm_password;
-              if (v != _passwordCtrl.text) return l10n.auth_err_passwords_no_match;
+              if (v != _passwordCtrl.text)
+                return l10n.auth_err_passwords_no_match;
               return null;
             },
           ),

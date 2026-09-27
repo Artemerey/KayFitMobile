@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:dio/dio.dart' show Options;
@@ -9,6 +10,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:kayfit/core/analytics/analytics_service.dart';
 import 'package:kayfit/core/api/api_client.dart';
+import 'package:kayfit/core/auth/auth_provider.dart';
+import 'package:kayfit/core/feedback/feedback_models.dart';
+import 'package:kayfit/core/feedback/feedback_presenter.dart';
 import 'package:kayfit/core/i18n/generated/app_localizations.dart';
 import 'package:kayfit/core/ai_consent/ai_consent_provider.dart';
 import 'package:kayfit/shared/theme/app_theme.dart';
@@ -145,6 +149,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       final reply = ChatMessage.fromJson(
         resp.data['message'] as Map<String, dynamic>,
       );
+      if (!mounted) return;
       setState(() {
         _messages.removeLast();
         _messages.add(reply);
@@ -153,6 +158,23 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         AnalyticsService.chatResponseReceived(_messages.length);
       } catch (_) {}
       _scrollToBottom();
+      final mealAdded = reply.mealAdded;
+      final userId = ref.read(authNotifierProvider).valueOrNull?.id;
+      if (mealAdded?.feedbackTargetId != null && userId != null) {
+        unawaited(
+          showMealFeedbackPrompt(
+            context: context,
+            targetId: mealAdded!.feedbackTargetId!,
+            source: FeedbackSource.chat,
+            userId: userId,
+            subjectLabel: mealAdded.name,
+            aggregateContext: {
+              'item_count': 1,
+              'total_calories_rounded': mealAdded.calories.round(),
+            },
+          ),
+        );
+      }
     } catch (_) {
       setState(() {
         _messages.removeLast();

@@ -1,7 +1,7 @@
 name: kayfit
 description: "Kayfit — calorie and nutrition tracker"
 publish_to: 'none'
-version: 1.3.1+11
+version: 1.3.2+16
 
 environment:
   sdk: ^3.11.1
@@ -44,7 +44,7 @@ dependencies:
   permission_handler: ^11.3.0
 
   # Barcode scanning
-  mobile_scanner: ^6.0.0
+  mobile_scanner: ^7.4.0
 
   # Storage
   shared_preferences: ^2.2.0
@@ -75,6 +75,7 @@ dependencies:
   # builds — Flutter excludes dev_dependency native modules from release,
   # which otherwise breaks GeneratedPluginRegistrant on Android.
   flutter_native_splash: ^2.4.0
+  package_info_plus: ^9.0.1
 
 dev_dependencies:
   flutter_test:

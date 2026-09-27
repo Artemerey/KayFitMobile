@@ -46,9 +46,10 @@ class SocialAuthService {
       throw Exception('Apple did not return an identity_token');
     }
 
-    final nameParts = [credential.givenName, credential.familyName]
-        .where((s) => s != null && s.isNotEmpty)
-        .toList();
+    final nameParts = [
+      credential.givenName,
+      credential.familyName,
+    ].where((s) => s != null && s.isNotEmpty).toList();
     final name = nameParts.isEmpty ? null : nameParts.join(' ');
 
     final deviceId = await _getDeviceId();
@@ -70,9 +71,10 @@ class SocialAuthService {
     var id = prefs.getString(key);
     if (id == null) {
       final rng = Random.secure();
-      id = List.generate(16, (_) => rng.nextInt(256))
-          .map((b) => b.toRadixString(16).padLeft(2, '0'))
-          .join();
+      id = List.generate(
+        16,
+        (_) => rng.nextInt(256),
+      ).map((b) => b.toRadixString(16).padLeft(2, '0')).join();
       await prefs.setString(key, id);
     }
     return id;

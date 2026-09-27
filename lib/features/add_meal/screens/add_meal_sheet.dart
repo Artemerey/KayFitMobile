@@ -5,7 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:kayfit/core/analytics/analytics_service.dart';
+import 'package:kayfit/core/feedback/feedback_models.dart';
 import 'package:kayfit/core/i18n/generated/app_localizations.dart';
+import 'package:kayfit/shared/models/recognition_clarification.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:record/record.dart';
@@ -23,14 +25,14 @@ import 'recognition_result_sheet_kf2.dart';
 import 'recognition_result_sheet_v2.dart';
 
 // KF2_PREVIEW: set to false via --dart-define=KF2_PREVIEW=false to fall back.
-const _useKF2 =
-    bool.fromEnvironment('KF2_PREVIEW', defaultValue: true);
+const _useKF2 = bool.fromEnvironment('KF2_PREVIEW', defaultValue: true);
 
 // KF2_RECOG: when true the Photo method opens the KF2 full-screen capture flow.
 // Activate with: flutter run --dart-define=KF2_RECOG=true
 const _useKF2Recog = bool.fromEnvironment('KF2_RECOG', defaultValue: false);
 
 enum _InputMode { choose, text, voice, photo }
+
 enum _LoadingType { none, voice, photo, parsing }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -77,7 +79,10 @@ class _AddMealSheetState extends ConsumerState<AddMealSheet>
       vsync: this,
       duration: const Duration(milliseconds: 420),
     );
-    _sheetFade = CurvedAnimation(parent: _sheetCtrl, curve: Curves.easeOutCubic);
+    _sheetFade = CurvedAnimation(
+      parent: _sheetCtrl,
+      curve: Curves.easeOutCubic,
+    );
     _sheetSlide = Tween<Offset>(
       begin: const Offset(0, 0.06),
       end: Offset.zero,
@@ -110,7 +115,9 @@ class _AddMealSheetState extends ConsumerState<AddMealSheet>
     setState(() => _mode = mode);
     _modeCtrl.forward();
     if (mode == _InputMode.text) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _textFocus.requestFocus());
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _textFocus.requestFocus(),
+      );
     }
   }
 
@@ -122,21 +129,28 @@ class _AddMealSheetState extends ConsumerState<AddMealSheet>
     if (saved == true && mounted) Navigator.pop(context);
   }
 
-  Future<void> _parseText(String text, String lang,
-      {bool manageLoading = true}) async {
+  Future<void> _parseText(
+    String text,
+    String lang, {
+    bool manageLoading = true,
+    FeedbackSource feedbackSource = FeedbackSource.text,
+  }) async {
     if (manageLoading) setState(() => _loadingType = _LoadingType.parsing);
+    final recognitionTimer = Stopwatch()..start();
     try {
       final resp = await apiDio.post(
         '/api/v2/parse_meal_suggestions',
         data: {'text': text, 'language': lang},
-        options: Options(
-          receiveTimeout: const Duration(seconds: 90),
-        ),
+        options: Options(receiveTimeout: const Duration(seconds: 90)),
       );
-      final rawItems = (resp.data['items'] as List<dynamic>?)
+      final rawItems =
+          (resp.data['items'] as List<dynamic>?)
               ?.map((e) => e as Map<String, dynamic>)
               .toList() ??
           [];
+      final clarification = RecognitionClarification.fromJson(
+        resp.data['clarification'],
+      );
 
       if (!mounted) return;
 
@@ -169,12 +183,18 @@ class _AddMealSheetState extends ConsumerState<AddMealSheet>
                       ingredients: v2items,
                       mealDate: widget.mealDate,
                       originalText: text,
+                      feedbackSource: feedbackSource,
+                      recognitionDuration: recognitionTimer.elapsed,
+                      clarification: clarification,
                     )
                   : RecognitionResultSheetV2(
                       dishName: summaryName,
                       ingredients: v2items,
                       mealDate: widget.mealDate,
                       originalText: text,
+                      feedbackSource: feedbackSource,
+                      recognitionDuration: recognitionTimer.elapsed,
+                      clarification: clarification,
                     ),
             );
           },
@@ -187,27 +207,32 @@ class _AddMealSheetState extends ConsumerState<AddMealSheet>
       }
     } catch (e) {
       _handleError(e);
-      if (manageLoading && mounted) setState(() => _loadingType = _LoadingType.none);
+      if (manageLoading && mounted)
+        setState(() => _loadingType = _LoadingType.none);
       return;
     }
-    if (manageLoading && mounted) setState(() => _loadingType = _LoadingType.none);
+    if (manageLoading && mounted)
+      setState(() => _loadingType = _LoadingType.none);
   }
 
   Future<void> _startRecording() async {
     final status = await Permission.microphone.request();
     if (!mounted) return;
     if (!status.isGranted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(AppLocalizations.of(context)!.addMeal_mic_denied),
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: AppColors.accentOver,
-        action: status.isPermanentlyDenied
-            ? SnackBarAction(
-                label: AppLocalizations.of(context)!.addMeal_open_settings,
-                textColor: Colors.white,
-                onPressed: openAppSettings)
-            : null,
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(AppLocalizations.of(context)!.addMeal_mic_denied),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: AppColors.accentOver,
+          action: status.isPermanentlyDenied
+              ? SnackBarAction(
+                  label: AppLocalizations.of(context)!.addMeal_open_settings,
+                  textColor: Colors.white,
+                  onPressed: openAppSettings,
+                )
+              : null,
+        ),
+      );
       _switchMode(_InputMode.choose);
       return;
     }
@@ -219,8 +244,9 @@ class _AddMealSheetState extends ConsumerState<AddMealSheet>
     final dir = await getTemporaryDirectory();
     _recordPath = '${dir.path}/meal_voice.m4a';
     await _recorder.start(
-        const RecordConfig(encoder: AudioEncoder.aacLc),
-        path: _recordPath!);
+      const RecordConfig(encoder: AudioEncoder.aacLc),
+      path: _recordPath!,
+    );
     _recordStart = DateTime.now();
     AnalyticsService.mealVoiceRecordStarted();
     if (mounted) setState(() => _isRecording = true);
@@ -238,18 +264,27 @@ class _AddMealSheetState extends ConsumerState<AddMealSheet>
     });
     try {
       final form = FormData.fromMap({
-        'audio': await MultipartFile.fromFile(_recordPath!,
-            filename: 'voice.m4a'),
+        'audio': await MultipartFile.fromFile(
+          _recordPath!,
+          filename: 'voice.m4a',
+        ),
       });
-      final resp =
-          await apiDio.post('/api/transcribe?language=$_lang', data: form);
+      final resp = await apiDio.post(
+        '/api/transcribe?language=$_lang',
+        data: form,
+      );
       // Handle both {text: "..."} and plain string responses
       final raw = resp.data;
       final text = raw is Map
           ? (raw['text'] as String? ?? '')
           : (raw?.toString() ?? '');
       if (text.isNotEmpty) {
-        await _parseText(text, _lang, manageLoading: false);
+        await _parseText(
+          text,
+          _lang,
+          manageLoading: false,
+          feedbackSource: FeedbackSource.voice,
+        );
       } else if (mounted) {
         _switchMode(_InputMode.choose);
       }
@@ -283,7 +318,9 @@ class _AddMealSheetState extends ConsumerState<AddMealSheet>
       // image_picker may reuse between captures (same temp path, new content).
       final originalBytes = await file.readAsBytes();
       if (!mounted) return;
-      debugPrint('📸 Original photo: ${file.path} (${originalBytes.length ~/ 1024} KB)');
+      debugPrint(
+        '📸 Original photo: ${file.path} (${originalBytes.length ~/ 1024} KB)',
+      );
 
       // Force-convert any source format (PNG/HEIC/JPEG) to a JPEG that's
       // small enough for fast upload + AI processing on the server.
@@ -313,6 +350,7 @@ class _AddMealSheetState extends ConsumerState<AddMealSheet>
       }
 
       final form = FormData.fromMap({'image': multipart});
+      final recognitionTimer = Stopwatch()..start();
       final resp = await apiDio.post(
         '/api/v2/recognize_photo?language=$lang',
         data: form,
@@ -322,10 +360,15 @@ class _AddMealSheetState extends ConsumerState<AddMealSheet>
         ),
       );
       if (!mounted) return;
-      debugPrint('📸 Recognize response status=${resp.statusCode} '
-          'data=${resp.data}');
+      debugPrint(
+        '📸 Recognize response status=${resp.statusCode} '
+        'data=${resp.data}',
+      );
       final error = resp.data['error'] as String?;
       final rawItems = resp.data['items'] as List<dynamic>?;
+      final clarification = RecognitionClarification.fromJson(
+        resp.data['clarification'],
+      );
       final isFood = resp.data['is_food'] as bool?;
       final notFoodReason = resp.data['not_food_reason'] as String?;
       if (error != null && error.isNotEmpty) {
@@ -356,7 +399,8 @@ class _AddMealSheetState extends ConsumerState<AddMealSheet>
         final items = rawItems.map((e) => e as Map<String, dynamic>).toList();
         final v2items = items.map(ingredientV2FromJson).toList();
 
-        final dishName = resp.data['dish_name'] as String? ??
+        final dishName =
+            resp.data['dish_name'] as String? ??
             items
                 .map((e) => (e['name'] as String?) ?? '')
                 .where((n) => n.isNotEmpty)
@@ -381,12 +425,18 @@ class _AddMealSheetState extends ConsumerState<AddMealSheet>
                       ingredients: v2items,
                       mealDate: widget.mealDate,
                       originalText: null,
+                      feedbackSource: FeedbackSource.photo,
+                      recognitionDuration: recognitionTimer.elapsed,
+                      clarification: clarification,
                     )
                   : RecognitionResultSheetV2(
                       dishName: dishName,
                       ingredients: v2items,
                       mealDate: widget.mealDate,
                       originalText: null,
+                      feedbackSource: FeedbackSource.photo,
+                      recognitionDuration: recognitionTimer.elapsed,
+                      clarification: clarification,
                     ),
             );
           },
@@ -412,7 +462,8 @@ class _AddMealSheetState extends ConsumerState<AddMealSheet>
         behavior: SnackBarBehavior.floating,
         backgroundColor: AppColors.accentOver,
         shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadius.sm)),
+          borderRadius: BorderRadius.circular(AppRadius.sm),
+        ),
       ),
     );
   }
@@ -423,7 +474,8 @@ class _AddMealSheetState extends ConsumerState<AddMealSheet>
     _lang = Localizations.localeOf(context).languageCode;
     final isRu = _lang == 'ru';
 
-    final bottomPad = MediaQuery.of(context).viewInsets.bottom +
+    final bottomPad =
+        MediaQuery.of(context).viewInsets.bottom +
         MediaQuery.of(context).padding.bottom;
 
     return KeyboardDismisser(
@@ -434,8 +486,7 @@ class _AddMealSheetState extends ConsumerState<AddMealSheet>
           child: Container(
             decoration: const BoxDecoration(
               color: AppColors.surface,
-              borderRadius:
-                  BorderRadius.vertical(top: Radius.circular(28)),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
             ),
             child: Stack(
               children: [
@@ -454,120 +505,130 @@ class _AddMealSheetState extends ConsumerState<AddMealSheet>
                           : null,
                     ),
 
-                  // Content
-                  FadeTransition(
-                    opacity: _modeCtrl,
-                    child: AnimatedSize(
-                      duration: const Duration(milliseconds: 280),
-                      curve: Curves.easeOutCubic,
-                      child: Padding(
-                        padding: EdgeInsets.fromLTRB(20, 0, 20, bottomPad + 20),
-                        child: _mode == _InputMode.choose
-                                ? _ChooseView(
-                                    l10n: l10n,
-                                    isRu: isRu,
-                                    onText: () => _switchMode(_InputMode.text),
-                                    onVoice: () async {
-                                      _switchMode(_InputMode.voice);
-                                      Future.delayed(
-                                          const Duration(milliseconds: 350),
-                                          _startRecording);
-                                    },
-                                    onPhoto: () async {
-                                      if (_useKF2Recog) {
-                                        // KF2 full-screen capture flow.
-                                        // Use plain Navigator so the bottom-sheet
-                                        // context is preserved on the back stack.
-                                        final file =
-                                            await Navigator.of(context).push<XFile?>(
-                                          MaterialPageRoute<XFile?>(
-                                            fullscreenDialog: true,
-                                            builder: (_) =>
-                                                const Kf2CaptureScreen(),
-                                          ),
-                                        );
-                                        if (file == null || !mounted) return;
-                                        // Kf2RecognizingScreen handles its own
-                                        // pushReplacement to RecognitionResultSheetKF2
-                                        // and pops with true on save.
-                                        final saved =
-                                            await Navigator.of(context).push<bool>(
-                                          MaterialPageRoute<bool>(
-                                            fullscreenDialog: true,
-                                            builder: (_) =>
-                                                Kf2RecognizingScreen(photo: file),
-                                          ),
-                                        );
-                                        if (saved == true && mounted) {
-                                          Navigator.of(context).pop();
-                                        }
-                                        return;
+                    // Content
+                    FadeTransition(
+                      opacity: _modeCtrl,
+                      child: AnimatedSize(
+                        duration: const Duration(milliseconds: 280),
+                        curve: Curves.easeOutCubic,
+                        child: Padding(
+                          padding: EdgeInsets.fromLTRB(
+                            20,
+                            0,
+                            20,
+                            bottomPad + 20,
+                          ),
+                          child: _mode == _InputMode.choose
+                              ? _ChooseView(
+                                  l10n: l10n,
+                                  isRu: isRu,
+                                  onText: () => _switchMode(_InputMode.text),
+                                  onVoice: () async {
+                                    _switchMode(_InputMode.voice);
+                                    Future.delayed(
+                                      const Duration(milliseconds: 350),
+                                      _startRecording,
+                                    );
+                                  },
+                                  onPhoto: () async {
+                                    if (_useKF2Recog) {
+                                      // KF2 full-screen capture flow.
+                                      // Use plain Navigator so the bottom-sheet
+                                      // context is preserved on the back stack.
+                                      final file = await Navigator.of(context)
+                                          .push<XFile?>(
+                                            MaterialPageRoute<XFile?>(
+                                              fullscreenDialog: true,
+                                              builder: (_) =>
+                                                  const Kf2CaptureScreen(),
+                                            ),
+                                          );
+                                      if (file == null || !mounted) return;
+                                      // Kf2RecognizingScreen handles its own
+                                      // pushReplacement to RecognitionResultSheetKF2
+                                      // and pops with true on save.
+                                      final saved = await Navigator.of(context)
+                                          .push<bool>(
+                                            MaterialPageRoute<bool>(
+                                              fullscreenDialog: true,
+                                              builder: (_) =>
+                                                  Kf2RecognizingScreen(
+                                                    photo: file,
+                                                  ),
+                                            ),
+                                          );
+                                      if (saved == true && mounted) {
+                                        Navigator.of(context).pop();
                                       }
-                                      // Legacy flow ─────────────────────────
-                                      final source =
-                                          await showModalBottomSheet<ImageSource>(
-                                        context: context,
-                                        backgroundColor: Colors.transparent,
-                                        isDismissible: true,
-                                        enableDrag: true,
-                                        showDragHandle: false,
-                                        builder: (_) =>
-                                            _PhotoSourceSheet(l10n: l10n),
-                                      );
-                                      if (source == null) return;
-                                      await _switchMode(_InputMode.photo);
-                                      if (!mounted) return;
-                                      await _pickAndRecognizePhoto(source);
-                                    },
-                                    onBarcode: _openBarcodeScanner,
-                                  )
-                                : _mode == _InputMode.text
-                                    ? _TextView(
-                                        controller: _textController,
-                                        focus: _textFocus,
-                                        l10n: l10n,
-                                        isRu: isRu,
-                                        onParse: () async {
-                                          AnalyticsService.addMealTextSubmitted(_textController.text.length);
-                                          _parseText(_textController.text, _lang);
-                                        },
-                                      )
-                                    : _mode == _InputMode.photo
-                                        ? const SizedBox.shrink()
-                                        : _VoiceView(
-                                            isRecording: _isRecording,
-                                            recordStart: _recordStart,
-                                            l10n: l10n,
-                                            onToggle: _isRecording
-                                                ? _stopRecordingAndTranscribe
-                                                : _startRecording,
-                                          ),
+                                      return;
+                                    }
+                                    // Legacy flow ─────────────────────────
+                                    final source =
+                                        await showModalBottomSheet<ImageSource>(
+                                          context: context,
+                                          backgroundColor: Colors.transparent,
+                                          isDismissible: true,
+                                          enableDrag: true,
+                                          showDragHandle: false,
+                                          builder: (_) =>
+                                              _PhotoSourceSheet(l10n: l10n),
+                                        );
+                                    if (source == null) return;
+                                    await _switchMode(_InputMode.photo);
+                                    if (!mounted) return;
+                                    await _pickAndRecognizePhoto(source);
+                                  },
+                                  onBarcode: _openBarcodeScanner,
+                                )
+                              : _mode == _InputMode.text
+                              ? _TextView(
+                                  controller: _textController,
+                                  focus: _textFocus,
+                                  l10n: l10n,
+                                  isRu: isRu,
+                                  onParse: () async {
+                                    AnalyticsService.addMealTextSubmitted(
+                                      _textController.text.length,
+                                    );
+                                    _parseText(_textController.text, _lang);
+                                  },
+                                )
+                              : _mode == _InputMode.photo
+                              ? const SizedBox.shrink()
+                              : _VoiceView(
+                                  isRecording: _isRecording,
+                                  recordStart: _recordStart,
+                                  l10n: l10n,
+                                  onToggle: _isRecording
+                                      ? _stopRecordingAndTranscribe
+                                      : _startRecording,
+                                ),
+                        ),
                       ),
                     ),
-                  ),
-                ],
-              ),
-
-              // Loading overlays
-              if (_loadingType == _LoadingType.voice ||
-                  _loadingType == _LoadingType.photo)
-                _RecognizingOverlay(type: _loadingType, l10n: l10n),
-              if (_loadingType == _LoadingType.parsing)
-                const _ParsingOverlay(),
-
-              // Close button (X) in top-right corner
-              if (_loadingType == _LoadingType.none)
-                Positioned(
-                  top: 8,
-                  right: 4,
-                  child: IconButton(
-                    icon: const Icon(Icons.close_rounded),
-                    iconSize: 20,
-                    color: AppColors.textMuted,
-                    tooltip: 'Close',
-                    onPressed: () => Navigator.of(context).pop(),
-                  ),
+                  ],
                 ),
+
+                // Loading overlays
+                if (_loadingType == _LoadingType.voice ||
+                    _loadingType == _LoadingType.photo)
+                  _RecognizingOverlay(type: _loadingType, l10n: l10n),
+                if (_loadingType == _LoadingType.parsing)
+                  const _ParsingOverlay(),
+
+                // Close button (X) in top-right corner
+                if (_loadingType == _LoadingType.none)
+                  Positioned(
+                    top: 8,
+                    right: 4,
+                    child: IconButton(
+                      icon: const Icon(Icons.close_rounded),
+                      iconSize: 20,
+                      color: AppColors.textMuted,
+                      tooltip: 'Close',
+                      onPressed: () => Navigator.of(context).pop(),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -584,14 +645,14 @@ class _AddMealSheetState extends ConsumerState<AddMealSheet>
 class _DragHandle extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
-        width: 40,
-        height: 4,
-        margin: const EdgeInsets.only(top: 12, bottom: 4),
-        decoration: BoxDecoration(
-          color: AppColors.border,
-          borderRadius: BorderRadius.circular(2),
-        ),
-      );
+    width: 40,
+    height: 4,
+    margin: const EdgeInsets.only(top: 12, bottom: 4),
+    decoration: BoxDecoration(
+      color: AppColors.border,
+      borderRadius: BorderRadius.circular(2),
+    ),
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -603,8 +664,11 @@ class _SheetHeader extends StatelessWidget {
   final AppLocalizations l10n;
   final VoidCallback? onBack;
 
-  const _SheetHeader(
-      {required this.mode, required this.l10n, required this.onBack});
+  const _SheetHeader({
+    required this.mode,
+    required this.l10n,
+    required this.onBack,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -622,8 +686,11 @@ class _SheetHeader extends StatelessWidget {
                   color: AppColors.bg,
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.arrow_back_ios_new_rounded,
-                    size: 16, color: AppColors.textMuted),
+                child: const Icon(
+                  Icons.arrow_back_ios_new_rounded,
+                  size: 16,
+                  color: AppColors.textMuted,
+                ),
               ),
             ),
             const SizedBox(width: 12),
@@ -751,13 +818,16 @@ class _ChooseViewState extends State<_ChooseView>
           parent: _stagger,
           curve: Interval(delay, delay + 0.5, curve: Curves.easeOutCubic),
         );
-        final slide = Tween<Offset>(
-          begin: const Offset(0, 0.25),
-          end: Offset.zero,
-        ).animate(CurvedAnimation(
-          parent: _stagger,
-          curve: Interval(delay, delay + 0.5, curve: Curves.easeOutCubic),
-        ));
+        final slide =
+            Tween<Offset>(
+              begin: const Offset(0, 0.25),
+              end: Offset.zero,
+            ).animate(
+              CurvedAnimation(
+                parent: _stagger,
+                curve: Interval(delay, delay + 0.5, curve: Curves.easeOutCubic),
+              ),
+            );
         return Padding(
           padding: const EdgeInsets.only(bottom: 12),
           child: FadeTransition(
@@ -856,8 +926,11 @@ class _MethodCardState extends State<_MethodCard>
                   width: 56,
                   height: 56,
                   decoration: BoxDecoration(
-                    gradient:
-                        LinearGradient(colors: d.gradient, begin: Alignment.topLeft, end: Alignment.bottomRight),
+                    gradient: LinearGradient(
+                      colors: d.gradient,
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
                     borderRadius: BorderRadius.circular(16),
                     boxShadow: [
                       BoxShadow(
@@ -940,8 +1013,7 @@ class _VoiceView extends StatefulWidget {
   State<_VoiceView> createState() => _VoiceViewState();
 }
 
-class _VoiceViewState extends State<_VoiceView>
-    with TickerProviderStateMixin {
+class _VoiceViewState extends State<_VoiceView> with TickerProviderStateMixin {
   late final AnimationController _pulseCtrl;
   late final AnimationController _waveCtrl;
   late final AnimationController _timerCtrl;
@@ -958,18 +1030,18 @@ class _VoiceViewState extends State<_VoiceView>
       vsync: this,
       duration: const Duration(milliseconds: 800),
     )..repeat();
-    _timerCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 1),
-    )..addListener(() {
-        if (widget.isRecording && widget.recordStart != null) {
-          setState(() {
-            _elapsed =
-                DateTime.now().difference(widget.recordStart!).inSeconds;
-          });
-        }
-      })
-      ..repeat();
+    _timerCtrl =
+        AnimationController(vsync: this, duration: const Duration(seconds: 1))
+          ..addListener(() {
+            if (widget.isRecording && widget.recordStart != null) {
+              setState(() {
+                _elapsed = DateTime.now()
+                    .difference(widget.recordStart!)
+                    .inSeconds;
+              });
+            }
+          })
+          ..repeat();
   }
 
   @override
@@ -1018,12 +1090,37 @@ class _VoiceViewState extends State<_VoiceView>
               children: [
                 // Ripple rings (only when recording)
                 if (recording) ...[
-                  _RippleRing(ctrl: _pulseCtrl, delay: 0.0, maxRadius: 90, color: AppColors.accentOver),
-                  _RippleRing(ctrl: _pulseCtrl, delay: 0.4, maxRadius: 90, color: AppColors.accentOver),
-                  _RippleRing(ctrl: _pulseCtrl, delay: 0.8, maxRadius: 90, color: AppColors.accentOver),
+                  _RippleRing(
+                    ctrl: _pulseCtrl,
+                    delay: 0.0,
+                    maxRadius: 90,
+                    color: AppColors.accentOver,
+                  ),
+                  _RippleRing(
+                    ctrl: _pulseCtrl,
+                    delay: 0.4,
+                    maxRadius: 90,
+                    color: AppColors.accentOver,
+                  ),
+                  _RippleRing(
+                    ctrl: _pulseCtrl,
+                    delay: 0.8,
+                    maxRadius: 90,
+                    color: AppColors.accentOver,
+                  ),
                 ] else ...[
-                  _RippleRing(ctrl: _pulseCtrl, delay: 0.0, maxRadius: 90, color: AppColors.accent),
-                  _RippleRing(ctrl: _pulseCtrl, delay: 0.5, maxRadius: 90, color: AppColors.accent),
+                  _RippleRing(
+                    ctrl: _pulseCtrl,
+                    delay: 0.0,
+                    maxRadius: 90,
+                    color: AppColors.accent,
+                  ),
+                  _RippleRing(
+                    ctrl: _pulseCtrl,
+                    delay: 0.5,
+                    maxRadius: 90,
+                    color: AppColors.accent,
+                  ),
                 ],
 
                 // Main button
@@ -1038,15 +1135,21 @@ class _VoiceViewState extends State<_VoiceView>
                       gradient: LinearGradient(
                         colors: recording
                             ? [const Color(0xFFDC2626), const Color(0xFFEF4444)]
-                            : [const Color(0xFF059669), const Color(0xFF10B981)],
+                            : [
+                                const Color(0xFF059669),
+                                const Color(0xFF10B981),
+                              ],
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                       ),
                       shape: BoxShape.circle,
                       boxShadow: [
                         BoxShadow(
-                          color: (recording ? AppColors.accentOver : AppColors.accent)
-                              .withValues(alpha: 0.45),
+                          color:
+                              (recording
+                                      ? AppColors.accentOver
+                                      : AppColors.accent)
+                                  .withValues(alpha: 0.45),
                           blurRadius: 20,
                           offset: const Offset(0, 6),
                         ),
@@ -1160,7 +1263,8 @@ class _WaveformBars extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.center,
         children: List.generate(count, (i) {
           final phase = (i / count) * 2 * math.pi;
-          final height = 4.0 +
+          final height =
+              4.0 +
               22.0 *
                   (0.5 +
                       0.5 *
@@ -1171,7 +1275,9 @@ class _WaveformBars extends StatelessWidget {
             height: height,
             margin: const EdgeInsets.symmetric(horizontal: 1.5),
             decoration: BoxDecoration(
-              color: AppColors.accentOver.withValues(alpha: 0.7 + 0.3 * (height / 26)),
+              color: AppColors.accentOver.withValues(
+                alpha: 0.7 + 0.3 * (height / 26),
+              ),
               borderRadius: BorderRadius.circular(2),
             ),
           );
@@ -1237,33 +1343,56 @@ class _TextViewState extends State<_TextView> {
         Wrap(
           spacing: 8,
           runSpacing: 6,
-          children: [
-            ru ? 'Гречка 200г, курица 150г' : 'Oatmeal 200g, chicken 150g',
-            ru ? 'Борщ 300мл, хлеб 2 куска' : 'Soup 300ml, 2 bread slices',
-          ].map((hint) => GestureDetector(
-            onTap: () {
-              widget.controller.text = hint;
-              widget.focus.requestFocus();
-            },
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: AppColors.accentSoft,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: AppColors.accent.withValues(alpha: 0.3)),
-              ),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                const Icon(Icons.lightbulb_outline_rounded,
-                    size: 13, color: AppColors.accent),
-                const SizedBox(width: 5),
-                Text(hint,
-                    style: const TextStyle(
-                        fontSize: 12,
-                        color: AppColors.accent,
-                        fontWeight: FontWeight.w500)),
-              ]),
-            ),
-          )).toList(),
+          children:
+              [
+                    ru
+                        ? 'Гречка 200г, курица 150г'
+                        : 'Oatmeal 200g, chicken 150g',
+                    ru
+                        ? 'Борщ 300мл, хлеб 2 куска'
+                        : 'Soup 300ml, 2 bread slices',
+                  ]
+                  .map(
+                    (hint) => GestureDetector(
+                      onTap: () {
+                        widget.controller.text = hint;
+                        widget.focus.requestFocus();
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.accentSoft,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: AppColors.accent.withValues(alpha: 0.3),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.lightbulb_outline_rounded,
+                              size: 13,
+                              color: AppColors.accent,
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              hint,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: AppColors.accent,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  )
+                  .toList(),
         ),
 
         const SizedBox(height: 14),
@@ -1290,7 +1419,10 @@ class _TextViewState extends State<_TextView> {
               contentPadding: const EdgeInsets.all(16),
             ),
             style: const TextStyle(
-                fontSize: 15, color: AppColors.text, height: 1.5),
+              fontSize: 15,
+              color: AppColors.text,
+              height: 1.5,
+            ),
           ),
         ),
 
@@ -1312,7 +1444,8 @@ class _TextViewState extends State<_TextView> {
                         end: Alignment.bottomRight,
                       )
                     : const LinearGradient(
-                        colors: [AppColors.border, AppColors.border]),
+                        colors: [AppColors.border, AppColors.border],
+                      ),
                 borderRadius: BorderRadius.circular(AppRadius.md),
                 boxShadow: _hasText
                     ? [
@@ -1320,7 +1453,7 @@ class _TextViewState extends State<_TextView> {
                           color: AppColors.accent.withValues(alpha: 0.3),
                           blurRadius: 12,
                           offset: const Offset(0, 4),
-                        )
+                        ),
                       ]
                     : null,
               ),
@@ -1334,8 +1467,11 @@ class _TextViewState extends State<_TextView> {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.auto_awesome_rounded,
-                            color: Colors.white, size: 18),
+                        const Icon(
+                          Icons.auto_awesome_rounded,
+                          color: Colors.white,
+                          size: 18,
+                        ),
                         const SizedBox(width: 8),
                         Text(
                           l10n.addMeal_recognize_ai,
@@ -1410,8 +1546,7 @@ class _RecognizingOverlayState extends State<_RecognizingOverlay>
           AnimatedBuilder(
             animation: _ctrl,
             builder: (_, __) {
-              final scale =
-                  1.0 + 0.08 * math.sin(_ctrl.value * 2 * math.pi);
+              final scale = 1.0 + 0.08 * math.sin(_ctrl.value * 2 * math.pi);
               return Transform.scale(
                 scale: scale,
                 child: Container(
@@ -1428,10 +1563,11 @@ class _RecognizingOverlayState extends State<_RecognizingOverlay>
                     shape: BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
-                        color: (isVoice
-                                ? AppColors.accent
-                                : const Color(0xFF7C3AED))
-                            .withValues(alpha: 0.4),
+                        color:
+                            (isVoice
+                                    ? AppColors.accent
+                                    : const Color(0xFF7C3AED))
+                                .withValues(alpha: 0.4),
                         blurRadius: 20,
                         offset: const Offset(0, 6),
                       ),
@@ -1461,10 +1597,7 @@ class _RecognizingOverlayState extends State<_RecognizingOverlay>
           const SizedBox(height: 6),
           Text(
             AppLocalizations.of(context)!.addMeal_ai_analyzing,
-            style: const TextStyle(
-              fontSize: 14,
-              color: AppColors.textMuted,
-            ),
+            style: const TextStyle(fontSize: 14, color: AppColors.textMuted),
           ),
           const SizedBox(height: 20),
           // Animated dots
@@ -1571,7 +1704,8 @@ class _ParsingOverlayState extends State<_ParsingOverlay>
                 AnimatedBuilder(
                   animation: _dotCtrl,
                   builder: (_, __) {
-                    final scale = 1.0 + 0.07 * math.sin(_dotCtrl.value * 2 * math.pi);
+                    final scale =
+                        1.0 + 0.07 * math.sin(_dotCtrl.value * 2 * math.pi);
                     return Transform.scale(
                       scale: scale,
                       child: Container(
@@ -1592,7 +1726,11 @@ class _ParsingOverlayState extends State<_ParsingOverlay>
                             ),
                           ],
                         ),
-                        child: const Icon(Icons.manage_search_rounded, color: Colors.white, size: 26),
+                        child: const Icon(
+                          Icons.manage_search_rounded,
+                          color: Colors.white,
+                          size: 26,
+                        ),
                       ),
                     );
                   },
@@ -1650,9 +1788,9 @@ class _ParsingOverlayState extends State<_ParsingOverlay>
                                   animation: _dotCtrl,
                                   builder: (_, __) =>
                                       const CircularProgressIndicator(
-                                    strokeWidth: 2.2,
-                                    color: AppColors.accent,
-                                  ),
+                                        strokeWidth: 2.2,
+                                        color: AppColors.accent,
+                                      ),
                                 )
                               : Icon(
                                   isDone
@@ -1675,8 +1813,8 @@ class _ParsingOverlayState extends State<_ParsingOverlay>
                             color: isCurrent
                                 ? AppColors.text
                                 : isDone
-                                    ? AppColors.textMuted
-                                    : AppColors.border,
+                                ? AppColors.textMuted
+                                : AppColors.border,
                           ),
                         ),
                       ],
@@ -1708,7 +1846,11 @@ class _PhotoSourceSheet extends StatelessWidget {
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
       padding: EdgeInsets.fromLTRB(
-          20, 16, 20, MediaQuery.of(context).padding.bottom + 20),
+        20,
+        16,
+        20,
+        MediaQuery.of(context).padding.bottom + 20,
+      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1723,8 +1865,7 @@ class _PhotoSourceSheet extends StatelessWidget {
           ),
           Text(
             l10n.addMeal_photo,
-            style: const TextStyle(
-                fontSize: 18, fontWeight: FontWeight.w700),
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 16),
           _PhotoSourceBtn(
@@ -1743,9 +1884,10 @@ class _PhotoSourceSheet extends StatelessWidget {
           const SizedBox(height: 6),
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text(l10n.common_cancel,
-                style: const TextStyle(
-                    color: AppColors.textMuted, fontSize: 15)),
+            child: Text(
+              l10n.common_cancel,
+              style: const TextStyle(color: AppColors.textMuted, fontSize: 15),
+            ),
           ),
         ],
       ),
@@ -1840,4 +1982,3 @@ class _PhotoSourceBtnState extends State<_PhotoSourceBtn>
     );
   }
 }
-

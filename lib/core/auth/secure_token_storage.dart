@@ -12,6 +12,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 
 import 'token_pair.dart';
 
@@ -40,6 +41,7 @@ abstract interface class SecureTokenStorage {
 const _kAccessToken = 'kayfit.access_token';
 const _kRefreshToken = 'kayfit.refresh_token';
 const _kExpiresAt = 'kayfit.expires_at';
+const _kTokenPair = 'kayfit.token_pair.v2';
 
 // Legacy SharedPreferences keys used before SecureTokenStorage was introduced.
 // Only read during one-time migration; never written to.
@@ -55,7 +57,7 @@ class SecureTokenStorageImpl implements SecureTokenStorage {
   /// Visible for testing: inject a custom [FlutterSecureStorage] instance.
   @visibleForTesting
   SecureTokenStorageImpl.withStorage(FlutterSecureStorage storage)
-      : _storage = storage;
+    : _storage = storage;
 
   // ignore: unused_element
   FlutterSecureStorage get storage => _storage;
@@ -63,27 +65,37 @@ class SecureTokenStorageImpl implements SecureTokenStorage {
   final FlutterSecureStorage _storage;
 
   static FlutterSecureStorage _buildStorage() => const FlutterSecureStorage(
-        iOptions: IOSOptions(
-          accessibility: KeychainAccessibility.first_unlock,
-        ),
-        aOptions: AndroidOptions(
-          encryptedSharedPreferences: true,
-        ),
-      );
+    iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+  );
 
   // ── Write ───────────────────────────────────────────────────────────────────
 
   @override
   Future<void> saveTokens(TokenPair pair) async {
     try {
+      // One Keychain value is the commit point. A crash can no longer leave an
+      // access token from one response paired with a refresh token from another.
+      await _storage.write(
+        key: _kTokenPair,
+        value: jsonEncode(<String, String>{
+          'access_token': pair.accessToken,
+          'refresh_token': pair.refreshToken,
+          'expires_at': pair.expiresAtIso,
+        }),
+      );
+      // Remove the former multi-key representation only after the atomic value
+      // is durable. Readers always prefer v2, so duplicates are never active.
       await Future.wait([
-        _storage.write(key: _kAccessToken, value: pair.accessToken),
-        _storage.write(key: _kRefreshToken, value: pair.refreshToken),
-        _storage.write(key: _kExpiresAt, value: pair.expiresAtIso),
+        _storage.delete(key: _kAccessToken),
+        _storage.delete(key: _kRefreshToken),
+        _storage.delete(key: _kExpiresAt),
       ]);
     } on PlatformException catch (e) {
-      debugPrint('[SecureTokenStorage] saveTokens PlatformException: $e');
-      // Do not rethrow — callers should not crash if Keychain is unavailable.
+      // Never include token values in diagnostics. Callers must know the
+      // atomic commit failed and must not publish an authenticated session.
+      debugPrint('[SecureTokenStorage] saveTokens failed code=${e.code}');
+      rethrow;
     }
   }
 
@@ -93,6 +105,17 @@ class SecureTokenStorageImpl implements SecureTokenStorage {
   Future<TokenPair?> loadTokens() async {
     // 1. Try SecureStorage first.
     try {
+      final encoded = await _storage.read(key: _kTokenPair);
+      if (encoded != null) {
+        final value = jsonDecode(encoded) as Map<String, dynamic>;
+        return TokenPair.fromStoredValues(
+          accessToken: value['access_token'] as String,
+          refreshToken: value['refresh_token'] as String,
+          expiresAtIso: value['expires_at'] as String,
+        );
+      }
+
+      // One-time migration from the previous three secure keys.
       final values = await Future.wait([
         _storage.read(key: _kAccessToken),
         _storage.read(key: _kRefreshToken),
@@ -103,14 +126,16 @@ class SecureTokenStorageImpl implements SecureTokenStorage {
       final expiresAt = values[2];
 
       if (access != null && refresh != null && expiresAt != null) {
-        return TokenPair.fromStoredValues(
+        final pair = TokenPair.fromStoredValues(
           accessToken: access,
           refreshToken: refresh,
           expiresAtIso: expiresAt,
         );
+        await saveTokens(pair);
+        return pair;
       }
     } on PlatformException catch (e) {
-      debugPrint('[SecureTokenStorage] loadTokens PlatformException: $e');
+      debugPrint('[SecureTokenStorage] loadTokens failed code=${e.code}');
       // errSecInteractionNotAllowed (-25308): Keychain locked after reboot.
       // This does NOT mean tokens are absent — rethrow so checkSession can
       // distinguish this case and avoid logging the user out.
@@ -148,8 +173,8 @@ class SecureTokenStorageImpl implements SecureTokenStorage {
 
         return pair;
       }
-    } catch (e) {
-      debugPrint('[SecureTokenStorage] migration error: $e');
+    } catch (_) {
+      debugPrint('[SecureTokenStorage] migration failed');
     }
 
     return null;
@@ -158,9 +183,9 @@ class SecureTokenStorageImpl implements SecureTokenStorage {
   @override
   Future<String?> loadAccessToken() async {
     try {
-      return await _storage.read(key: _kAccessToken);
+      return (await loadTokens())?.accessToken;
     } on PlatformException catch (e) {
-      debugPrint('[SecureTokenStorage] loadAccessToken PlatformException: $e');
+      debugPrint('[SecureTokenStorage] loadAccessToken failed code=${e.code}');
       if (e.code == '-25308' || e.code == 'errSecInteractionNotAllowed') {
         throw KeychainUnavailableException(e.code);
       }
@@ -171,9 +196,9 @@ class SecureTokenStorageImpl implements SecureTokenStorage {
   @override
   Future<String?> loadRefreshToken() async {
     try {
-      return await _storage.read(key: _kRefreshToken);
+      return (await loadTokens())?.refreshToken;
     } on PlatformException catch (e) {
-      debugPrint('[SecureTokenStorage] loadRefreshToken PlatformException: $e');
+      debugPrint('[SecureTokenStorage] loadRefreshToken failed code=${e.code}');
       if (e.code == '-25308' || e.code == 'errSecInteractionNotAllowed') {
         throw KeychainUnavailableException(e.code);
       }
@@ -187,12 +212,13 @@ class SecureTokenStorageImpl implements SecureTokenStorage {
   Future<void> clearTokens() async {
     try {
       await Future.wait([
+        _storage.delete(key: _kTokenPair),
         _storage.delete(key: _kAccessToken),
         _storage.delete(key: _kRefreshToken),
         _storage.delete(key: _kExpiresAt),
       ]);
     } on PlatformException catch (e) {
-      debugPrint('[SecureTokenStorage] clearTokens PlatformException: $e');
+      debugPrint('[SecureTokenStorage] clearTokens failed code=${e.code}');
     }
   }
 }

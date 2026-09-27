@@ -16,6 +16,8 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../../core/ai_consent/ai_consent_provider.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/auth/auth_provider.dart';
+import '../../../core/feedback/onboarding_feedback_host.dart';
+import '../widgets/onboarding_auth_handoff.dart';
 import '../../../core/locale/locale_provider.dart';
 import '../../../core/storage/onboarding_pending_storage.dart';
 import '../../../router.dart';
@@ -131,6 +133,8 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   Set<String> _healthConditions = {'none'};
   String _dietType = 'none';
   String _foodRestrictions = '';
+  Set<String> _restrictionTagIds = {};
+  List<Map<String, dynamic>> _restrictionCatalog = [];
   Set<String> _goals = {};
   double _weightLossSpeedKgPerWeek = 0.5;
 
@@ -147,6 +151,24 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     AnalyticsService.onboardingStarted();
     AnalyticsService.onboardingStepViewed(_Step.landing.name);
     _restoreProgress();
+    _loadRestrictionCatalog();
+  }
+
+  Future<void> _loadRestrictionCatalog() async {
+    try {
+      final response = await apiDio.get('/api/restriction-tags');
+      final items = response.data['items'] as List<dynamic>;
+      if (!mounted) return;
+      setState(() {
+        _restrictionCatalog = items
+            .map((item) => Map<String, dynamic>.from(item as Map))
+            .where((item) => item['active'] == true)
+            .toList();
+      });
+    } catch (_) {
+      // The selection remains stored as IDs. The restrictions step offers its
+      // own retry, and a later rebuild can still display the fetched catalog.
+    }
   }
 
   /// Restore step index and answers from SharedPreferences after a kill-restore.
@@ -211,6 +233,10 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     _trainingFreq = answers['trainingFreq'] as String? ?? '';
     _dietType = answers['dietType'] as String? ?? 'none';
     _foodRestrictions = answers['foodRestrictions'] as String? ?? '';
+    final restrictionIds = answers['restrictionTagIds'];
+    if (restrictionIds is List) {
+      _restrictionTagIds = restrictionIds.cast<String>().toSet();
+    }
     _weightLossSpeedKgPerWeek =
         (answers['weightLossSpeedKgPerWeek'] as num?)?.toDouble() ?? 0.5;
 
@@ -245,6 +271,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
           'trainingFreq': _trainingFreq,
           'dietType': _dietType,
           'foodRestrictions': _foodRestrictions,
+          'restrictionTagIds': _restrictionTagIds.toList(),
           'healthConditions': _healthConditions.toList(),
           'goals': _goals.toList(),
           'weightLossSpeedKgPerWeek': _weightLossSpeedKgPerWeek,
@@ -289,8 +316,8 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     });
   }
 
-  void _savePending() {
-    OnboardingPendingStorage.save(
+  Future<void> _savePending() {
+    return OnboardingPendingStorage.save(
       OnboardingPendingData(
         age: _age,
         height: _height,
@@ -303,6 +330,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
         foodRestrictions: _foodRestrictions.isNotEmpty
             ? _foodRestrictions
             : null,
+        restrictionTagIds: _restrictionTagIds.toList(),
         goals: _goals.toList(),
         weightLossSpeedKgPerWeek: _goals.contains('lose_weight')
             ? _weightLossSpeedKgPerWeek
@@ -408,6 +436,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
         foodRestrictions: _foodRestrictions.isNotEmpty
             ? _foodRestrictions
             : null,
+        restrictionTagIds: _restrictionTagIds.toList(),
         goals: _goals.toList(),
         weightLossSpeedKgPerWeek: _goals.contains('lose_weight')
             ? _weightLossSpeedKgPerWeek
@@ -431,7 +460,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     if (mounted) {
       await ref.read(authNotifierProvider.notifier).logout();
     }
-    if (mounted) context.go('/login');
+    if (mounted) context.go('/email-auth');
   }
 
   // ── Result calculation ──────────────────────────────────────────────────────
@@ -587,7 +616,10 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
           primaryCta: ObGradientButton(label: nextLabel, onTap: _goNext),
           secondaryCta: TextButton(
             onPressed: () {
-              setState(() => _foodRestrictions = '');
+              setState(() {
+                _foodRestrictions = '';
+                _restrictionTagIds = {};
+              });
               _goNext();
             },
             child: Text(
@@ -703,8 +735,10 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       case _Step.result:
         return _FooterCtaData(
           primaryCta: ObGradientButton(
-            label: l10n.ob_footer_login,
-            onTap: _goNext,
+            label: isRu
+                ? 'Зарегистрироваться или войти'
+                : 'Register or sign in',
+            onTap: _navigateToLogin,
           ),
         );
     }
@@ -726,7 +760,13 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
           // onboarding_done=false). User ends up where they started. Clearing
           // auth state first makes the redirect chain land cleanly on /login.
           onLogin: () async {
-            await ref.read(authNotifierProvider.notifier).logout();
+            // Avoid writing the already-logged-out auth provider while
+            // GoRouter is building the transition. Riverpod rejects that
+            // synchronous refresh in debug builds. A genuinely stale Keychain
+            // session has a non-null user and still follows the logout path.
+            if (ref.read(authNotifierProvider).value != null) {
+              await ref.read(authNotifierProvider.notifier).logout();
+            }
             if (mounted) context.go('/login');
           },
           locale: ref.watch(localeProvider),
@@ -754,8 +794,16 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
 
       case _Step.food_restrictions:
         return _FoodRestrictionsStep(
-          value: _foodRestrictions,
-          onChange: (v) => setState(() => _foodRestrictions = v),
+          value: _restrictionTagIds,
+          initialTags: _restrictionCatalog,
+          onTagsLoaded: (tags) {
+            if (mounted) setState(() => _restrictionCatalog = tags);
+          },
+          onChange: (v) async {
+            setState(() => _restrictionTagIds = v);
+            await _savePending();
+            await _saveProgress();
+          },
           isRu: isRu,
         );
 
@@ -931,6 +979,14 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
           l10n: l10n,
           preview: _preview,
           currentWeight: _weight,
+          restrictionNames: _restrictionCatalog
+              .where((tag) => _restrictionTagIds.contains(tag['id']))
+              .map((tag) => tag[isRu ? 'name_ru' : 'name_en'] as String)
+              .toList(),
+          onEditAnswers: () {
+            setState(() => _stepIndex = _buildStepList().indexOf(_Step.goals));
+            _saveProgress();
+          },
         );
 
       case _Step.auth:
@@ -1651,14 +1707,18 @@ class _DietStep extends StatelessWidget {
 
 // ─── Food restrictions step ────────────────────────────────────────────────────
 class _FoodRestrictionsStep extends StatefulWidget {
-  final String value;
-  final ValueChanged<String> onChange;
+  final Set<String> value;
+  final Future<void> Function(Set<String>) onChange;
   final bool isRu;
+  final List<Map<String, dynamic>> initialTags;
+  final ValueChanged<List<Map<String, dynamic>>> onTagsLoaded;
 
   const _FoodRestrictionsStep({
     required this.value,
     required this.onChange,
     required this.isRu,
+    required this.initialTags,
+    required this.onTagsLoaded,
   });
 
   @override
@@ -1666,18 +1726,46 @@ class _FoodRestrictionsStep extends StatefulWidget {
 }
 
 class _FoodRestrictionsStepState extends State<_FoodRestrictionsStep> {
-  late final TextEditingController _ctrl;
+  List<Map<String, dynamic>> _tags = [];
+  String _query = '';
+  bool _loading = true;
+  bool _failed = false;
 
   @override
   void initState() {
     super.initState();
-    _ctrl = TextEditingController(text: widget.value);
+    _tags = widget.initialTags;
+    _loading = _tags.isEmpty;
+    if (_loading) _load();
   }
 
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
+  Future<void> _load() async {
+    try {
+      final response = await apiDio.get('/api/restriction-tags');
+      final items = response.data['items'] as List<dynamic>;
+      if (!mounted) return;
+      setState(() {
+        _tags = items
+            .map((item) => Map<String, dynamic>.from(item as Map))
+            .where((item) => item['active'] == true)
+            .toList();
+        _loading = false;
+        _failed = false;
+      });
+      widget.onTagsLoaded(_tags);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _failed = true;
+      });
+    }
+  }
+
+  Future<void> _toggle(String id, bool selected) async {
+    final next = Set<String>.from(widget.value);
+    selected ? next.add(id) : next.remove(id);
+    await widget.onChange(next);
   }
 
   @override
@@ -1709,33 +1797,92 @@ class _FoodRestrictionsStepState extends State<_FoodRestrictionsStep> {
               height: 1.4,
             ),
           ),
-          const SizedBox(height: 24),
-          TextField(
-            controller: _ctrl,
-            maxLines: 4,
-            autofocus: false,
-            style: const TextStyle(fontSize: 15),
-            decoration: InputDecoration(
-              hintText: isRu
-                  ? 'Орехи, морепродукты, глютен...'
-                  : 'Nuts, seafood, gluten...',
-              filled: true,
-              fillColor: Colors.white,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(color: OBColors.border),
+          const SizedBox(height: 18),
+          if (_loading)
+            const Center(child: CircularProgressIndicator(strokeWidth: 2))
+          else if (_failed)
+            Center(
+              child: TextButton.icon(
+                onPressed: () {
+                  setState(() => _loading = true);
+                  _load();
+                },
+                icon: const Icon(Icons.refresh),
+                label: Text(isRu ? 'Повторить загрузку' : 'Retry loading'),
               ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(color: OBColors.border),
+            )
+          else ...[
+            TextField(
+              decoration: InputDecoration(
+                prefixIcon: const Icon(Icons.search),
+                hintText: isRu ? 'Поиск продуктов' : 'Search foods',
+                filled: true,
+                fillColor: Colors.white,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: const BorderSide(color: OBColors.border),
+                ),
               ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(color: OBColors.pink, width: 2),
-              ),
+              onChanged: (value) => setState(() => _query = value),
             ),
-            onChanged: widget.onChange,
-          ),
+            if (widget.value.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  for (final tag in _tags.where(
+                    (tag) => widget.value.contains(tag['id']),
+                  ))
+                    InputChip(
+                      label: Text(tag[isRu ? 'name_ru' : 'name_en'] as String),
+                      selected: true,
+                      onDeleted: () => _toggle(tag['id'] as String, false),
+                    ),
+                ],
+              ),
+            ],
+            for (final category
+                in _tags
+                    .where(
+                      (tag) => (tag[isRu ? 'name_ru' : 'name_en'] as String)
+                          .toLowerCase()
+                          .contains(_query.toLowerCase()),
+                    )
+                    .map((tag) => tag['category'] as String)
+                    .toSet()) ...[
+              Padding(
+                padding: const EdgeInsets.only(top: 16, bottom: 7),
+                child: Text(
+                  category.toUpperCase(),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+              ),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final tag in _tags.where(
+                    (tag) =>
+                        tag['category'] == category &&
+                        (tag[isRu ? 'name_ru' : 'name_en'] as String)
+                            .toLowerCase()
+                            .contains(_query.toLowerCase()),
+                  ))
+                    FilterChip(
+                      label: Text(tag[isRu ? 'name_ru' : 'name_en'] as String),
+                      selected: widget.value.contains(tag['id']),
+                      onSelected: (selected) =>
+                          _toggle(tag['id'] as String, selected),
+                    ),
+                ],
+              ),
+            ],
+          ],
         ],
       ),
     );
@@ -3237,11 +3384,15 @@ class _ResultStep extends StatelessWidget {
   final AppLocalizations l10n;
   final CalculationResult preview;
   final double? currentWeight;
+  final List<String> restrictionNames;
+  final VoidCallback onEditAnswers;
 
   const _ResultStep({
     required this.l10n,
     required this.preview,
     this.currentWeight,
+    required this.restrictionNames,
+    required this.onEditAnswers,
   });
 
   @override
@@ -3250,6 +3401,10 @@ class _ResultStep extends StatelessWidget {
       calc: preview,
       l10n: l10n,
       currentWeight: currentWeight,
+      restrictionNames: restrictionNames,
+      onEditAnswers: onEditAnswers,
+      feedbackPrompt: const OnboardingFeedbackHost(),
+      authHandoff: const OnboardingAuthHandoff(),
     );
   }
 }

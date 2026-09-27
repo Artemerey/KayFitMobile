@@ -35,6 +35,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/analytics/analytics_service.dart';
 import '../../../core/ai_consent/ai_consent_provider.dart';
 import '../../../core/api/api_client.dart';
+import '../../../core/auth/auth_provider.dart';
+import '../../../core/feedback/feedback_models.dart';
+import '../../../core/feedback/feedback_presenter.dart';
+import '../../../core/meal_logging/meal_log_operation.dart';
+import '../../../core/meal_logging/meal_log_operation_provider.dart';
+import '../../../core/meal_logging/meal_log_incident.dart';
+import '../../../core/meal_logging/meal_log_incident_reporter.dart';
+import '../../../core/feedback/recognition_feedback_bar.dart';
 import '../../../features/add_meal/screens/barcode_scanner_screen_v2.dart';
 import '../../../features/add_meal/screens/recognition_result_args.dart';
 import '../../../router.dart' show kf2RouteObserver;
@@ -43,9 +51,12 @@ import '../../../features/dashboard/providers/dashboard_provider.dart';
 import '../../../features/journal/screens/journal_screen.dart'
     show journalDayMealsProvider;
 import '../../../shared/models/ingredient_v2.dart';
+import '../../../shared/models/nutrients_v2.dart';
 import '../providers/pending_meal_provider.dart';
 import '../providers/chat_history_provider.dart';
 import '../providers/transcription_pending_provider.dart';
+import '../voice/voice_draft_storage.dart';
+import '../voice/voice_request.dart';
 import '../../../shared/models/stats.dart';
 import '../../../shared/theme/kayfit2_theme.dart';
 import '../../../shared/utils/nutrient_parser.dart';
@@ -105,6 +116,8 @@ class ChatV2Screen extends ConsumerStatefulWidget {
 
 class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     with WidgetsBindingObserver, RouteAware {
+  static int? _loadedHistoryAccountId;
+
   final _scrollController = ScrollController();
   final _textController = TextEditingController();
 
@@ -119,12 +132,6 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
   // survives navigation away from chat (e.g. tab switch to journal).
   // Cleared on confirm/cancel/restart through the notifier API.
 
-  /// Timestamp when the pending meal card first became active in this session.
-  /// Used to implement a 700ms tap-cooldown on the Add button so that the card
-  /// appearing does not immediately register a touch that was intended for
-  /// something underneath it (e.g. home-gesture swipe on iPhone).
-  DateTime? _pendingMealShownAt;
-
   /// Set when the assistant just asked the user to clarify a meal
   /// (type/portion). The next user message is then routed to the meal
   /// parser regardless of regex — we already know we're in a meal flow.
@@ -135,6 +142,8 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
   /// `original + clarification` together so multi-item meals don't lose
   /// the items that already had weights specified.
   String? _pendingClarifyOriginal;
+  bool _pendingClarifyWasVoice = false;
+  String? _pendingClarifyOperationId;
 
   bool _isLoading = false;
   bool _isSending = false;
@@ -164,6 +173,8 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
   bool _speechReady = false;
   _VoiceState _voiceState = _VoiceState.idle;
   bool _fromVoice = false;
+  String? _voiceOperationId;
+  bool _voiceFailureReported = false;
 
   // --- Continuous voice input (restart + accumulate) ---------------------
   // The native SFSpeechRecognizer (iOS) ends a session on silence and has its
@@ -203,21 +214,34 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     try {
       AnalyticsService.chatOpened();
     } catch (_) {}
+    final accountId = ref.read(authNotifierProvider).valueOrNull?.id;
+    final accountChanged = _loadedHistoryAccountId != accountId;
+    if (accountChanged) {
+      _loadedHistoryAccountId = accountId;
+    }
     // If the provider already has messages (survived a tab switch), show them
     // immediately and refresh in the background. If empty, show loading state.
-    final cached = ref.read(chatHistoryProvider);
-    if (cached.isEmpty) {
-      _loadHistory();
+    // Riverpod providers cannot be mutated from initState, so an account switch
+    // clears history after the first frame before loading the new account.
+    if (accountChanged) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ref.read(chatHistoryProvider.notifier).setMessages(const []);
+        _loadHistory();
+      });
     } else {
-      unawaited(_loadHistory());
+      final cached = ref.read(chatHistoryProvider);
+      if (cached.isEmpty) {
+        _loadHistory();
+      } else {
+        unawaited(_loadHistory());
+      }
     }
     // If the user navigated away during recognition and comes back, the
     // provider might already be in done state — show the result sheet.
-    _textController.addListener(() {
-      if (_fromVoice && _voiceState == _VoiceState.idle) _fromVoice = false;
-    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      unawaited(_restoreVoiceDraft());
       // A recognition may have completed while the user was on another screen —
       // flush any queued outcomes now that the chat is mounted and current.
       _drainOutcomes();
@@ -291,6 +315,7 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
         // Mark intent so the auto-restart loop doesn't re-arm the mic while the
         // app is backgrounded.
         _voice.requestStop();
+        _reportVoiceFailure('speech_engine_error');
         _speech.stop().then((_) {
           if (mounted) setState(() => _voiceState = _VoiceState.idle);
         }).ignore();
@@ -329,8 +354,13 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
   /// prompts, "✓ added" confirmations, cancel acks. These are not persisted
   /// on the backend (they're not real Claude turns), so we cache them
   /// client-side and merge with server history on every reload.
-  static const _kLocalChatKey = 'kf2_chat_local_messages_v1';
+  static const _kLocalChatKeyPrefix = 'kf2_chat_local_messages_v1';
   static const _kLocalChatLimit = 100;
+
+  String? get _localChatKey {
+    final accountId = ref.read(authNotifierProvider).valueOrNull?.id;
+    return accountId == null ? null : '$_kLocalChatKeyPrefix:$accountId';
+  }
 
   Future<void> _loadHistory() async {
     setState(() => _isLoading = true);
@@ -369,8 +399,10 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
 
   Future<List<ChatMessage>> _loadLocalMessages() async {
     try {
+      final localChatKey = _localChatKey;
+      if (localChatKey == null) return const [];
       final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getStringList(_kLocalChatKey) ?? const [];
+      final raw = prefs.getStringList(localChatKey) ?? const [];
       return raw.map((s) {
         final m = jsonDecode(s) as Map<String, dynamic>;
         return ChatMessage(
@@ -386,8 +418,10 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
 
   Future<void> _persistLocalMessage(ChatMessage msg) async {
     try {
+      final localChatKey = _localChatKey;
+      if (localChatKey == null) return;
       final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getStringList(_kLocalChatKey) ?? <String>[];
+      final raw = prefs.getStringList(localChatKey) ?? <String>[];
       raw.add(
         jsonEncode({
           'role': msg.role,
@@ -399,7 +433,7 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
       if (raw.length > _kLocalChatLimit) {
         raw.removeRange(0, raw.length - _kLocalChatLimit);
       }
-      await prefs.setStringList(_kLocalChatKey, raw);
+      await prefs.setStringList(localChatKey, raw);
     } catch (_) {
       // Non-fatal — synthetic messages stay only in memory until next save.
     }
@@ -470,8 +504,12 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     //     (the user is replying to "сколько грамм?" — treat as meal flow)
     final forceMealFlow = _awaitingMealClarification;
     final pendingOrig = _pendingClarifyOriginal;
+    final pendingWasVoice = _pendingClarifyWasVoice;
+    final pendingVoiceOperationId = _pendingClarifyOperationId;
     _awaitingMealClarification = false; // one-shot
     _pendingClarifyOriginal = null;
+    _pendingClarifyWasVoice = false;
+    _pendingClarifyOperationId = null;
     // Try the food parser when:
     //   • message has no '?' (question mark strongly implies a non-food query)
     //   • message is not a clear advisory/recommendation request —
@@ -491,16 +529,31 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
           ? '$pendingOrig. ${text.trim()}'
           : text;
       // Only ever ask for clarification ONCE per meal session.
+      _fromVoice = _fromVoice || pendingWasVoice;
       final isVoice = _fromVoice;
+      final voiceOperationId = isVoice
+          ? (_voiceOperationId ?? pendingVoiceOperationId)
+          : null;
       _fromVoice = false;
+      _voiceOperationId = null;
       final routed = await _tryParseAndOfferMeal(
         parseText,
         msgLang,
         skipClarify: forceMealFlow,
         isVoice: isVoice,
+        operationId: voiceOperationId,
       );
       if (routed) {
-        if (mounted) setState(() => _isSending = false);
+        // This early return bypasses the consultant branch's `finally`, so
+        // finish both local and shared processing state here. Otherwise the
+        // chat restores a stale "parsing your message" bubble on rebuild.
+        processingNotifier.state = false;
+        if (mounted) {
+          setState(() {
+            _thinking = null;
+            _isSending = false;
+          });
+        }
         return;
       }
       // Parser returned nothing — fall through to consultant.
@@ -590,13 +643,19 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     String lang, {
     bool skipClarify = false,
     bool isVoice = false,
+    String? operationId,
   }) async {
     // Pre-capture before the API await — ref is invalid after navigation.
     final pendingMealNotifier = ref.read(pendingMealProvider.notifier);
+    final recognitionTimer = Stopwatch()..start();
     try {
       final resp = await apiDio.post(
         '/api/v2/parse_meal_suggestions',
-        data: {'text': text, 'language': lang, if (isVoice) 'is_voice': true},
+        data: mealParseRequestData(
+          text: text,
+          language: lang,
+          voiceProvenance: isVoice,
+        ),
         // Claude + FatSecret round-trip can take 40-60 s; global 30 s
         // receiveTimeout aborts too early on slow runs.
         options: Options(
@@ -604,6 +663,29 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
           sendTimeout: const Duration(seconds: 30),
         ),
       );
+      final clarification = resp.data['clarification'];
+      if (clarification is Map) {
+        if (!mounted) return true;
+        final message =
+            (clarification['message'] as String?) ??
+            (lang == 'ru'
+                ? 'Уточни, пожалуйста, блюда и порции.'
+                : 'Please clarify the dishes and portions.');
+        final clarifyMsg = ChatMessage(
+          role: 'assistant',
+          content: message,
+          createdAt: DateTime.now(),
+        );
+        ref.read(chatHistoryProvider.notifier).add(clarifyMsg);
+        setState(() {
+          _thinking = null;
+          _awaitingMealClarification = true;
+          _pendingClarifyOriginal = text;
+          _pendingClarifyWasVoice = isVoice;
+          _pendingClarifyOperationId = operationId;
+        });
+        return true;
+      }
       final rawItems = (resp.data['items'] as List<dynamic>?) ?? [];
       if (rawItems.isEmpty) return false;
 
@@ -648,6 +730,8 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
           // the clarification reply (e.g. "тёмный, 100г"). Without this
           // the soup would silently disappear from the final card.
           _pendingClarifyOriginal = text;
+          _pendingClarifyWasVoice = isVoice;
+          _pendingClarifyOperationId = operationId;
         });
         unawaited(_persistLocalMessage(clarifyMsg));
         _scrollToBottom();
@@ -657,7 +741,24 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
       // Always set the pending meal in the global provider — it survives tab
       // navigation and the card will appear when the user returns to chat.
       if (mounted) setState(() => _thinking = null);
-      pendingMealNotifier.setMeal(items, _inferMealTypeForNow());
+      final operation = operationId == null
+          ? ref
+                .read(mealLogOperationProvider.notifier)
+                .start(isVoice ? MealLogSource.voice : MealLogSource.text)
+          : ref
+                .read(mealLogOperationProvider.notifier)
+                .resumeOrCreate(operationId, MealLogSource.voice);
+      ref
+          .read(mealLogOperationProvider.notifier)
+          .advance(operation.id, MealLogStage.recognitionCompleted);
+      pendingMealNotifier.setMeal(
+        items,
+        _inferMealTypeForNow(),
+        feedbackSource: isVoice ? FeedbackSource.voice : FeedbackSource.text,
+        recognitionDuration: recognitionTimer.elapsed,
+        operationId: operation.id,
+      );
+      if (isVoice) unawaited(VoiceDraftStorage.clear());
       if (mounted) _scrollToBottom();
       return true;
     } on Exception {
@@ -710,42 +811,6 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
       if (lower.contains(fragment)) return true;
     }
     return false;
-  }
-
-  /// Translates English goal-type labels and formats raw floats coming from
-  /// the backend `/api/coach/advice` response when the UI language is Russian.
-  static String _localizeBackendAdvice(String text) {
-    return text
-        .replaceAll(
-          RegExp(r'\blose weight\b', caseSensitive: false),
-          'похудеть',
-        )
-        .replaceAll(
-          RegExp(r'\bgain weight\b', caseSensitive: false),
-          'набрать вес',
-        )
-        .replaceAll(
-          RegExp(r'\bmaintain weight\b', caseSensitive: false),
-          'поддерживать вес',
-        )
-        .replaceAllMapped(
-          // "(target 69.40983581542969kg)" → "(цель: 69.4 кг)"
-          RegExp(r'\(target\s+([\d.]+)\s*kg\)', caseSensitive: false),
-          (m) {
-            final raw = double.tryParse(m.group(1) ?? '');
-            final nice = raw != null ? raw.toStringAsFixed(1) : m.group(1);
-            return '(цель: $nice кг)';
-          },
-        )
-        .replaceAllMapped(
-          // standalone "target 69.4kg" without parens
-          RegExp(r'\btarget\s+([\d.]+)\s*kg\b', caseSensitive: false),
-          (m) {
-            final raw = double.tryParse(m.group(1) ?? '');
-            final nice = raw != null ? raw.toStringAsFixed(1) : m.group(1);
-            return 'цель: $nice кг';
-          },
-        );
   }
 
   /// Builds the post-add coaching message using fresh daily stats.
@@ -815,14 +880,6 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
   /// dashboard/journal providers, replaces the preview with a synthetic
   /// "✓ added" assistant message (local-only, not persisted on backend).
   Future<void> _confirmAddPendingMeal() async {
-    // Tap-cooldown guard: ignore taps in the first 700ms after the card
-    // appeared. Prevents accidental confirms when the card slides in right
-    // under the user's thumb (e.g. while swiping up to the home screen).
-    if (_pendingMealShownAt != null) {
-      final elapsed = DateTime.now().difference(_pendingMealShownAt!);
-      if (elapsed < const Duration(milliseconds: 700)) return;
-    }
-
     final pendingState = ref.read(pendingMealProvider);
     final pending = pendingState.items;
     if (pending == null || pending.isEmpty || pendingState.isAdding) return;
@@ -855,14 +912,28 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
         };
       }).toList();
 
-      await apiDio.post(
-        '/api/meals/add_selected',
-        data: {
-          'items': items,
-          'dish_name': pending.map((i) => i.name).join(', '),
-          'meal_type': pendingState.mealType,
-        },
-      );
+      final operationId =
+          pendingState.operationId ??
+          ref
+              .read(mealLogOperationProvider.notifier)
+              .start(
+                pendingState.feedbackSource == FeedbackSource.voice
+                    ? MealLogSource.voice
+                    : MealLogSource.text,
+              )
+              .id;
+      // The shared repository performs POST '/api/meals/add_selected'.
+      final saveResult = await ref
+          .read(mealLogOperationProvider.notifier)
+          .saveSelected(
+            operationId: operationId,
+            expectedItems: items.length,
+            payload: {
+              'items': items,
+              'dish_name': pending.map((i) => i.name).join(', '),
+              'meal_type': pendingState.mealType,
+            },
+          );
 
       // Refresh everything that displays meal data.
       ref.invalidate(todayStatsProvider);
@@ -889,65 +960,14 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
       );
       final isRu = _detectMessageLang(lastUserMsg.content) == 'ru';
 
-      // Fetch fresh stats (already invalidated above) for coaching message.
-      MacroStats freshStats;
-      try {
-        freshStats = await ref.read(todayStatsProvider.future);
-      } catch (_) {
-        freshStats = const MacroStats(
-          caloriesEaten: 0,
-          caloriesGoal: 0,
-          proteinEaten: 0,
-          proteinGoal: 0,
-          fatEaten: 0,
-          fatGoal: 0,
-          carbsEaten: 0,
-          carbsGoal: 0,
-        );
-      }
-
-      // Ask the backend coach for a history-aware reply. The hardcoded
-      // `_buildCoachMessage` template named specific foods like "fish" even
-      // when the user had no fish in their history — see /api/coach/advice
-      // which feeds `frequent_meals` (last 30 days) into the prompt.
-      // Falls back to the local template on any network/Claude failure.
-      String? backendAdvice;
-      try {
-        final advResp = await apiDio.post(
-          '/api/coach/advice',
-          data: {
-            'meal_names': pending.map((i) => i.name).toList(),
-            'total_calories': totalKcal,
-          },
-        );
-        backendAdvice = (advResp.data['advice'] as String?)?.trim();
-        if (backendAdvice != null && backendAdvice.isEmpty) {
-          backendAdvice = null;
-        }
-        if (isRu && backendAdvice != null) {
-          backendAdvice = _localizeBackendAdvice(backendAdvice);
-        }
-      } on Exception {
-        // network/Claude timeout — fall back to client template below
-        backendAdvice = null;
-      }
-
       final confirmLine = isRu
           ? '✓ Добавлено: $dishLabel — ${totalKcal.round()} ккал'
           : '✓ Added: $dishLabel — ${totalKcal.round()} kcal';
-      final reply = backendAdvice != null
-          ? '$confirmLine\n\n$backendAdvice'
-          : _buildCoachMessage(
-              stats: freshStats,
-              dishLabel: dishLabel,
-              isRu: isRu,
-              addedKcal: totalKcal,
-            );
 
       if (!mounted) return;
       final addedMsg = ChatMessage(
         role: 'assistant',
-        content: reply,
+        content: confirmLine,
         createdAt: DateTime.now(),
       );
       ref.read(pendingMealProvider.notifier).clear();
@@ -961,6 +981,22 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
         );
       } catch (_) {}
       _scrollToBottom();
+      ref.read(mealLogOperationProvider.notifier).successRendered(operationId);
+      final userId = ref.read(authNotifierProvider).valueOrNull?.id;
+      if (saveResult.canRequestFeedback && userId != null) {
+        unawaited(
+          showMealFeedbackPrompt(
+            context: context,
+            targetId: saveResult.feedbackTargetId!,
+            source: FeedbackSource.chat,
+            userId: userId,
+            aggregateContext: {
+              'item_count': saveResult.added,
+              'total_calories_rounded': totalKcal.round(),
+            },
+          ),
+        );
+      }
     } on Exception {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1192,7 +1228,7 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
         );
 
     switch (outcome) {
-      case RecogSuccess(:final result):
+      case RecogSuccess(:final result, :final recognitionDuration):
         _resultSheetOpen = true;
         HapticFeedback.mediumImpact();
         // Consume the outcome NOW, at present-time — not when the sheet closes.
@@ -1207,6 +1243,9 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
         final args = RecognitionResultArgs(
           dishName: result.dishName,
           items: result.items,
+          feedbackSource: FeedbackSource.photo,
+          recognitionDuration: recognitionDuration,
+          clarification: result.clarification,
           onSaved: (name) => unawaited(_onPhotoSaved(name)),
         );
         // Stash the payload in a provider so the result route survives an
@@ -1333,6 +1372,21 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     if (_voiceState == _VoiceState.recording) {
       await _stopListening();
     } else {
+      final operation = ref
+          .read(mealLogOperationProvider.notifier)
+          .start(MealLogSource.voice);
+      _voiceOperationId = operation.id;
+      _fromVoice = true;
+      _voiceFailureReported = false;
+      unawaited(
+        VoiceDraftStorage.save(
+          VoiceDraft(
+            operationId: operation.id,
+            committedTranscript: '',
+            inputSource: 'voice',
+          ),
+        ),
+      );
       await _startListening();
     }
   }
@@ -1436,11 +1490,14 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
   /// Starts one native listen session. Reused for every restart in a recording.
   Future<void> _beginVoiceSession() async {
     if (!mounted || _voice.userStopped) return;
-    _voice.beginSession();
+    final sessionId = _voice.beginSession();
     try {
       await _speech.listen(
-        onResult: (result) =>
-            _handleVoiceResult(result.recognizedWords, result.finalResult),
+        onResult: (result) => _handleVoiceResult(
+          sessionId,
+          result.recognizedWords,
+          result.finalResult,
+        ),
         listenOptions: SpeechListenOptions(
           localeId: _voiceLocaleId,
           partialResults: true,
@@ -1461,15 +1518,15 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
 
   /// Appends partial results to the committed buffer instead of overwriting,
   /// so restarted sessions never clobber earlier speech.
-  void _handleVoiceResult(String words, bool isFinal) {
+  void _handleVoiceResult(int sessionId, String words, bool isFinal) {
     if (!mounted) return;
-    final combined = _voice.onWords(words);
+    final combined = _voice.onWords(sessionId, words);
     setState(() {
       _textController.text = combined;
       _textController.selection = TextSelection.fromPosition(
         TextPosition(offset: combined.length),
       );
-      if (isFinal && combined.isNotEmpty) _fromVoice = true;
+      _fromVoice = true;
     });
   }
 
@@ -1480,6 +1537,7 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     final action = _voice.onSessionEnded();
     // Duplicate end (done + notListening both fired) — already handled.
     if (action == null) return;
+    unawaited(_persistVoiceDraft());
 
     switch (action) {
       case VoiceEndAction.idle:
@@ -1510,8 +1568,50 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
   Future<void> _stopListening() async {
     // Mark intent first so any in-flight session end goes idle, not restart.
     _voice.requestStop();
+    await _persistVoiceDraft();
     await _speech.stop();
     if (mounted) setState(() => _voiceState = _VoiceState.idle);
+  }
+
+  Future<void> _persistVoiceDraft() async {
+    final operationId = _voiceOperationId;
+    if (operationId == null) return;
+    await VoiceDraftStorage.save(
+      VoiceDraft(
+        operationId: operationId,
+        committedTranscript: _voice.committedTranscript,
+        inputSource: 'voice',
+      ),
+    );
+  }
+
+  Future<void> _restoreVoiceDraft() async {
+    final draft = await VoiceDraftStorage.load();
+    if (draft == null || !mounted) return;
+    _voice.restore(committed: draft.committedTranscript, provenance: true);
+    _voiceOperationId = draft.operationId;
+    _fromVoice = true;
+    if (draft.committedTranscript.isNotEmpty) {
+      setState(() {
+        _textController.text = draft.committedTranscript;
+        _textController.selection = TextSelection.collapsed(
+          offset: draft.committedTranscript.length,
+        );
+      });
+    }
+  }
+
+  void _reportVoiceFailure(String stage) {
+    if (_voiceFailureReported) return;
+    _voiceFailureReported = true;
+    unawaited(
+      MealLogIncidentRuntime.reporter?.report(
+        source: 'voice',
+        stage: stage,
+        errorCode: MealLogIncidentCode.flutterException,
+        clientOperationId: _voiceOperationId,
+      ),
+    );
   }
 
   /// Opens the legacy barcode scanner via Navigator (no GoRouter route exists).
@@ -1557,17 +1657,6 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     ref.listen<bool>(chatProcessingProvider, (_, next) {
       if (!next && !_isSending && _thinking != null && mounted) {
         setState(() => _thinking = null);
-      }
-    });
-
-    // Record when the pending meal card first becomes active so the Add button
-    // tap-cooldown knows how long the card has been visible.
-    ref.listen<PendingMealState>(pendingMealProvider, (prev, next) {
-      final wasActive = prev?.isActive ?? false;
-      if (!wasActive && next.isActive) {
-        _pendingMealShownAt = DateTime.now();
-      } else if (!next.isActive) {
-        _pendingMealShownAt = null;
       }
     });
 
@@ -1650,6 +1739,9 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
                 onCancel: _cancelPendingMeal,
                 onEditItem: _onEditPendingItem,
                 onWeightChange: _onPendingItemWeightChange,
+                feedbackSource: pendingMeal.feedbackSource,
+                recognitionDuration: pendingMeal.recognitionDuration,
+                userId: ref.watch(authNotifierProvider).valueOrNull?.id,
                 theme: t,
               ),
 
@@ -2499,6 +2591,56 @@ class _InputPillState extends State<_InputPill>
 // Pending meal confirm card
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Simulator visual harness for the exact card used by the chat flow.
+/// Reachable only through the compile-time QA_PENDING_MEAL_PREVIEW flag.
+class PendingMealCardSimulatorPreview extends StatelessWidget {
+  const PendingMealCardSimulatorPreview({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    const item = IngredientV2(
+      name: 'Курица гриль',
+      weightGrams: 200,
+      nutrientsPer100g: NutrientsV2(
+        calories: 165,
+        protein: 31,
+        fat: 3.5,
+        carbs: 0,
+      ),
+      nutrientsTotal: NutrientsV2(calories: 330, protein: 62, fat: 7, carbs: 0),
+    );
+
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      locale: const Locale('ru'),
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      home: Scaffold(
+        backgroundColor: K2Theme.light.bg,
+        appBar: AppBar(
+          title: const Text('Coach'),
+          backgroundColor: K2Theme.light.surface,
+        ),
+        body: Center(
+          child: _PendingMealCard(
+            items: const [item],
+            mealType: 'lunch',
+            onMealTypeChanged: (_) {},
+            isAdding: false,
+            onAdd: () {},
+            onCancel: () {},
+            onEditItem: (_) {},
+            onWeightChange: (_, __) {},
+            feedbackSource: FeedbackSource.text,
+            userId: null,
+            theme: K2Theme.light,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _PendingMealCard extends StatelessWidget {
   const _PendingMealCard({
     required this.items,
@@ -2509,6 +2651,9 @@ class _PendingMealCard extends StatelessWidget {
     required this.onCancel,
     required this.onEditItem,
     required this.onWeightChange,
+    required this.feedbackSource,
+    this.recognitionDuration,
+    required this.userId,
     required this.theme,
   });
 
@@ -2528,6 +2673,9 @@ class _PendingMealCard extends StatelessWidget {
   /// weight pill on a row. Triggers a proportional macro recalculation via
   /// `IngredientV2.withWeight`.
   final void Function(int index, double newWeight) onWeightChange;
+  final FeedbackSource feedbackSource;
+  final Duration? recognitionDuration;
+  final int? userId;
 
   final K2Theme theme;
 
@@ -2640,17 +2788,36 @@ class _PendingMealCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 6),
-          Text(
-            isRu
-                ? 'Б ${totalP.round()} · Ж ${totalF.round()} · У ${totalC.round()}'
-                : 'P ${totalP.round()} · F ${totalF.round()} · C ${totalC.round()}',
-            style: TextStyle(
-              fontSize: 11,
-              color: theme.fgMute,
-              fontFamily: K2Fonts.mono,
-            ),
+          Row(
+            children: [
+              Text(
+                isRu
+                    ? 'Б ${totalP.round()} · Ж ${totalF.round()} · У ${totalC.round()}'
+                    : 'P ${totalP.round()} · F ${totalF.round()} · C ${totalC.round()}',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: theme.fgMute,
+                  fontFamily: K2Fonts.mono,
+                ),
+              ),
+              const Spacer(),
+              RecognitionFeedbackBar(
+                source: feedbackSource,
+                userId: userId,
+                margin: EdgeInsets.zero,
+                contextData: {
+                  'item_count': items.length,
+                  'total_calories_rounded': totalKcal.round(),
+                  'recognition_mode': 'kf2',
+                  if (recognitionDuration != null)
+                    'recognition_duration_ms': recognitionDuration!
+                        .inMilliseconds
+                        .clamp(1, 600000),
+                },
+              ),
+            ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 6),
           SizedBox(
             height: 26,
             child: ListView.separated(
@@ -2965,24 +3132,20 @@ class _PendingMealItemRowState extends State<_PendingMealItemRow> {
                 ),
               ),
               const SizedBox(width: 8),
-              GestureDetector(
-                onTap: widget.isAdding ? null : widget.onCorrect,
-                behavior: HitTestBehavior.opaque,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 4,
-                    vertical: 2,
-                  ),
-                  child: Text(
-                    isRu ? 'скорректировать' : 'fix',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: widget.isAdding ? t.fgMute : K2Colors.accent,
-                      fontFamily: K2Fonts.sans,
-                      decoration: TextDecoration.underline,
-                      decorationColor: K2Colors.accent.withValues(alpha: 0.4),
-                    ),
-                  ),
+              IconButton(
+                key: const Key('pending_meal_edit_item'),
+                tooltip: isRu ? 'Скорректировать' : 'Edit',
+                onPressed: widget.isAdding ? null : widget.onCorrect,
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints.tightFor(
+                  width: 30,
+                  height: 30,
+                ),
+                icon: Icon(
+                  Icons.edit_outlined,
+                  size: 18,
+                  color: widget.isAdding ? t.fgMute : K2Colors.accent,
                 ),
               ),
             ],
