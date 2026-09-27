@@ -37,6 +37,7 @@ import '../../../core/ai_consent/ai_consent_provider.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/auth/auth_provider.dart';
 import '../../../core/feedback/feedback_models.dart';
+import '../../../core/feedback/secure_uuid.dart';
 import '../../../core/feedback/feedback_presenter.dart';
 import '../../../core/meal_logging/meal_log_operation.dart';
 import '../../../core/meal_logging/meal_log_operation_provider.dart';
@@ -63,6 +64,7 @@ import '../../../shared/utils/nutrient_parser.dart';
 import '../../../shared/widgets/kayfit2_tab_bar.dart';
 import '../../../core/i18n/generated/app_localizations.dart';
 import '../models/chat_message.dart';
+import '../delivery/chat_delivery.dart';
 import '../voice/voice_session_machine.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -147,6 +149,7 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
 
   bool _isLoading = false;
   bool _isSending = false;
+  ChatDeliveryFailure? _deliveryFailure;
 
   // True while a recognition result sheet (/kf2/result) is open. Guards against
   // pushing a second result sheet on top of the first — outcomes are drained
@@ -288,6 +291,7 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
   @override
   void didPopNext() {
     _drainOutcomes();
+    unawaited(_recoverChatDeliveries());
   }
 
   @override
@@ -325,7 +329,23 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     // notification) — show any recognition results that completed while away.
     if (state == AppLifecycleState.resumed) {
       _drainOutcomes();
+      unawaited(_recoverChatDeliveries());
     }
+  }
+
+  Future<void> _recoverChatDeliveries() async {
+    final accountId = ref.read(authNotifierProvider).valueOrNull?.id;
+    if (accountId == null) return;
+    final storage = ChatDeliveryStorage(await SharedPreferences.getInstance());
+    final recovered = storage.recoverMessages(accountId);
+    if (!mounted || recovered.isEmpty) return;
+    final history = ref.read(chatHistoryProvider);
+    ref
+        .read(chatHistoryProvider.notifier)
+        .setMessages(
+          [...history, ...recovered]
+            ..sort((a, b) => a.createdAt.compareTo(b.createdAt)),
+        );
   }
 
   /// Keep the latest message visible when the keyboard opens.
@@ -373,6 +393,12 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
           .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
           .toList();
       final local = await _loadLocalMessages();
+      final accountId = ref.read(authNotifierProvider).valueOrNull?.id;
+      final durable = accountId == null
+          ? const <ChatMessage>[]
+          : ChatDeliveryStorage(
+              await SharedPreferences.getInstance(),
+            ).recoverMessages(accountId);
       // Deduplicate: drop local copies of messages already on the server
       // (a local message that was also POSTed to /api/chat/send would
       // otherwise show twice after the background refresh).
@@ -380,8 +406,13 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
       final dedupedLocal = local
           .where((m) => !serverKeys.contains('${m.role}:${m.content}'))
           .toList();
-      final merged = [...server, ...dedupedLocal]
-        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      final merged =
+          [
+              ...durable,
+              ...server,
+              ...dedupedLocal,
+            ].deduplicatedByDeliveryIdentity()
+            ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
       if (!mounted) return;
       ref.read(chatHistoryProvider.notifier).setMessages(merged);
       _scrollToBottom();
@@ -409,6 +440,9 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
           role: m['role'] as String,
           content: m['content'] as String,
           createdAt: DateTime.parse(m['createdAt'] as String),
+          clientOperationId: m['clientOperationId'] as String?,
+          correlationId: m['correlationId'] as String?,
+          runId: m['runId'] as String?,
         );
       }).toList();
     } catch (_) {
@@ -427,6 +461,10 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
           'role': msg.role,
           'content': msg.content,
           'createdAt': msg.createdAt.toIso8601String(),
+          if (msg.clientOperationId != null)
+            'clientOperationId': msg.clientOperationId,
+          if (msg.correlationId != null) 'correlationId': msg.correlationId,
+          if (msg.runId != null) 'runId': msg.runId,
         }),
       );
       // Trim to last N to bound storage.
@@ -472,6 +510,34 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     }
 
     final lang = Localizations.localeOf(context).languageCode;
+    final accountId = ref.read(authNotifierProvider).valueOrNull?.id;
+    if (accountId == null) return;
+    late final ChatDeliveryStorage deliveryStorage;
+    late final ChatDeliveryOperation deliveryOperation;
+    try {
+      deliveryStorage = ChatDeliveryStorage(
+        await SharedPreferences.getInstance(),
+      );
+      deliveryOperation = await deliveryStorage.create(accountId);
+    } on Object {
+      final operationId = SecureUuid.v4();
+      _setDeliveryFailure(
+        ChatDeliveryFailure(
+          clientOperationId: operationId,
+          stage: ChatDeliveryStage.requestCreated,
+          code: ChatDeliveryErrorCode.durableReceiveFailure,
+        ),
+      );
+      unawaited(
+        MealLogIncidentRuntime.reporter?.report(
+          source: 'chat',
+          stage: 'chat_request_created',
+          errorCode: MealLogIncidentCode.flutterException,
+          clientOperationId: operationId,
+        ),
+      );
+      return;
+    }
     _textController.clear();
     HapticFeedback.lightImpact();
 
@@ -479,6 +545,7 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
       role: 'user',
       content: text,
       createdAt: DateTime.now(),
+      clientOperationId: deliveryOperation.clientOperationId,
     );
 
     // Persist user message into the global provider immediately — this
@@ -587,12 +654,80 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
           sendTimeout: const Duration(seconds: 30),
         ),
       );
-      final reply = ChatMessage.fromJson(
-        resp.data['message'] as Map<String, dynamic>,
-      );
+      try {
+        await deliveryStorage.markApiReceived(deliveryOperation);
+      } on Object {
+        _setDeliveryFailure(
+          ChatDeliveryFailure(
+            clientOperationId: deliveryOperation.clientOperationId,
+            stage: ChatDeliveryStage.apiResponseReceived,
+            code: ChatDeliveryErrorCode.durableReceiveFailure,
+          ),
+        );
+        unawaited(
+          MealLogIncidentRuntime.reporter?.report(
+            source: 'chat',
+            stage: 'chat_api_receive_ack_persist',
+            errorCode: MealLogIncidentCode.invalidAcknowledgment,
+            clientOperationId: deliveryOperation.clientOperationId,
+            reachedBackend: true,
+          ),
+        );
+        rethrow;
+      }
+      late final ChatMessage reply;
+      try {
+        reply = deliveryStorage.parseResponse(
+          deliveryOperation,
+          Map<String, dynamic>.from(resp.data as Map),
+        );
+        await deliveryStorage.markParsed(deliveryOperation, reply);
+      } on Object {
+        _setDeliveryFailure(
+          ChatDeliveryFailure(
+            clientOperationId: deliveryOperation.clientOperationId,
+            stage: ChatDeliveryStage.apiResponseReceived,
+            code: ChatDeliveryErrorCode.invalidResponse,
+          ),
+        );
+        unawaited(
+          MealLogIncidentRuntime.reporter?.report(
+            source: 'chat',
+            stage: 'chat_response_parse',
+            errorCode: MealLogIncidentCode.invalidAcknowledgment,
+            clientOperationId: deliveryOperation.clientOperationId,
+            reachedBackend: true,
+          ),
+        );
+        rethrow;
+      }
+      try {
+        await deliveryStorage.markDurableReceived(deliveryOperation, reply);
+      } on Object {
+        _setDeliveryFailure(
+          ChatDeliveryFailure(
+            clientOperationId: deliveryOperation.clientOperationId,
+            stage: ChatDeliveryStage.responseParsed,
+            code: ChatDeliveryErrorCode.durableReceiveFailure,
+          ),
+        );
+        unawaited(
+          MealLogIncidentRuntime.reporter?.report(
+            source: 'chat',
+            stage: 'chat_durable_receive',
+            errorCode: MealLogIncidentCode.invalidAcknowledgment,
+            clientOperationId: deliveryOperation.clientOperationId,
+            correlationId: reply.correlationId,
+            runId: reply.runId,
+            reachedBackend: true,
+          ),
+        );
+        rethrow;
+      }
       // Always persist reply — historyNotifier is global and pre-captured above.
       // The user will see the response when they return to the chat tab.
       historyNotifier.add(reply);
+      _deliveryFailure = null;
       if (mounted) {
         setState(() => _thinking = null);
         try {
@@ -602,25 +737,68 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
         } catch (_) {}
         _scrollToBottom();
       }
-    } on Exception {
+    } on Exception catch (error) {
       // Roll back optimistic user message even if screen was navigated away.
-      historyNotifier.removeLast();
-      if (mounted) {
-        setState(() => _thinking = null);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Could not reach AI coach. Try again.'),
-            backgroundColor: K2Colors.error,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
+      historyNotifier.removeWhere(
+        (message) =>
+            message.role == 'user' &&
+            message.clientOperationId == deliveryOperation.clientOperationId,
+      );
+      if (_deliveryFailure == null) {
+        _setDeliveryFailure(
+          ChatDeliveryFailure(
+            clientOperationId: deliveryOperation.clientOperationId,
+            stage: ChatDeliveryStage.requestCreated,
+            code: ChatDeliveryErrorCode.transportFailure,
           ),
         );
+        unawaited(
+          MealLogIncidentRuntime.reporter?.report(
+            source: 'chat',
+            stage: 'chat_api_transport',
+            errorCode: MealLogIncidentCode.transportTimeout,
+            clientOperationId: deliveryOperation.clientOperationId,
+            reachedBackend: error is DioException && error.response != null,
+            httpStatus: error is DioException
+                ? error.response?.statusCode
+                : null,
+          ),
+        );
+      }
+      if (mounted) {
+        setState(() => _thinking = null);
       }
     } finally {
       processingNotifier.state = false;
       if (mounted) setState(() => _isSending = false);
+    }
+  }
+
+  void _setDeliveryFailure(ChatDeliveryFailure failure) {
+    if (!mounted) return;
+    setState(() => _deliveryFailure = failure);
+  }
+
+  Future<void> _ackRendered(ChatMessage message) async {
+    final operationId = message.clientOperationId;
+    if (operationId == null) return;
+    try {
+      final storage = ChatDeliveryStorage(
+        await SharedPreferences.getInstance(),
+      );
+      await storage.markRendered(operationId);
+    } on Object {
+      unawaited(
+        MealLogIncidentRuntime.reporter?.report(
+          source: 'chat',
+          stage: 'chat_render_ack_persist',
+          errorCode: MealLogIncidentCode.responseNotRendered,
+          clientOperationId: operationId,
+          correlationId: message.correlationId,
+          runId: message.runId,
+          reachedBackend: true,
+        ),
+      );
     }
   }
 
@@ -1723,8 +1901,11 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
                       messages: messages,
                       thinking: _thinking,
                       theme: t,
+                      onRendered: _ackRendered,
                     ),
             ),
+            if (_deliveryFailure case final failure?)
+              _ChatDeliveryErrorCard(failure: failure, theme: t),
 
             // ── Pending meal confirm card ──────────────────────────────────
             if (pendingMeal.isActive)
@@ -1935,12 +2116,14 @@ class _MessageList extends StatelessWidget {
     required this.messages,
     required this.thinking,
     required this.theme,
+    required this.onRendered,
   });
 
   final ScrollController scrollController;
   final List<ChatMessage> messages;
   final _ThinkingState? thinking;
   final K2Theme theme;
+  final ValueChanged<ChatMessage> onRendered;
 
   @override
   Widget build(BuildContext context) {
@@ -1971,9 +2154,11 @@ class _MessageList extends StatelessWidget {
           return _PhotoAnalyzingBubble(photoPath: msg.content, theme: theme);
         }
         return _MessageBubble(
+          key: ValueKey(msg.deliveryKey ?? '${msg.role}:${msg.createdAt}'),
           message: msg,
           theme: theme,
           isNewest: msgIndex == messages.length - 1 && !hasThinking,
+          onRendered: onRendered,
         );
       },
     );
@@ -1986,14 +2171,17 @@ class _MessageList extends StatelessWidget {
 
 class _MessageBubble extends StatefulWidget {
   const _MessageBubble({
+    super.key,
     required this.message,
     required this.theme,
     required this.isNewest,
+    required this.onRendered,
   });
 
   final ChatMessage message;
   final K2Theme theme;
   final bool isNewest;
+  final ValueChanged<ChatMessage> onRendered;
 
   @override
   State<_MessageBubble> createState() => _MessageBubbleState();
@@ -2036,69 +2224,77 @@ class _MessageBubbleState extends State<_MessageBubble>
     final isUser = widget.message.role == 'user';
     final t = widget.theme;
 
-    return FadeTransition(
-      opacity: _fade,
-      child: SlideTransition(
-        position: _slide,
-        child: Padding(
-          padding: EdgeInsets.only(
-            left: isUser ? 56 : 0,
-            right: isUser ? 0 : 56,
-            top: 3,
-            bottom: 7,
-          ),
-          child: Row(
-            mainAxisAlignment: isUser
-                ? MainAxisAlignment.end
-                : MainAxisAlignment.start,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Flexible(
-                child: Column(
-                  crossAxisAlignment: isUser
-                      ? CrossAxisAlignment.end
-                      : CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 10,
-                      ),
-                      decoration: BoxDecoration(
-                        color: isUser ? K2Colors.accent : t.surface,
-                        border: Border.all(color: t.border, width: 0.5),
-                        borderRadius: BorderRadius.only(
-                          topLeft: const Radius.circular(14),
-                          topRight: const Radius.circular(14),
-                          bottomLeft: Radius.circular(isUser ? 14 : 4),
-                          bottomRight: Radius.circular(isUser ? 4 : 14),
+    return ChatDeliveryRenderAck(
+      deliveryId: widget.message.deliveryKey,
+      onRendered: () => widget.onRendered(widget.message),
+      child: FadeTransition(
+        opacity: _fade,
+        child: SlideTransition(
+          position: _slide,
+          child: Padding(
+            padding: EdgeInsets.only(
+              left: isUser ? 56 : 0,
+              right: isUser ? 0 : 56,
+              top: 3,
+              bottom: 7,
+            ),
+            child: Row(
+              mainAxisAlignment: isUser
+                  ? MainAxisAlignment.end
+                  : MainAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Flexible(
+                  child: Column(
+                    crossAxisAlignment: isUser
+                        ? CrossAxisAlignment.end
+                        : CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isUser ? K2Colors.accent : t.surface,
+                          border: Border.all(color: t.border, width: 0.5),
+                          borderRadius: BorderRadius.only(
+                            topLeft: const Radius.circular(14),
+                            topRight: const Radius.circular(14),
+                            bottomLeft: Radius.circular(isUser ? 14 : 4),
+                            bottomRight: Radius.circular(isUser ? 4 : 14),
+                          ),
+                        ),
+                        child: Text(
+                          widget.message.content,
+                          style: TextStyle(
+                            fontFamily: K2Fonts.sans,
+                            fontSize: 14,
+                            height: 1.45,
+                            color: isUser ? Colors.white : t.fg,
+                          ),
                         ),
                       ),
-                      child: Text(
-                        widget.message.content,
-                        style: TextStyle(
-                          fontFamily: K2Fonts.sans,
-                          fontSize: 14,
-                          height: 1.45,
-                          color: isUser ? Colors.white : t.fg,
+                      Padding(
+                        padding: const EdgeInsets.only(
+                          top: 3,
+                          left: 4,
+                          right: 4,
+                        ),
+                        child: Text(
+                          _formatTime(widget.message.createdAt),
+                          style: TextStyle(
+                            fontFamily: K2Fonts.mono,
+                            fontSize: 10,
+                            color: t.fgMute,
+                          ),
                         ),
                       ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.only(top: 3, left: 4, right: 4),
-                      child: Text(
-                        _formatTime(widget.message.createdAt),
-                        style: TextStyle(
-                          fontFamily: K2Fonts.mono,
-                          fontSize: 10,
-                          color: t.fgMute,
-                        ),
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -2108,6 +2304,53 @@ class _MessageBubbleState extends State<_MessageBubble>
   String _formatTime(DateTime dt) =>
       '${dt.hour.toString().padLeft(2, '0')}:'
       '${dt.minute.toString().padLeft(2, '0')}';
+}
+
+class _ChatDeliveryErrorCard extends StatelessWidget {
+  const _ChatDeliveryErrorCard({required this.failure, required this.theme});
+
+  final ChatDeliveryFailure failure;
+  final K2Theme theme;
+
+  @override
+  Widget build(BuildContext context) {
+    final isRu = Localizations.localeOf(context).languageCode == 'ru';
+    final stage = switch (failure.stage) {
+      ChatDeliveryStage.requestCreated => isRu ? 'отправка' : 'sending',
+      ChatDeliveryStage.apiResponseReceived =>
+        isRu ? 'разбор ответа' : 'response parsing',
+      ChatDeliveryStage.responseParsed =>
+        isRu ? 'сохранение ответа' : 'response storage',
+      ChatDeliveryStage.durableReceived =>
+        isRu ? 'показ ответа' : 'response rendering',
+      ChatDeliveryStage.rendered =>
+        isRu ? 'подтверждение показа' : 'render acknowledgment',
+    };
+    return Semantics(
+      liveRegion: true,
+      label: 'chat_delivery_error_${failure.code.name}',
+      child: Container(
+        width: double.infinity,
+        margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: K2Colors.error.withValues(alpha: 0.08),
+          border: Border.all(color: K2Colors.error.withValues(alpha: 0.35)),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Text(
+          isRu
+              ? 'Ответ не доставлен. Этап: $stage. Повторите отправку.'
+              : 'The response was not delivered. Stage: $stage. Please retry.',
+          style: TextStyle(
+            fontFamily: K2Fonts.sans,
+            fontSize: 12,
+            color: theme.fg,
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

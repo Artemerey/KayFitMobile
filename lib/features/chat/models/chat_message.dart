@@ -5,6 +5,9 @@ class ChatMessage {
   final DateTime createdAt;
   final bool isLoading;
   final MealAdded? mealAdded;
+  final String? clientOperationId;
+  final String? correlationId;
+  final String? runId;
 
   const ChatMessage({
     this.id,
@@ -13,6 +16,9 @@ class ChatMessage {
     required this.createdAt,
     this.isLoading = false,
     this.mealAdded,
+    this.clientOperationId,
+    this.correlationId,
+    this.runId,
   });
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
@@ -25,8 +31,17 @@ class ChatMessage {
       mealAdded: ma != null
           ? MealAdded.fromJson(ma as Map<String, dynamic>)
           : null,
+      clientOperationId: json['client_operation_id'] as String?,
+      correlationId: json['correlation_id'] as String?,
+      runId: json['run_id'] as String?,
     );
   }
+
+  String? get deliveryKey => id != null
+      ? 'server:$id'
+      : clientOperationId != null
+      ? 'operation:$clientOperationId:$role'
+      : null;
 }
 
 class MealAdded {

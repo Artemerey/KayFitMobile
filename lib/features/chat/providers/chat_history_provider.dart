@@ -4,17 +4,18 @@
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/chat_message.dart';
+import '../delivery/chat_delivery.dart';
 
 class ChatHistoryNotifier extends Notifier<List<ChatMessage>> {
   @override
   List<ChatMessage> build() => const [];
 
   void setMessages(List<ChatMessage> messages) {
-    state = List.unmodifiable(messages);
+    state = List.unmodifiable(messages.deduplicatedByDeliveryIdentity());
   }
 
   void add(ChatMessage msg) {
-    state = [...state, msg];
+    state = [...state, msg].deduplicatedByDeliveryIdentity();
   }
 
   /// Remove the last message (used to roll back an optimistic user message
@@ -35,5 +36,5 @@ class ChatHistoryNotifier extends Notifier<List<ChatMessage>> {
 
 final chatHistoryProvider =
     NotifierProvider<ChatHistoryNotifier, List<ChatMessage>>(
-  ChatHistoryNotifier.new,
-);
+      ChatHistoryNotifier.new,
+    );
