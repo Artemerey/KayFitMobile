@@ -1,38 +1,22 @@
 === English (≤ 4000 chars) ===
 
-Kayfit 1.3.2
+Kayfit 1.4.0
 
-• Added Sign up with Apple alongside Apple sign-in
-• Added compact thumbs up/down directly to recognized meal cards before saving
-• Replaced the long correction link with a clear edit icon
-• Feedback buttons now lock after submission and confirm that your response was received
-• Fresh installs now start in English; Russian remains available from the language switcher
-• Fixed AI Chat opening errors and the stuck “parsing your message” indicator
-• Improved anonymous onboarding handoff so your calculated plan is preserved during registration
-• Fixed the app icon and duplicate first-photo recognition jobs
-• Added a consistent KAYFIT header across the app
-• Added a one-time celebration after logging your first meal
-• Feedback is available for photo, voice, text, barcode, chat, recipes, copied meals, and onboarding plans
-• Feedback is safely queued offline and delivered after connectivity or sign-in is restored
-• Fixed calorie plans for weight loss, maintenance, and muscle gain
-• Preserved the selected weight-loss pace and added safeguards against extreme calorie deficits
+• Meal saves are now safely retried without creating duplicate entries
+• Improved long voice input, pauses, restart, and late callbacks on Android
+• Preserved onboarding plans reliably through sign-in and registration
+• Improved nutrition-label recognition when both per-100-g and per-serving values are present
+• AI Chat responses survive restart or resume and appear exactly once
+• Added reliable offline incident delivery while keeping chat text and secrets out of diagnostics
 
 
 === Russian (≤ 4000 chars) ===
 
-Kayfit 1.3.2
+Kayfit 1.4.0
 
-• Добавлена регистрация через Apple наряду со входом через Apple
-• Компактные кнопки оценки теперь находятся прямо в карточке распознанной еды до сохранения
-• Длинная ссылка коррекции заменена понятным карандашом
-• После отправки оценки кнопки блокируются и показывают подтверждение
-• Чистая установка теперь запускается на английском; русский можно выбрать в переключателе
-• Исправлены ошибка открытия AI Chat и зависающий индикатор «parsing your message»
-• Рассчитанный в анонимном онбординге план теперь сохраняется при регистрации
-• Исправлены иконка приложения и дублирование первого фото
-• Добавлен единый фирменный header KAYFIT на экранах приложения
-• После первой записи еды появляется одноразовое поздравление
-• Оценка доступна для фото, голоса, текста, штрихкода, чата, рецептов, копирования и плана
-• Без связи оценка сохраняется и отправляется после восстановления сети или входа
-• Исправлены калорийные планы для похудения, поддержания веса и набора мышц
-• Скорость похудения сохраняется; добавлена защита от экстремального дефицита калорий
+• Сохранение еды теперь безопасно повторяется без дублей
+• Улучшены длинный голосовой ввод, паузы, повторный запуск и поздние callback на Android
+• План онбординга надёжно сохраняется при входе и регистрации
+• Улучшено распознавание этикеток, где одновременно указаны значения на 100 г и на порцию
+• Ответы AI Chat переживают перезапуск или возврат в приложение и появляются ровно один раз
+• Добавлена надёжная офлайн-доставка инцидентов без текста чата и секретов в диагностике
