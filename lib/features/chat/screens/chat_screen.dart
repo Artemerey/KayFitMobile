@@ -13,6 +13,9 @@ import 'package:kayfit/core/api/api_client.dart';
 import 'package:kayfit/core/auth/auth_provider.dart';
 import 'package:kayfit/core/feedback/feedback_models.dart';
 import 'package:kayfit/core/feedback/feedback_presenter.dart';
+import 'package:kayfit/core/feedback/feedback_metadata.dart';
+import 'package:kayfit/core/telemetry/recognition_flow.dart';
+import 'package:kayfit/core/telemetry/telemetry_client.dart';
 import 'package:kayfit/core/i18n/generated/app_localizations.dart';
 import 'package:kayfit/core/ai_consent/ai_consent_provider.dart';
 import 'package:kayfit/shared/theme/app_theme.dart';
@@ -93,14 +96,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     final consent = ref.read(aiConsentProvider);
     if (consent == false) {
       final isRu = Localizations.localeOf(context).languageCode == 'ru';
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(isRu
-            ? 'Чат с ИИ недоступен: вы отклонили использование ИИ'
-            : 'AI chat is unavailable: AI consent was declined'),
-        backgroundColor: AppColors.accentOver,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.sm)),
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            isRu
+                ? 'Чат с ИИ недоступен: вы отклонили использование ИИ'
+                : 'AI chat is unavailable: AI consent was declined',
+          ),
+          backgroundColor: AppColors.accentOver,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadius.sm),
+          ),
+        ),
+      );
       return;
     }
 
@@ -132,23 +141,34 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
     try {
       final utcOffsetHours = DateTime.now().timeZoneOffset.inHours;
+      final flow = RecognitionFlow.start(mode: RecognitionMode.chat);
+      final operation = flow.startOperation(RecognitionEndpoint.chat);
       final resp = await apiDio.post(
         '/api/chat/send',
         data: {
           'text': text,
           'language': lang,
           'utc_offset_hours': utcOffsetHours,
+          'client_flow_id': flow.id,
+          'client_operation_id': operation.id,
+          'release_version': FeedbackMetadata.current?.releaseVersion,
+          'build_number': FeedbackMetadata.current?.buildNumber,
+          'platform': FeedbackMetadata.current?.platform,
+          'network_class': 'unknown',
         },
         // Claude responses regularly take 40–60 s on slow LTE; the default
         // apiDio receiveTimeout (30 s) fires too early.
         options: Options(
           receiveTimeout: const Duration(seconds: 120),
           sendTimeout: const Duration(seconds: 30),
+          extra: {'recognition_operation': operation},
         ),
       );
       final reply = ChatMessage.fromJson(
         resp.data['message'] as Map<String, dynamic>,
       );
+      operation.markDecoded();
+      submitRecognitionTelemetry(operation);
       if (!mounted) return;
       setState(() {
         _messages.removeLast();
@@ -188,7 +208,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
             backgroundColor: AppColors.accentOver,
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppRadius.sm)),
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+            ),
           ),
         );
       }
@@ -237,7 +258,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadius.lg)),
+          borderRadius: BorderRadius.circular(AppRadius.lg),
+        ),
         title: Text(l10n.chat_clear),
         content: Text(l10n.chat_clear_confirm),
         actions: [
@@ -247,8 +269,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text(l10n.common_delete,
-                style: const TextStyle(color: AppColors.accentOver)),
+            child: Text(
+              l10n.common_delete,
+              style: const TextStyle(color: AppColors.accentOver),
+            ),
           ),
         ],
       ),
@@ -285,52 +309,54 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
               child: _isLoading
                   ? const Center(
                       child: CircularProgressIndicator(
-                          color: AppColors.accent, strokeWidth: 2.5),
+                        color: AppColors.accent,
+                        strokeWidth: 2.5,
+                      ),
                     )
                   : _messages.isEmpty
-                      ? _EmptyState(l10n: l10n, onSend: _sendSuggestion)
-                      : ListView.builder(
-                          controller: _scrollController,
-                          keyboardDismissBehavior:
-                              ScrollViewKeyboardDismissBehavior.onDrag,
-                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                          itemCount: _messages.length,
-                          itemBuilder: (context, index) {
-                            final msg = _messages[index];
-                            final bubble = _AnimatedBubble(
-                              message: msg,
-                              isNewest: index == _messages.length - 1,
+                  ? _EmptyState(l10n: l10n, onSend: _sendSuggestion)
+                  : ListView.builder(
+                      controller: _scrollController,
+                      keyboardDismissBehavior:
+                          ScrollViewKeyboardDismissBehavior.onDrag,
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                      itemCount: _messages.length,
+                      itemBuilder: (context, index) {
+                        final msg = _messages[index];
+                        final bubble = _AnimatedBubble(
+                          message: msg,
+                          isNewest: index == _messages.length - 1,
+                        );
+                        if (msg.role == 'assistant' && !msg.isLoading) {
+                          if (msg.mealAdded != null) {
+                            return Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                bubble,
+                                _MealAddedBadge(meal: msg.mealAdded!),
+                              ],
                             );
-                            if (msg.role == 'assistant' && !msg.isLoading) {
-                              if (msg.mealAdded != null) {
-                                return Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    bubble,
-                                    _MealAddedBadge(meal: msg.mealAdded!),
-                                  ],
-                                );
-                              }
-                              if (_isFoodConfirmation(msg.content)) {
-                                final userMsg = _precedingUserMessage(index);
-                                if (userMsg != null) {
-                                  return Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      bubble,
-                                      _CorrectionChip(
-                                        onTap: () => _correctMessage(userMsg),
-                                      ),
-                                    ],
-                                  );
-                                }
-                              }
+                          }
+                          if (_isFoodConfirmation(msg.content)) {
+                            final userMsg = _precedingUserMessage(index);
+                            if (userMsg != null) {
+                              return Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  bubble,
+                                  _CorrectionChip(
+                                    onTap: () => _correctMessage(userMsg),
+                                  ),
+                                ],
+                              );
                             }
-                            return bubble;
-                          },
-                        ),
+                          }
+                        }
+                        return bubble;
+                      },
+                    ),
             ),
 
             // ── Input row ───────────────────────────────────────────────
@@ -411,8 +437,11 @@ class _ChatHeader extends StatelessWidget {
                     ),
                   ],
                 ),
-                child: const Icon(Icons.psychology_rounded,
-                    color: Colors.white, size: 26),
+                child: const Icon(
+                  Icons.psychology_rounded,
+                  color: Colors.white,
+                  size: 26,
+                ),
               );
             },
           ),
@@ -456,8 +485,11 @@ class _ChatHeader extends StatelessWidget {
           ),
           if (hasMessages)
             IconButton(
-              icon: const Icon(Icons.delete_outline_rounded,
-                  color: Colors.white, size: 22),
+              icon: const Icon(
+                Icons.delete_outline_rounded,
+                color: Colors.white,
+                size: 22,
+              ),
               tooltip: l10n.chat_clear,
               onPressed: onClear,
             ),
@@ -517,8 +549,7 @@ class _EmptyStateState extends State<_EmptyState>
             AnimatedBuilder(
               animation: _pulseCtrl,
               builder: (context, child) {
-                final scale =
-                    1.0 + 0.06 * math.sin(_pulseCtrl.value * math.pi);
+                final scale = 1.0 + 0.06 * math.sin(_pulseCtrl.value * math.pi);
                 return Transform.scale(scale: scale, child: child);
               },
               child: Container(
@@ -539,8 +570,11 @@ class _EmptyStateState extends State<_EmptyState>
                     ),
                   ],
                 ),
-                child: const Icon(Icons.psychology_rounded,
-                    color: Colors.white, size: 40),
+                child: const Icon(
+                  Icons.psychology_rounded,
+                  color: Colors.white,
+                  size: 40,
+                ),
               ),
             ),
             const SizedBox(height: 20),
@@ -565,10 +599,9 @@ class _EmptyStateState extends State<_EmptyState>
             ),
             const SizedBox(height: 28),
             // Suggestion chips
-            ...suggestions.map((s) => _SuggestionChip(
-                  text: s,
-                  onTap: () => widget.onSend(s),
-                )),
+            ...suggestions.map(
+              (s) => _SuggestionChip(text: s, onTap: () => widget.onSend(s)),
+            ),
           ],
         ),
       ),
@@ -619,8 +652,11 @@ class _SuggestionChipState extends State<_SuggestionChip> {
                 ),
               ),
             ),
-            const Icon(Icons.arrow_forward_ios_rounded,
-                size: 13, color: AppColors.textMuted),
+            const Icon(
+              Icons.arrow_forward_ios_rounded,
+              size: 13,
+              color: AppColors.textMuted,
+            ),
           ],
         ),
       ),
@@ -702,8 +738,9 @@ class _MessageBubble extends StatelessWidget {
         bottom: 4,
       ),
       child: Row(
-        mainAxisAlignment:
-            isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+        mainAxisAlignment: isUser
+            ? MainAxisAlignment.end
+            : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           if (!isUser) ...[
@@ -719,14 +756,18 @@ class _MessageBubble extends StatelessWidget {
                 ),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.psychology_rounded,
-                  color: Colors.white, size: 16),
+              child: const Icon(
+                Icons.psychology_rounded,
+                color: Colors.white,
+                size: 16,
+              ),
             ),
           ],
           Flexible(
             child: Column(
-              crossAxisAlignment:
-                  isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+              crossAxisAlignment: isUser
+                  ? CrossAxisAlignment.end
+                  : CrossAxisAlignment.start,
               children: [
                 Container(
                   padding: const EdgeInsets.symmetric(
@@ -761,35 +802,39 @@ class _MessageBubble extends StatelessWidget {
                   child: message.isLoading
                       ? const _TypingIndicator()
                       : isUser
-                          ? Text(
-                              message.content,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 15,
-                                height: 1.45,
-                              ),
-                            )
-                          : MarkdownBody(
-                              data: message.content,
-                              styleSheet: MarkdownStyleSheet(
-                                p: const TextStyle(
-                                    color: AppColors.text,
-                                    fontSize: 15,
-                                    height: 1.45),
-                                strong: const TextStyle(
-                                    color: AppColors.text,
-                                    fontWeight: FontWeight.w700),
-                                pPadding: EdgeInsets.zero,
-                              ),
-                              shrinkWrap: true,
+                      ? Text(
+                          message.content,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            height: 1.45,
+                          ),
+                        )
+                      : MarkdownBody(
+                          data: message.content,
+                          styleSheet: MarkdownStyleSheet(
+                            p: const TextStyle(
+                              color: AppColors.text,
+                              fontSize: 15,
+                              height: 1.45,
                             ),
+                            strong: const TextStyle(
+                              color: AppColors.text,
+                              fontWeight: FontWeight.w700,
+                            ),
+                            pPadding: EdgeInsets.zero,
+                          ),
+                          shrinkWrap: true,
+                        ),
                 ),
                 Padding(
                   padding: const EdgeInsets.only(top: 3, left: 4, right: 4),
                   child: Text(
                     _fmt(message.createdAt),
                     style: const TextStyle(
-                        fontSize: 10, color: AppColors.textMuted),
+                      fontSize: 10,
+                      color: AppColors.textMuted,
+                    ),
                   ),
                 ),
               ],
@@ -1017,8 +1062,11 @@ class _InputRowState extends State<_InputRow>
                           color: Colors.white,
                         ),
                       )
-                    : const Icon(Icons.send_rounded,
-                        color: Colors.white, size: 20),
+                    : const Icon(
+                        Icons.send_rounded,
+                        color: Colors.white,
+                        size: 20,
+                      ),
               ),
             ),
           ),
@@ -1048,7 +1096,9 @@ class _ChatDisclaimerBanner extends StatelessWidget {
         ? 'Ответы ИИ носят информационный характер и не заменяют консультацию врача. Основано на: '
         : 'AI-generated responses are for informational purposes only and do not replace professional medical advice. Based on: ';
 
-    final whoLabel = isRu ? 'Рекомендации ВОЗ/ФАО' : 'WHO/FAO Dietary Guidelines';
+    final whoLabel = isRu
+        ? 'Рекомендации ВОЗ/ФАО'
+        : 'WHO/FAO Dietary Guidelines';
     final usdaLabel = isRu ? 'Рекомендации USDA' : 'USDA Dietary Guidelines';
 
     return Container(
@@ -1065,7 +1115,11 @@ class _ChatDisclaimerBanner extends StatelessWidget {
         children: [
           const Padding(
             padding: EdgeInsets.only(top: 1),
-            child: Icon(Icons.info_outline, size: 14, color: AppColors.textMuted),
+            child: Icon(
+              Icons.info_outline,
+              size: 14,
+              color: AppColors.textMuted,
+            ),
           ),
           const SizedBox(width: 8),
           Expanded(
@@ -1087,9 +1141,9 @@ class _ChatDisclaimerBanner extends StatelessWidget {
                     ),
                     recognizer: TapGestureRecognizer()
                       ..onTap = () => launchUrl(
-                            Uri.parse(_whoUrl),
-                            mode: LaunchMode.externalApplication,
-                          ),
+                        Uri.parse(_whoUrl),
+                        mode: LaunchMode.externalApplication,
+                      ),
                   ),
                   const TextSpan(text: ', '),
                   TextSpan(
@@ -1101,9 +1155,9 @@ class _ChatDisclaimerBanner extends StatelessWidget {
                     ),
                     recognizer: TapGestureRecognizer()
                       ..onTap = () => launchUrl(
-                            Uri.parse(_usdaUrl),
-                            mode: LaunchMode.externalApplication,
-                          ),
+                        Uri.parse(_usdaUrl),
+                        mode: LaunchMode.externalApplication,
+                      ),
                   ),
                   const TextSpan(text: '.'),
                 ],
@@ -1138,7 +1192,11 @@ class _MealAddedBadge extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.check_circle_rounded, size: 13, color: Color(0xFF16A34A)),
+            const Icon(
+              Icons.check_circle_rounded,
+              size: 13,
+              color: Color(0xFF16A34A),
+            ),
             const SizedBox(width: 5),
             Text(
               'Добавлено: ${meal.name} — ${meal.calories.toStringAsFixed(0)} ккал',

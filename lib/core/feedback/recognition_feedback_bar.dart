@@ -8,6 +8,8 @@ import 'feedback_models.dart';
 import 'feedback_metadata.dart';
 import 'feedback_prompt.dart';
 import '../i18n/generated/app_localizations.dart';
+import '../telemetry/recognition_flow.dart';
+import 'secure_uuid.dart';
 
 class RecognitionFeedbackBar extends StatefulWidget {
   const RecognitionFeedbackBar({
@@ -16,12 +18,14 @@ class RecognitionFeedbackBar extends StatefulWidget {
     this.userId,
     this.contextData = const {},
     this.margin = const EdgeInsets.fromLTRB(20, 12, 20, 4),
+    this.flow,
   });
 
   final FeedbackSource source;
   final int? userId;
   final Map<String, Object> contextData;
   final EdgeInsetsGeometry margin;
+  final RecognitionFlow? flow;
 
   @override
   State<RecognitionFeedbackBar> createState() => _RecognitionFeedbackBarState();
@@ -71,10 +75,17 @@ class _RecognitionFeedbackBarState extends State<RecognitionFeedbackBar> {
           source: widget.source,
           reasons: reasons,
           comment: comment,
-          context: widget.contextData,
+          context: {
+            ...widget.contextData,
+            if (widget.flow != null) ...widget.flow!.feedbackContext(),
+          },
           locale: locale,
           appVersion: FeedbackMetadata.current?.appVersion,
           platform: FeedbackMetadata.current?.platform,
+          clientFlowId: widget.flow?.id,
+          clientOperationId: widget.flow == null ? null : SecureUuid.v4(),
+          buildNumber: FeedbackMetadata.current?.buildNumber,
+          networkClass: 'unknown',
         ),
         ownerBinding: owner,
       );

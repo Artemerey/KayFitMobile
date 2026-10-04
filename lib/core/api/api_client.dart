@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../auth/secure_token_storage.dart';
 import '../auth/token_pair.dart';
 import 'locale_interceptor.dart';
+import '../telemetry/recognition_flow.dart';
 
 export '../auth/secure_token_storage.dart';
 export '../auth/token_pair.dart';
@@ -42,18 +43,21 @@ Future<void> initApiClient({
 }) async {
   secureTokenStorage = storage ?? SecureTokenStorageImpl();
 
-  apiDio = Dio(BaseOptions(
-    baseUrl: _baseUrl,
-    // 30s connect — production tester hit `[connection timeout]` after 15s on
-    // weak LTE because the TLS handshake couldn't complete in time. Server
-    // round-trip from a healthy network is <100ms, so 30s only kicks in when
-    // the radio is genuinely degraded and we'd rather wait than instantly fail.
-    connectTimeout: const Duration(seconds: 30),
-    receiveTimeout: const Duration(seconds: 30),
-    headers: {'Content-Type': 'application/json'},
-  ));
+  apiDio = Dio(
+    BaseOptions(
+      baseUrl: _baseUrl,
+      // 30s connect — production tester hit `[connection timeout]` after 15s on
+      // weak LTE because the TLS handshake couldn't complete in time. Server
+      // round-trip from a healthy network is <100ms, so 30s only kicks in when
+      // the radio is genuinely degraded and we'd rather wait than instantly fail.
+      connectTimeout: const Duration(seconds: 30),
+      receiveTimeout: const Duration(seconds: 30),
+      headers: {'Content-Type': 'application/json'},
+    ),
+  );
 
   apiDio.interceptors.add(LocaleInterceptor());
+  apiDio.interceptors.add(_RecognitionTelemetryInterceptor());
 
   apiDio.interceptors.add(
     _AuthInterceptor(
@@ -132,11 +136,14 @@ class _AuthInterceptor extends Interceptor {
     }
 
     // ── If a refresh is already in progress, wait for it then retry ──────────
+    final telemetry = err.requestOptions.extra['recognition_operation'];
+    if (telemetry is RecognitionOperation) telemetry.markAuthRefresh();
     if (_refreshCompleter != null) {
       final newToken = await _refreshCompleter!.future;
       if (newToken != null) {
         try {
           final opts = _cloneForRetry(err.requestOptions, newToken);
+          if (telemetry is RecognitionOperation) telemetry.markRetry();
           final retryResp = await _dio.fetch(opts);
           handler.resolve(retryResp);
         } catch (_) {
@@ -165,11 +172,13 @@ class _AuthInterceptor extends Interceptor {
 
       final refreshDio = _refreshDioFactory != null
           ? _refreshDioFactory()
-          : Dio(BaseOptions(
-              baseUrl: _baseUrl,
-              connectTimeout: const Duration(seconds: 30),
-              receiveTimeout: const Duration(seconds: 15),
-            ));
+          : Dio(
+              BaseOptions(
+                baseUrl: _baseUrl,
+                connectTimeout: const Duration(seconds: 30),
+                receiveTimeout: const Duration(seconds: 15),
+              ),
+            );
       final resp = await refreshDio.post(
         '/api/v1/auth/refresh',
         data: {'refresh_token': refreshToken},
@@ -228,6 +237,7 @@ class _AuthInterceptor extends Interceptor {
     // Retry the original request that triggered the 401
     try {
       final opts = _cloneForRetry(err.requestOptions, newAccess);
+      if (telemetry is RecognitionOperation) telemetry.markRetry();
       final retryResp = await _dio.fetch(opts);
       handler.resolve(retryResp);
     } catch (e) {
@@ -249,7 +259,9 @@ class _AuthInterceptor extends Interceptor {
   /// the stream from the same fields/files. Other body types (Map, String,
   /// bytes) are safe to re-send as-is.
   RequestOptions _cloneForRetry(RequestOptions opts, String newAccessToken) {
-    final data = opts.data is FormData ? (opts.data as FormData).clone() : opts.data;
+    final data = opts.data is FormData
+        ? (opts.data as FormData).clone()
+        : opts.data;
     final headers = Map<String, dynamic>.from(opts.headers)
       ..['Authorization'] = 'Bearer $newAccessToken';
     return opts.copyWith(data: data, headers: headers);
@@ -260,6 +272,35 @@ class _AuthInterceptor extends Interceptor {
     // Notify AuthNotifier immediately so GoRouter redirects to /login without
     // waiting for the next checkSession() (app resume or cold start).
     _sessionExpiredController.add(null);
+  }
+}
+
+class _RecognitionTelemetryInterceptor extends Interceptor {
+  @override
+  void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
+    final operation = options.extra['recognition_operation'];
+    if (operation is RecognitionOperation) {
+      operation.markRequestStarted();
+      options.headers['X-Client-Operation-ID'] = operation.id;
+      options.headers['X-Client-Flow-ID'] = operation.flowId;
+    } else if (options.data is Map) {
+      final id = (options.data as Map)['client_operation_id'];
+      if (id is String && id.isNotEmpty) {
+        options.headers['X-Client-Operation-ID'] = id;
+        final flowId = (options.data as Map)['client_flow_id'];
+        if (flowId is String && flowId.isNotEmpty) {
+          options.headers['X-Client-Flow-ID'] = flowId;
+        }
+      }
+    }
+    handler.next(options);
+  }
+
+  @override
+  void onResponse(Response response, ResponseInterceptorHandler handler) {
+    final operation = response.requestOptions.extra['recognition_operation'];
+    if (operation is RecognitionOperation) operation.markResponseReceived();
+    handler.next(response);
   }
 }
 

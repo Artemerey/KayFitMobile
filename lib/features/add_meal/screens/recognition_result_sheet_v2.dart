@@ -11,7 +11,10 @@ import '../../../core/analytics/analytics_service.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/auth/auth_provider.dart';
 import '../../../core/feedback/feedback_models.dart';
+import '../../../core/feedback/feedback_metadata.dart';
+import '../../../core/feedback/secure_uuid.dart';
 import '../../../core/feedback/recognition_feedback_bar.dart';
+import '../../../core/telemetry/recognition_flow.dart';
 import '../../../core/meal_logging/meal_log_operation.dart';
 import '../../../core/meal_logging/meal_log_operation_provider.dart';
 import '../../../features/dashboard/providers/dashboard_provider.dart';
@@ -53,6 +56,8 @@ class RecognitionResultSheetV2 extends ConsumerStatefulWidget {
   final FeedbackSource feedbackSource;
   final Duration? recognitionDuration;
   final RecognitionClarification? clarification;
+  final RecognitionFlow? flow;
+  final String? runId;
 
   const RecognitionResultSheetV2({
     super.key,
@@ -63,6 +68,8 @@ class RecognitionResultSheetV2 extends ConsumerStatefulWidget {
     this.feedbackSource = FeedbackSource.photo,
     this.recognitionDuration,
     this.clarification,
+    this.flow,
+    this.runId,
   });
 
   @override
@@ -93,7 +100,9 @@ class _RecognitionResultSheetV2State
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _ensureOperation();
+      if (!mounted) return;
+      _ensureOperation();
+      _acknowledgeMeaningfulFrame();
     });
     _items = List.from(widget.ingredients);
     _dishName = widget.dishName;
@@ -103,6 +112,22 @@ class _RecognitionResultSheetV2State
 
   String _ensureOperation() {
     if (_operationId case final id?) return id;
+    if (widget.flow case final flow?) {
+      final id = flow.startOperation(RecognitionEndpoint.save).id;
+      final source = switch (widget.feedbackSource) {
+        FeedbackSource.voice => MealLogSource.voice,
+        FeedbackSource.text => MealLogSource.text,
+        FeedbackSource.manual => MealLogSource.manual,
+        FeedbackSource.barcode => MealLogSource.barcode,
+        _ => MealLogSource.photo,
+      };
+      ref.read(mealLogOperationProvider.notifier).resumeOrCreate(id, source);
+      _operationId = id;
+      ref
+          .read(mealLogOperationProvider.notifier)
+          .advance(id, MealLogStage.recognitionCompleted);
+      return id;
+    }
     final operation = ref.read(mealLogOperationProvider.notifier).start(
       switch (widget.feedbackSource) {
         FeedbackSource.voice => MealLogSource.voice,
@@ -117,6 +142,43 @@ class _RecognitionResultSheetV2State
         .read(mealLogOperationProvider.notifier)
         .advance(operation.id, MealLogStage.recognitionCompleted);
     return operation.id;
+  }
+
+  Future<void> _acknowledgeMeaningfulFrame() async {
+    final flow = widget.flow;
+    final runId = widget.runId;
+    if (flow == null || runId == null || _items.isEmpty) return;
+    flow.markMeaningfulFrame();
+    final operation = flow.startOperation(RecognitionEndpoint.displayAck);
+    try {
+      await apiDio.post(
+        '/api/v2/meal/display-ack',
+        data: {
+          'event_id': SecureUuid.v4(),
+          'run_id': runId,
+          'displayed_payload': {
+            'items': _items
+                .map(
+                  (item) => {
+                    'name': item.name,
+                    'weight_grams': item.weightGrams,
+                  },
+                )
+                .toList(),
+          },
+          'displayed_at': DateTime.now().toUtc().toIso8601String(),
+          'app_version': FeedbackMetadata.current?.appVersion,
+          'platform': FeedbackMetadata.current?.platform,
+          'client_flow_id': flow.id,
+          'client_operation_id': operation.id,
+          'release_version': FeedbackMetadata.current?.releaseVersion,
+          'build_number': FeedbackMetadata.current?.buildNumber,
+          'network_class': 'unknown',
+          'tap_to_meaningful_frame_ms': flow.meaningfulFrameMs,
+        },
+        options: Options(extra: {'recognition_operation': operation}),
+      );
+    } on Object {}
   }
 
   @override
@@ -334,6 +396,7 @@ class _RecognitionResultSheetV2State
     if (!_clarificationConfirmed) return;
     if (_saving || _selected.isEmpty) return;
     setState(() => _saving = true);
+    widget.flow?.markSaveTap();
     HapticFeedback.mediumImpact();
 
     try {
@@ -380,6 +443,11 @@ class _RecognitionResultSheetV2State
               'items': items,
               'dish_name': widget.dishName,
               'meal_type': _mealType,
+              if (widget.flow != null) 'client_flow_id': widget.flow!.id,
+              'release_version': FeedbackMetadata.current?.releaseVersion,
+              'build_number': FeedbackMetadata.current?.buildNumber,
+              'platform': FeedbackMetadata.current?.platform,
+              'network_class': 'unknown',
               if (widget.mealDate != null)
                 'date':
                     '${widget.mealDate!.year.toString().padLeft(4, '0')}-'
@@ -600,6 +668,7 @@ class _RecognitionResultSheetV2State
                       RecognitionFeedbackBar(
                         source: widget.feedbackSource,
                         userId: userId,
+                        flow: widget.flow,
                         contextData: {
                           'item_count': _selected.length,
                           'total_calories_rounded': totals.calories.round(),

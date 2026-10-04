@@ -12,6 +12,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/ingredient_v2.dart';
 import '../../../core/feedback/feedback_models.dart';
+import '../../../core/telemetry/recognition_flow.dart';
 
 /// Snapshot of the "pending meal confirm" UI shown at the bottom of the chat.
 ///
@@ -27,6 +28,8 @@ class PendingMealState {
     this.feedbackSource = FeedbackSource.text,
     this.recognitionDuration,
     this.operationId,
+    this.flow,
+    this.runId,
   });
 
   final List<IngredientV2>? items;
@@ -35,6 +38,8 @@ class PendingMealState {
   final FeedbackSource feedbackSource;
   final Duration? recognitionDuration;
   final String? operationId;
+  final RecognitionFlow? flow;
+  final String? runId;
 
   bool get isActive => items != null && items!.isNotEmpty;
 
@@ -45,6 +50,8 @@ class PendingMealState {
     FeedbackSource? feedbackSource,
     Duration? recognitionDuration,
     Object? operationId = _sentinel,
+    Object? flow = _sentinel,
+    Object? runId = _sentinel,
   }) {
     return PendingMealState(
       items: identical(items, _sentinel)
@@ -57,6 +64,8 @@ class PendingMealState {
       operationId: identical(operationId, _sentinel)
           ? this.operationId
           : operationId as String?,
+      flow: identical(flow, _sentinel) ? this.flow : flow as RecognitionFlow?,
+      runId: identical(runId, _sentinel) ? this.runId : runId as String?,
     );
   }
 
@@ -75,6 +84,8 @@ class PendingMealNotifier extends Notifier<PendingMealState> {
     FeedbackSource feedbackSource = FeedbackSource.text,
     Duration? recognitionDuration,
     String? operationId,
+    RecognitionFlow? flow,
+    String? runId,
   }) {
     state = state.copyWith(
       items: items,
@@ -83,11 +94,19 @@ class PendingMealNotifier extends Notifier<PendingMealState> {
       feedbackSource: feedbackSource,
       recognitionDuration: recognitionDuration,
       operationId: operationId,
+      flow: flow,
+      runId: runId,
     );
   }
 
   void clear() {
-    state = state.copyWith(items: null, isAdding: false, operationId: null);
+    state = state.copyWith(
+      items: null,
+      isAdding: false,
+      operationId: null,
+      flow: null,
+      runId: null,
+    );
   }
 
   void setMealType(String mealType) {

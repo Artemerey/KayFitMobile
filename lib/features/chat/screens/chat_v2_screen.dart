@@ -39,6 +39,10 @@ import '../../../core/auth/auth_provider.dart';
 import '../../../core/feedback/feedback_models.dart';
 import '../../../core/feedback/secure_uuid.dart';
 import '../../../core/feedback/feedback_presenter.dart';
+import '../../../core/feedback/feedback_metadata.dart';
+import '../../../core/telemetry/recognition_flow.dart';
+import '../../../core/telemetry/telemetry_client.dart';
+import '../../../core/telemetry/meaningful_frame_ack.dart';
 import '../../../core/meal_logging/meal_log_operation.dart';
 import '../../../core/meal_logging/meal_log_operation_provider.dart';
 import '../../../core/meal_logging/meal_log_incident.dart';
@@ -559,6 +563,9 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     });
     processingNotifier.state = true;
     _scrollToBottom();
+    final recognitionFlow = RecognitionFlow.start(
+      mode: _fromVoice ? RecognitionMode.voice : RecognitionMode.chat,
+    );
 
     try {
       AnalyticsService.chatMessageSent(ref.read(chatHistoryProvider).length);
@@ -609,6 +616,7 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
         skipClarify: forceMealFlow,
         isVoice: isVoice,
         operationId: voiceOperationId,
+        flow: recognitionFlow,
       );
       if (routed) {
         // This early return bypasses the consultant branch's `finally`, so
@@ -639,12 +647,21 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
 
     try {
       final utcOffsetHours = DateTime.now().timeZoneOffset.inHours;
+      final chatOperation = recognitionFlow.startOperation(
+        RecognitionEndpoint.chat,
+      );
       final resp = await apiDio.post(
         '/api/chat/send',
         data: {
           'text': text,
           'language': lang,
           'utc_offset_hours': utcOffsetHours,
+          'client_flow_id': recognitionFlow.id,
+          'client_operation_id': chatOperation.id,
+          'release_version': FeedbackMetadata.current?.releaseVersion,
+          'build_number': FeedbackMetadata.current?.buildNumber,
+          'platform': FeedbackMetadata.current?.platform,
+          'network_class': 'unknown',
         },
         // Claude responses regularly take 40–60 s on slow LTE; the default
         // apiDio receiveTimeout (30 s) fires too early and the user sees
@@ -652,6 +669,7 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
         options: Options(
           receiveTimeout: const Duration(seconds: 120),
           sendTimeout: const Duration(seconds: 30),
+          extra: {'recognition_operation': chatOperation},
         ),
       );
       try {
@@ -682,6 +700,8 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
           Map<String, dynamic>.from(resp.data as Map),
         );
         await deliveryStorage.markParsed(deliveryOperation, reply);
+        chatOperation.markDecoded();
+        submitRecognitionTelemetry(chatOperation);
       } on Object {
         _setDeliveryFailure(
           ChatDeliveryFailure(
@@ -822,25 +842,44 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     bool skipClarify = false,
     bool isVoice = false,
     String? operationId,
+    RecognitionFlow? flow,
   }) async {
     // Pre-capture before the API await — ref is invalid after navigation.
     final pendingMealNotifier = ref.read(pendingMealProvider.notifier);
     final recognitionTimer = Stopwatch()..start();
     try {
+      final activeFlow =
+          flow ??
+          RecognitionFlow.start(
+            mode: isVoice ? RecognitionMode.voice : RecognitionMode.text,
+          );
+      final parseOperation = activeFlow.startOperation(
+        RecognitionEndpoint.parse,
+      );
       final resp = await apiDio.post(
         '/api/v2/parse_meal_suggestions',
-        data: mealParseRequestData(
-          text: text,
-          language: lang,
-          voiceProvenance: isVoice,
-        ),
+        data: {
+          ...mealParseRequestData(
+            text: text,
+            language: lang,
+            voiceProvenance: isVoice,
+          ),
+          'client_flow_id': activeFlow.id,
+          'client_operation_id': parseOperation.id,
+          'release_version': FeedbackMetadata.current?.releaseVersion,
+          'build_number': FeedbackMetadata.current?.buildNumber,
+          'platform': FeedbackMetadata.current?.platform,
+          'network_class': 'unknown',
+        },
         // Claude + FatSecret round-trip can take 40-60 s; global 30 s
         // receiveTimeout aborts too early on slow runs.
         options: Options(
           receiveTimeout: const Duration(seconds: 120),
           sendTimeout: const Duration(seconds: 30),
+          extra: {'recognition_operation': parseOperation},
         ),
       );
+      parseOperation.markDecoded();
       final clarification = resp.data['clarification'];
       if (clarification is Map) {
         if (!mounted) return true;
@@ -865,6 +904,17 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
         return true;
       }
       final rawItems = (resp.data['items'] as List<dynamic>?) ?? [];
+      final cacheCount = rawItems
+          .where((item) => item is Map && item['source'] == 'cache')
+          .length;
+      parseOperation.markResponseReceived(
+        cacheOutcome: cacheCount == rawItems.length && rawItems.isNotEmpty
+            ? CacheOutcome.hit
+            : cacheCount > 0
+            ? CacheOutcome.partial
+            : CacheOutcome.miss,
+      );
+      submitRecognitionTelemetry(parseOperation);
       if (rawItems.isEmpty) return false;
 
       final missingWeight = <String>[];
@@ -935,6 +985,8 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
         feedbackSource: isVoice ? FeedbackSource.voice : FeedbackSource.text,
         recognitionDuration: recognitionTimer.elapsed,
         operationId: operation.id,
+        flow: activeFlow,
+        runId: resp.data['run_id']?.toString(),
       );
       if (isVoice) unawaited(VoiceDraftStorage.clear());
       if (mounted) _scrollToBottom();
@@ -942,6 +994,44 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
     } on Exception {
       return false;
     }
+  }
+
+  Future<void> _ackPendingMealDisplayed(PendingMealState pending) async {
+    final flow = pending.flow;
+    final runId = pending.runId;
+    final items = pending.items;
+    if (flow == null || runId == null || items == null || items.isEmpty) return;
+    flow.markMeaningfulFrame();
+    final operation = flow.startOperation(RecognitionEndpoint.displayAck);
+    try {
+      await apiDio.post(
+        '/api/v2/meal/display-ack',
+        data: {
+          'event_id': SecureUuid.v4(),
+          'run_id': runId,
+          'displayed_payload': {
+            'items': items
+                .map(
+                  (item) => {
+                    'name': item.name,
+                    'weight_grams': item.weightGrams,
+                  },
+                )
+                .toList(),
+          },
+          'displayed_at': DateTime.now().toUtc().toIso8601String(),
+          'app_version': FeedbackMetadata.current?.appVersion,
+          'platform': FeedbackMetadata.current?.platform,
+          'client_flow_id': flow.id,
+          'client_operation_id': operation.id,
+          'release_version': FeedbackMetadata.current?.releaseVersion,
+          'build_number': FeedbackMetadata.current?.buildNumber,
+          'network_class': 'unknown',
+          'tap_to_meaningful_frame_ms': flow.meaningfulFrameMs,
+        },
+        options: Options(extra: {'recognition_operation': operation}),
+      );
+    } on Object {}
   }
 
   /// Infer breakfast/lunch/snack/dinner from current local time.
@@ -1110,6 +1200,12 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
               'items': items,
               'dish_name': pending.map((i) => i.name).join(', '),
               'meal_type': pendingState.mealType,
+              if (pendingState.flow != null)
+                'client_flow_id': pendingState.flow!.id,
+              'release_version': FeedbackMetadata.current?.releaseVersion,
+              'build_number': FeedbackMetadata.current?.buildNumber,
+              'platform': FeedbackMetadata.current?.platform,
+              'network_class': 'unknown',
             },
           );
 
@@ -1909,21 +2005,29 @@ class _ChatV2ScreenState extends ConsumerState<ChatV2Screen>
 
             // ── Pending meal confirm card ──────────────────────────────────
             if (pendingMeal.isActive)
-              _PendingMealCard(
-                items: pendingMeal.items!,
-                mealType: pendingMeal.mealType,
-                onMealTypeChanged: ref
-                    .read(pendingMealProvider.notifier)
-                    .setMealType,
-                isAdding: pendingMeal.isAdding,
-                onAdd: _confirmAddPendingMeal,
-                onCancel: _cancelPendingMeal,
-                onEditItem: _onEditPendingItem,
-                onWeightChange: _onPendingItemWeightChange,
-                feedbackSource: pendingMeal.feedbackSource,
-                recognitionDuration: pendingMeal.recognitionDuration,
-                userId: ref.watch(authNotifierProvider).valueOrNull?.id,
-                theme: t,
+              MeaningfulFrameAck(
+                identity:
+                    pendingMeal.runId ?? pendingMeal.operationId ?? 'pending',
+                meaningful: pendingMeal.isActive,
+                onRendered: () =>
+                    unawaited(_ackPendingMealDisplayed(pendingMeal)),
+                child: _PendingMealCard(
+                  items: pendingMeal.items!,
+                  mealType: pendingMeal.mealType,
+                  onMealTypeChanged: ref
+                      .read(pendingMealProvider.notifier)
+                      .setMealType,
+                  isAdding: pendingMeal.isAdding,
+                  onAdd: _confirmAddPendingMeal,
+                  onCancel: _cancelPendingMeal,
+                  onEditItem: _onEditPendingItem,
+                  onWeightChange: _onPendingItemWeightChange,
+                  feedbackSource: pendingMeal.feedbackSource,
+                  recognitionDuration: pendingMeal.recognitionDuration,
+                  userId: ref.watch(authNotifierProvider).valueOrNull?.id,
+                  flow: pendingMeal.flow,
+                  theme: t,
+                ),
               ),
 
             // ── Attach toolbar ─────────────────────────────────────────────
@@ -2897,6 +3001,7 @@ class _PendingMealCard extends StatelessWidget {
     required this.feedbackSource,
     this.recognitionDuration,
     required this.userId,
+    this.flow,
     required this.theme,
   });
 
@@ -2919,6 +3024,7 @@ class _PendingMealCard extends StatelessWidget {
   final FeedbackSource feedbackSource;
   final Duration? recognitionDuration;
   final int? userId;
+  final RecognitionFlow? flow;
 
   final K2Theme theme;
 
@@ -3047,6 +3153,7 @@ class _PendingMealCard extends StatelessWidget {
               RecognitionFeedbackBar(
                 source: feedbackSource,
                 userId: userId,
+                flow: flow,
                 margin: EdgeInsets.zero,
                 contextData: {
                   'item_count': items.length,

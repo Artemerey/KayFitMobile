@@ -14,6 +14,9 @@ import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../../core/api/api_client.dart';
+import '../../../core/feedback/feedback_metadata.dart';
+import '../../../core/telemetry/recognition_flow.dart';
+import '../../../core/telemetry/telemetry_client.dart';
 import '../../../shared/theme/app_theme.dart';
 import '../../../shared/utils/nutrient_parser.dart';
 import '../../../shared/widgets/keyboard_dismisser.dart';
@@ -136,18 +139,48 @@ class _AddMealSheetState extends ConsumerState<AddMealSheet>
     FeedbackSource feedbackSource = FeedbackSource.text,
   }) async {
     if (manageLoading) setState(() => _loadingType = _LoadingType.parsing);
+    final flow = RecognitionFlow.start(
+      mode: feedbackSource == FeedbackSource.voice
+          ? RecognitionMode.voice
+          : RecognitionMode.text,
+    );
+    final operation = flow.startOperation(RecognitionEndpoint.parse);
     final recognitionTimer = Stopwatch()..start();
     try {
       final resp = await apiDio.post(
         '/api/v2/parse_meal_suggestions',
-        data: {'text': text, 'language': lang},
-        options: Options(receiveTimeout: const Duration(seconds: 90)),
+        data: {
+          'text': text,
+          'language': lang,
+          'client_flow_id': flow.id,
+          'client_operation_id': operation.id,
+          'release_version': FeedbackMetadata.current?.releaseVersion,
+          'build_number': FeedbackMetadata.current?.buildNumber,
+          'platform': FeedbackMetadata.current?.platform,
+          'network_class': 'unknown',
+        },
+        options: Options(
+          receiveTimeout: const Duration(seconds: 90),
+          extra: {'recognition_operation': operation},
+        ),
       );
+      operation.markDecoded();
       final rawItems =
           (resp.data['items'] as List<dynamic>?)
               ?.map((e) => e as Map<String, dynamic>)
               .toList() ??
           [];
+      final cacheCount = rawItems
+          .where((item) => item['source'] == 'cache')
+          .length;
+      operation.markResponseReceived(
+        cacheOutcome: cacheCount == rawItems.length && rawItems.isNotEmpty
+            ? CacheOutcome.hit
+            : cacheCount > 0
+            ? CacheOutcome.partial
+            : CacheOutcome.miss,
+      );
+      submitRecognitionTelemetry(operation);
       final clarification = RecognitionClarification.fromJson(
         resp.data['clarification'],
       );
@@ -186,6 +219,8 @@ class _AddMealSheetState extends ConsumerState<AddMealSheet>
                       feedbackSource: feedbackSource,
                       recognitionDuration: recognitionTimer.elapsed,
                       clarification: clarification,
+                      flow: flow,
+                      runId: resp.data['run_id']?.toString(),
                     )
                   : RecognitionResultSheetV2(
                       dishName: summaryName,
@@ -195,6 +230,8 @@ class _AddMealSheetState extends ConsumerState<AddMealSheet>
                       feedbackSource: feedbackSource,
                       recognitionDuration: recognitionTimer.elapsed,
                       clarification: clarification,
+                      flow: flow,
+                      runId: resp.data['run_id']?.toString(),
                     ),
             );
           },
@@ -349,7 +386,13 @@ class _AddMealSheetState extends ConsumerState<AddMealSheet>
         );
       }
 
-      final form = FormData.fromMap({'image': multipart});
+      final flow = RecognitionFlow.start(mode: RecognitionMode.photo);
+      final operation = flow.startOperation(RecognitionEndpoint.parse);
+      final form = FormData.fromMap({
+        'image': multipart,
+        'client_flow_id': flow.id,
+        'client_operation_id': operation.id,
+      });
       final recognitionTimer = Stopwatch()..start();
       final resp = await apiDio.post(
         '/api/v2/recognize_photo?language=$lang',
@@ -357,8 +400,10 @@ class _AddMealSheetState extends ConsumerState<AddMealSheet>
         options: Options(
           receiveTimeout: const Duration(seconds: 120),
           sendTimeout: const Duration(seconds: 60),
+          extra: {'recognition_operation': operation},
         ),
       );
+      operation.markDecoded();
       if (!mounted) return;
       debugPrint(
         '📸 Recognize response status=${resp.statusCode} '
@@ -366,6 +411,18 @@ class _AddMealSheetState extends ConsumerState<AddMealSheet>
       );
       final error = resp.data['error'] as String?;
       final rawItems = resp.data['items'] as List<dynamic>?;
+      final photoItems = rawItems ?? const [];
+      final cacheCount = photoItems
+          .where((item) => item is Map && item['source'] == 'cache')
+          .length;
+      operation.markResponseReceived(
+        cacheOutcome: cacheCount == photoItems.length && photoItems.isNotEmpty
+            ? CacheOutcome.hit
+            : cacheCount > 0
+            ? CacheOutcome.partial
+            : CacheOutcome.miss,
+      );
+      submitRecognitionTelemetry(operation);
       final clarification = RecognitionClarification.fromJson(
         resp.data['clarification'],
       );
@@ -428,6 +485,8 @@ class _AddMealSheetState extends ConsumerState<AddMealSheet>
                       feedbackSource: FeedbackSource.photo,
                       recognitionDuration: recognitionTimer.elapsed,
                       clarification: clarification,
+                      flow: flow,
+                      runId: resp.data['run_id']?.toString(),
                     )
                   : RecognitionResultSheetV2(
                       dishName: dishName,
@@ -437,6 +496,8 @@ class _AddMealSheetState extends ConsumerState<AddMealSheet>
                       feedbackSource: FeedbackSource.photo,
                       recognitionDuration: recognitionTimer.elapsed,
                       clarification: clarification,
+                      flow: flow,
+                      runId: resp.data['run_id']?.toString(),
                     ),
             );
           },

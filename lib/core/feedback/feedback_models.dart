@@ -69,6 +69,10 @@ class FeedbackRequest {
     this.appVersion,
     this.platform,
     this.locale,
+    this.clientFlowId,
+    this.clientOperationId,
+    this.buildNumber,
+    this.networkClass = 'unknown',
   });
 
   final FeedbackRating rating;
@@ -79,6 +83,10 @@ class FeedbackRequest {
   final String? appVersion;
   final String? platform;
   final String? locale;
+  final String? clientFlowId;
+  final String? clientOperationId;
+  final String? buildNumber;
+  final String networkClass;
 
   Map<String, Object?> toJson() => {
     'rating': rating.apiValue,
@@ -89,6 +97,10 @@ class FeedbackRequest {
     'app_version': ?appVersion,
     'platform': ?platform,
     'locale': ?locale,
+    'client_flow_id': ?clientFlowId,
+    'client_operation_id': ?clientOperationId,
+    'build_number': ?buildNumber,
+    'network_class': networkClass,
   };
 
   String? get _normalizedComment {
@@ -116,6 +128,10 @@ class FeedbackRequest {
     appVersion: json['app_version'] as String?,
     platform: json['platform'] as String?,
     locale: json['locale'] as String?,
+    clientFlowId: json['client_flow_id'] as String?,
+    clientOperationId: json['client_operation_id'] as String?,
+    buildNumber: json['build_number'] as String?,
+    networkClass: json['network_class'] as String? ?? 'unknown',
   );
 }
 

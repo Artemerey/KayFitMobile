@@ -11,6 +11,8 @@ import '../feedback/secure_uuid.dart';
 import 'meal_log_operation.dart';
 import 'meal_log_incident.dart';
 import 'meal_log_incident_reporter.dart';
+import '../telemetry/recognition_flow.dart';
+import '../telemetry/telemetry_client.dart';
 
 const _storageKey = 'meal_log_operations_v1';
 
@@ -101,6 +103,15 @@ class MealLogOperationNotifier extends Notifier<Map<String, MealLogOperation>> {
     }
     _put(current.advance(MealLogStage.saveStarted));
     final startedAt = DateTime.now();
+    final flowId = payload['client_flow_id'] as String?;
+    final telemetryOperation = flowId == null
+        ? null
+        : RecognitionOperation.forExisting(
+            flowId: flowId,
+            operationId: operationId,
+            endpoint: RecognitionEndpoint.save,
+          );
+    telemetryOperation?.markRequestStarted();
     try {
       final response = await apiDio.post(
         '/api/meals/add_selected',
@@ -112,6 +123,11 @@ class MealLogOperationNotifier extends Notifier<Map<String, MealLogOperation>> {
       );
       _put(state[operationId]!.advance(MealLogStage.saveResponseReceived));
       final result = MealSaveResult.fromJson(response.data);
+      telemetryOperation?.markResponseReceived();
+      telemetryOperation?.markDecoded();
+      if (telemetryOperation != null) {
+        submitRecognitionTelemetry(telemetryOperation);
+      }
       if (expectedItems > 0 && result.added == 0) {
         await _reportFailure(
           current,
